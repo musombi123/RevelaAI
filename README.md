@@ -1,0 +1,60 @@
+# RevelaAI 🧠📖  
+**A Philosophical & Theological AI Assistant**
+
+RevelaAI is an AI-powered assistant designed to help users explore, compare, and understand **theology, philosophy, prophecy, and scripture** across multiple traditions — neutrally, transparently, and responsibly.
+
+It integrates modern Large Language Models (LLMs) with structured reasoning to analyze sacred texts, prophecies, and theological concepts while clearly distinguishing **interpretation**, **tradition**, and **historical status**.
+
+---
+
+## ✨ Core Features
+
+### 🧠 Theological Intelligence
+- Christianity (Bible – OT & NT)
+- Islam (Qur’an & Hadith references)
+- Hinduism (Vedas, Upanishads, Bhagavad Gita)
+- Judaism (Tanakh references)
+- Traditional & philosophical belief systems
+
+---
+
+### 📖 Scripture Analysis
+- Verse-by-verse explanations  
+- Neutral interpretation across traditions  
+- Direct scripture quotations  
+- Cross-textual comparisons  
+
+Example:
+> *“Explain Revelation 3:21 verse by verse”*
+
+---
+
+### 🔍 Prophecy Evaluation Engine
+- Identifies prophetic statements
+- Explains traditional interpretations
+- Assesses **status**:
+  - Fulfilled
+  - Partially fulfilled
+  - Unfulfilled
+  - Symbolic / debated
+- Clearly labels speculation vs doctrine
+
+---
+
+### 📚 Source Transparency
+- Explicit scripture citations (Book, Chapter, Verse)
+- Source IDs for traceability
+- No hidden authority claims
+
+---
+
+### 🌐 Philosophical Neutrality
+- No preaching
+- No forced belief systems
+- Compares viewpoints side-by-side
+- Encourages understanding, not persuasion
+
+---
+
+## 🏗️ Architecture Overview
+
