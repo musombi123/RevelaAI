@@ -24,3 +24,7 @@ pydantic
 requests
 python-dotenv
 httpx
+Flask
+gunicorn
+pymongo
+groq
