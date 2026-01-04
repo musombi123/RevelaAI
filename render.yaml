@@ -1,12 +1,9 @@
 services:
   - type: web
-    name: revelacode-api
+    name: revelaai-backend
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    autoDeploy: true
+    startCommand: python app.py
     envVars:
-      - key: FLASK_ENV
-        value: production
-      - key: PORT
-        value: 5000
+      - key: GROQ_API_KEY
+        sync: false
