@@ -13,12 +13,13 @@ app = Flask(__name__)
 CORS(app)
 
 # -------------------------------
-# Groq Client
+# Groq Client (SAFE)
 # -------------------------------
 def get_groq_client():
-    return Groq(api_key=os.environ["GROQ_API_KEY"])
-
-client = get_groq_client()
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is not set")
+    return Groq(api_key=api_key)
 
 # -------------------------------
 # AI Core Imports
@@ -35,6 +36,8 @@ from ai.json_utils import (
 # LLM Call
 # -------------------------------
 def get_ai_reply(user_message: str) -> str:
+    client = get_groq_client()  # ✅ FIX: create client here
+
     completion = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
@@ -91,7 +94,6 @@ def ai_assistant():
                 "The AI response could not be parsed as valid JSON."
             )), 500
     else:
-        # Text-only modes are safely wrapped
         data = {
             "content": raw_reply
         }
