@@ -10,7 +10,17 @@ from groq import Groq
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+
+CORS(
+    app,
+    resources={r"/*": {
+        "origins": [
+            "http://localhost:5173",
+            "https://revelacode-frontend.onrender.com"
+        ]
+    }},
+    supports_credentials=True
+)
 
 # -------------------------------
 # Groq Client (SAFE)
