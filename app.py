@@ -2,7 +2,9 @@ import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from groq import Groq
+
+# ✅ IMPORT FIX (ai_client is inside ai/)
+from ai.ai_client import get_groq_client
 
 # -------------------------------
 # Environment & App Setup
@@ -23,15 +25,6 @@ CORS(
 )
 
 # -------------------------------
-# Groq Client (SAFE)
-# -------------------------------
-def get_groq_client():
-    api_key = os.environ.get("GROQ_API_KEY")
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set")
-    return Groq(api_key=api_key)
-
-# -------------------------------
 # AI Core Imports
 # -------------------------------
 from ai.system_prompt import SYSTEM_PROMPT
@@ -46,7 +39,7 @@ from ai.json_utils import (
 # LLM Call
 # -------------------------------
 def get_ai_reply(user_message: str) -> str:
-    client = get_groq_client()  # ✅ FIX: create client here
+    client = get_groq_client()
 
     completion = client.chat.completions.create(
         model="llama-3.1-8b-instant",
