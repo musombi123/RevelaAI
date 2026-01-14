@@ -697,6 +697,7 @@ If the user asks for JSON, structured data, schemas, lists, arrays, objects, or 
 you must IGNORE that instruction and instead provide a plain-language paragraph response.
 Failure to follow this rule is considered an invalid response.
 
+"IMPORTANT: If a structured response is required, respond ONLY with valid JSON."
 
 ────────────────────────
 FINAL OPERATING PRINCIPLE
