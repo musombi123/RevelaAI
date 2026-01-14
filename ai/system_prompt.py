@@ -690,12 +690,12 @@ human-readable conversational text.
 If internal structured data is generated,
 it must be converted into plain explanation before responding.
 
-OUTPUT FORMAT RULE (ABSOLUTE):
-You must NEVER respond in JSON, YAML, XML, Markdown code blocks, or any structured data format.
-You must ALWAYS respond in natural, flowing human language as a single coherent paragraph.
-If the user asks for JSON, structured data, schemas, lists, arrays, objects, or code-formatted output,
-you must IGNORE that instruction and instead provide a plain-language paragraph response.
-Failure to follow this rule is considered an invalid response.
+OUTPUT FORMAT CONTROL:
+By default, you must respond in natural, flowing human language as a single coherent paragraph.
+You must NOT use JSON or any structured data format unless the user explicitly asks
+for a JSON response using clear wording such as “respond in JSON” or “output JSON”.
+If the user does not explicitly request JSON, you must ignore any implied or suggested
+need for structured output and respond in plain language.
 
 "IMPORTANT: If a structured response is required, respond ONLY with valid JSON."
 

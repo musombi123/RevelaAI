@@ -44,14 +44,13 @@ def get_ai_reply(user_message: str) -> str:
     completion = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT
+            },
             {
                 "role": "user",
-                "content": (
-                    user_message
-                    + "\n\nIMPORTANT: If a structured response is required, "
-                      "respond ONLY with valid JSON."
-                )
+                "content": user_message
             }
         ],
         temperature=0.4,
@@ -74,32 +73,28 @@ def ai_assistant():
             "Please provide a message."
         )), 400
 
-    # Detect domain / intent
+    # Detect domain / intent (used only for metadata now)
     mode = classify_intent(message)
 
-    # Get raw model output
+    # Get raw model output (ALWAYS TEXT)
     raw_reply = get_ai_reply(message)
 
-    # Modes that REQUIRE structured JSON
-    structured_modes = [
-        "prophecy_analysis",
-        "verse_exegesis",
-        "scripture_lookup",
-        "theological_comparison"
-    ]
+    # 🔒 JSON ONLY IF USER EXPLICITLY ASKED
+    wants_json = any(
+        phrase in message.lower()
+        for phrase in [
+            "respond in json",
+            "return json",
+            "output json",
+            "give me json"
+        ]
+    )
 
-    if mode in structured_modes:
-        data = extract_json(raw_reply)
-
-        if not data:
-            return jsonify(error_response(
-                "INVALID_AI_RESPONSE",
-                "The AI response could not be parsed as valid JSON."
-            )), 500
+    if wants_json:
+        parsed = extract_json(raw_reply)
+        data = parsed if parsed else {"content": raw_reply}
     else:
-        data = {
-            "content": raw_reply
-        }
+        data = {"content": raw_reply}
 
     # Enforce RevelaAI base response schema
     response = enforce_base_schema(
