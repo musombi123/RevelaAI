@@ -1,15 +1,10 @@
+import os
 from groq import Groq
-from ai.system_prompt import SYSTEM_PROMPT
 
-client = Groq()
 
-def query_llm(user_query: str):
-    response = client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_query}
-        ],
-        temperature=0.2
-    )
-    return response.choices[0].message.content
+def get_groq_client():
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise RuntimeError("GROQ_API_KEY is not set")
+
+    return Groq(api_key=api_key)
