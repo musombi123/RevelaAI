@@ -125,7 +125,7 @@ def ai_assistant():
         }
 
         payload = {
-            "version": "db21e45c-8f6f-4c2a-8f4a-9b1c8a3d78f4",  # SDXL
+            "version": "7762fd07cf82c948538e6c84c6d2c99e1f6dfe9c5a1a89d5b8c0c0d5855c8d07",
             "input": {
                 "prompt": message,
                 "width": 1024,
@@ -133,23 +133,29 @@ def ai_assistant():
             }
         }
 
-        response = requests.post(
-            "https://api.replicate.com/v1/predictions",
-            headers=headers,
-            json=payload
-        )
-
-        response.raise_for_status()
-        prediction = response.json()
+        try:
+            response = requests.post(
+                "https://api.replicate.com/v1/predictions",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            prediction = response.json()
+        except Exception as e:
+            return jsonify(error_response(
+                "IMAGE_GENERATION_FAILED",
+                str(e)
+            )), 500
 
         return jsonify(enforce_base_schema(
             query=message,
             mode=mode,
             data={
                 "type": "image",
-                "prediction_id": prediction["id"],
-                "status": prediction["status"],
-                "poll_url": prediction["urls"]["get"]
+                "prediction_id": prediction.get("id"),
+                "status": prediction.get("status"),
+                "poll_url": prediction.get("urls", {}).get("get")
             },
             sources=[],
             meta={
