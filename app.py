@@ -139,7 +139,8 @@ def ai_assistant():
         }
 
         payload = {
-            "version": "db21e45c-8f6f-4c2a-8f4a-9b1c8a3d78f4",
+            # ✅ VALID Replicate SDXL model version
+            "version": "ac732df83cea7fff18b8472768c88ad041fa750ff7682a21b0ed9b3af2f5c8c4",
             "input": {
                 "prompt": message,
                 "width": 1024,
@@ -244,6 +245,9 @@ def ai_stream():
 @app.route("/health")
 def health():
     return {"status": "ok"}
+
+# -------------------------------
+# Run Server (Local / Fallback)
 # -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
