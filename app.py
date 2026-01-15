@@ -125,13 +125,17 @@ def ai_assistant():
         }
 
         payload = {
-            "version": "7762fd07cf82c948538e6c84c6d2c99e1f6dfe9c5a1a89d5b8c0c0d5855c8d07",
+            "version": "39ed52f2a78e934b3ba6e2a89f5b1d8d4f8f4b6a0b99c77c2f1b5c7a0f9c0a36",
             "input": {
                 "prompt": message,
                 "width": 1024,
-                "height": 1024
-            }
+                "height": 1024,
+                "num_outputs": 1,
+                "guidance_scale": 7.5,
+                "num_inference_steps": 30
+                }
         }
+
 
         try:
             response = requests.post(
