@@ -1,5 +1,6 @@
 import os
-from flask import Flask, request, jsonify
+import io
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -64,16 +65,30 @@ def get_ai_reply(user_message: str) -> str:
 # -------------------------------
 @app.route("/ai", methods=["POST"])
 def ai_assistant():
-    payload = request.get_json(silent=True) or {}
-    message = payload.get("message", "").strip()
+    message = ""
+
+    # ✅ FILE UPLOAD SUPPORT
+    if "file" in request.files:
+        uploaded_file = request.files["file"]
+        try:
+            content = uploaded_file.read().decode("utf-8", errors="ignore")
+            message = f"Analyze and work with the following document:\n\n{content}"
+        except Exception:
+            return jsonify(error_response(
+                "FILE_READ_ERROR",
+                "Unable to read uploaded file."
+            )), 400
+    else:
+        payload = request.get_json(silent=True) or {}
+        message = payload.get("message", "").strip()
 
     if not message:
         return jsonify(error_response(
             "EMPTY_MESSAGE",
-            "Please provide a message."
+            "Please provide a message or upload a document."
         )), 400
 
-    # Detect domain / intent (used only for metadata now)
+    # Detect domain / intent (metadata only)
     mode = classify_intent(message)
 
     # Get raw model output (ALWAYS TEXT)
@@ -96,6 +111,29 @@ def ai_assistant():
     else:
         data = {"content": raw_reply}
 
+    # 📄 DOWNLOADABLE DOCUMENT SUPPORT
+    wants_download = any(
+        phrase in message.lower()
+        for phrase in [
+            "download",
+            "export",
+            "save as file",
+            "give me a document"
+        ]
+    )
+
+    if wants_download:
+        buffer = io.BytesIO()
+        buffer.write(raw_reply.encode("utf-8"))
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name="revelaai_document.txt",
+            mimetype="text/plain"
+        )
+
     # Enforce RevelaAI base response schema
     response = enforce_base_schema(
         query=message,
@@ -106,8 +144,9 @@ def ai_assistant():
             "ai_model": "llama-3.1-8b-instant",
             "reasoning_style": "neutral_scholarly",
             "limitations": [
-                "Interpretations vary by tradition",
-                "Some conclusions are historically or theologically debated"
+                "Image generation is conceptual and descriptive",
+                "External tools required for rendering visuals",
+                "Interpretations vary by tradition"
             ]
         }
     )

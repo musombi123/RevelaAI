@@ -6,3 +6,6 @@ requests>=2.31
 pymongo>=4.6
 groq>=0.9.0
 httpx>=0.27
+pdfplumber
+python-docx
+reportlab
