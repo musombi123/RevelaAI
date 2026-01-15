@@ -1,6 +1,6 @@
 import os
 import io
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -37,7 +37,7 @@ from ai.json_utils import (
 )
 
 # -------------------------------
-# LLM Call
+# LLM Call (STANDARD)
 # -------------------------------
 def get_ai_reply(user_message: str) -> str:
     client = get_groq_client()
@@ -45,14 +45,8 @@ def get_ai_reply(user_message: str) -> str:
     completion = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_message
-            }
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message}
         ],
         temperature=0.4,
         max_tokens=700
@@ -61,7 +55,29 @@ def get_ai_reply(user_message: str) -> str:
     return completion.choices[0].message.content.strip()
 
 # -------------------------------
-# API Endpoint
+# LLM Call (STREAMING)  ✅ ADDED
+# -------------------------------
+def get_ai_reply_streamed(user_message: str):
+    client = get_groq_client()
+
+    stream = client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_message}
+        ],
+        temperature=0.4,
+        max_tokens=700,
+        stream=True
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta
+        if delta and delta.content:
+            yield delta.content
+
+# -------------------------------
+# API Endpoint (STANDARD)
 # -------------------------------
 @app.route("/ai", methods=["POST"])
 def ai_assistant():
@@ -88,13 +104,12 @@ def ai_assistant():
             "Please provide a message or upload a document."
         )), 400
 
-    # Detect domain / intent (metadata only)
+    # Detect intent (metadata only)
     mode = classify_intent(message)
 
-    # Get raw model output (ALWAYS TEXT)
     raw_reply = get_ai_reply(message)
 
-    # 🔒 JSON ONLY IF USER EXPLICITLY ASKED
+    # 🔒 JSON ONLY IF EXPLICITLY REQUESTED
     wants_json = any(
         phrase in message.lower()
         for phrase in [
@@ -111,7 +126,7 @@ def ai_assistant():
     else:
         data = {"content": raw_reply}
 
-    # 📄 DOWNLOADABLE DOCUMENT SUPPORT
+    # 📄 DOWNLOADABLE TEXT DOCUMENT
     wants_download = any(
         phrase in message.lower()
         for phrase in [
@@ -123,8 +138,7 @@ def ai_assistant():
     )
 
     if wants_download:
-        buffer = io.BytesIO()
-        buffer.write(raw_reply.encode("utf-8"))
+        buffer = io.BytesIO(raw_reply.encode("utf-8"))
         buffer.seek(0)
 
         return send_file(
@@ -134,7 +148,6 @@ def ai_assistant():
             mimetype="text/plain"
         )
 
-    # Enforce RevelaAI base response schema
     response = enforce_base_schema(
         query=message,
         mode=mode,
@@ -152,6 +165,26 @@ def ai_assistant():
     )
 
     return jsonify(response)
+
+# -------------------------------
+# API Endpoint (STREAMING) ✅ ADDED
+# -------------------------------
+@app.route("/ai/stream", methods=["POST"])
+def ai_stream():
+    payload = request.get_json(silent=True) or {}
+    message = payload.get("message", "").strip()
+
+    if not message:
+        return jsonify(error_response(
+            "EMPTY_MESSAGE",
+            "Message required for streaming."
+        )), 400
+
+    def generate():
+        for chunk in get_ai_reply_streamed(message):
+            yield f"data: {chunk}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
 
 # -------------------------------
 # Health Check
