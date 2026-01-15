@@ -1,5 +1,6 @@
 import os
 import io
+import requests
 from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -55,7 +56,7 @@ def get_ai_reply(user_message: str) -> str:
     return completion.choices[0].message.content.strip()
 
 # -------------------------------
-# LLM Call (STREAMING)  ✅ ADDED
+# LLM Call (STREAMING)
 # -------------------------------
 def get_ai_reply_streamed(user_message: str):
     client = get_groq_client()
@@ -104,12 +105,64 @@ def ai_assistant():
             "Please provide a message or upload a document."
         )), 400
 
-    # Detect intent (metadata only)
+    # Detect intent
     mode = classify_intent(message)
 
+    # -------------------------------
+    # 🎨 IMAGE / DESIGN GENERATION (REPLICATE)
+    # -------------------------------
+    if mode in ["image_generation", "graphic_design"]:
+        replicate_token = os.environ.get("REPLICATE_API_TOKEN")
+        if not replicate_token:
+            return jsonify(error_response(
+                "REPLICATE_NOT_CONFIGURED",
+                "Image generation is not configured."
+            )), 500
+
+        headers = {
+            "Authorization": f"Token {replicate_token}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "version": "db21e45c-8f6f-4c2a-8f4a-9b1c8a3d78f4",  # SDXL
+            "input": {
+                "prompt": message,
+                "width": 1024,
+                "height": 1024
+            }
+        }
+
+        response = requests.post(
+            "https://api.replicate.com/v1/predictions",
+            headers=headers,
+            json=payload
+        )
+
+        response.raise_for_status()
+        prediction = response.json()
+
+        return jsonify(enforce_base_schema(
+            query=message,
+            mode=mode,
+            data={
+                "type": "image",
+                "prediction_id": prediction["id"],
+                "status": prediction["status"],
+                "poll_url": prediction["urls"]["get"]
+            },
+            sources=[],
+            meta={
+                "provider": "replicate",
+                "note": "Poll the URL to retrieve the generated image"
+            }
+        ))
+
+    # -------------------------------
+    # TEXT RESPONSE (DEFAULT)
+    # -------------------------------
     raw_reply = get_ai_reply(message)
 
-    # 🔒 JSON ONLY IF EXPLICITLY REQUESTED
     wants_json = any(
         phrase in message.lower()
         for phrase in [
@@ -157,9 +210,8 @@ def ai_assistant():
             "ai_model": "llama-3.1-8b-instant",
             "reasoning_style": "neutral_scholarly",
             "limitations": [
-                "Image generation is conceptual and descriptive",
-                "External tools required for rendering visuals",
-                "Interpretations vary by tradition"
+                "Image generation uses external services",
+                "Logos and visuals are AI-generated concepts"
             ]
         }
     )
@@ -167,7 +219,7 @@ def ai_assistant():
     return jsonify(response)
 
 # -------------------------------
-# API Endpoint (STREAMING) ✅ ADDED
+# API Endpoint (STREAMING)
 # -------------------------------
 @app.route("/ai/stream", methods=["POST"])
 def ai_stream():
