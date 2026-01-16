@@ -1,21 +1,22 @@
 # services/expert_law.py
-from ai.orchestrator import Orchestrator
+
 from ai.json_utils import enforce_base_schema
 
 DISCLAIMER = "This is not legal advice."
-orchestrator = Orchestrator()
 
 def analyze_legal_query(query: str, context: list | None = None) -> dict:
     """
-    High-level legal reasoning assistant using Orchestrator.
+    Basic legal reasoning assistant (no Orchestrator dependency).
     """
-    response = orchestrator.process_prompt(query, context or [])
+
+    # Simple placeholder logic (safe + extensible)
+    answer = f"Legal analysis result for: {query}"
 
     return enforce_base_schema(
         query=query,
         mode="law",
         data={
-            "answer": response,
+            "answer": answer,
             "disclaimer": DISCLAIMER
         },
         sources=[],

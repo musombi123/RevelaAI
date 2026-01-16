@@ -1,21 +1,22 @@
 # services/expert_medicine.py
-from ai.orchestrator import Orchestrator
+
 from ai.json_utils import enforce_base_schema
 
 DISCLAIMER = "This is not medical advice."
-orchestrator = Orchestrator()
 
 def analyze_medical_query(query: str, context: list | None = None) -> dict:
     """
-    High-level medical reasoning assistant using Orchestrator.
+    Basic medical reasoning assistant (no Orchestrator dependency).
     """
-    response = orchestrator.process_prompt(query, context or [])
+
+    # Simple placeholder logic (safe + extensible)
+    answer = f"Medical analysis result for: {query}"
 
     return enforce_base_schema(
         query=query,
         mode="medicine",
         data={
-            "answer": response,
+            "answer": answer,
             "disclaimer": DISCLAIMER
         },
         sources=[],
