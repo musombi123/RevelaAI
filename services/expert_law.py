@@ -1,26 +1,39 @@
 # services/expert_law.py
-from ai.orchestrator import run_reasoning_pipeline
+from ai.orchestrator import Orchestrator
 from ai.json_utils import enforce_base_schema
 
-def analyze_legal_question(question: str, context: dict = None) -> dict:
+DISCLAIMER = "This is not legal advice."
+
+orchestrator = Orchestrator()
+
+def analyze_legal_query(query: str, context: dict | None = None) -> dict:
     """
-    Provide legal guidance or summaries based on the input question.
-    Not a substitute for a licensed lawyer.
+    High-level legal reasoning using the Orchestrator.
     """
     prompt = f"""
-    You are a legal assistant AI. Answer clearly and professionally:
-    Question: {question}
-    Context: {context or 'No additional context.'}
-    Provide accurate and concise explanations.
+    You are an AI legal analyst.
+    User Question:
+    {query}
+
+    Context:
+    {context or "None"}
+
+    Be precise, structured, and neutral.
+    Avoid giving definitive legal judgments.
     """
-    
-    # Run reasoning pipeline from orchestrator
-    answer = run_reasoning_pipeline(prompt)
+    response = orchestrator.process_prompt(prompt, session_messages=[])
     
     return enforce_base_schema(
-        query=question,
-        mode="legal_analysis",
-        data={"content": answer},
-        sources=[],  # Add references if available
-        meta={"expert_module": "law"}
+        query=query,
+        mode="law",
+        data={
+            "answer": response,
+            "disclaimer": DISCLAIMER
+        },
+        sources=[],
+        meta={
+            "domain": "law",
+            "confidence": "medium",
+            "human_required": True
+        }
     )
