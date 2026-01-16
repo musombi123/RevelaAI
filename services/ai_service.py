@@ -3,8 +3,8 @@ from ai.orchestrator import Orchestrator
 from ai.emotion import detect_emotion
 
 # NEW domain handlers (drop-in, no breakage)
-from ai.law import handle_legal_query
-from ai.medicine import handle_medical_query
+from services.expert_law import analyze_legal_query
+from services.expert_medicine import analyze_medical_query
 
 orchestrator = Orchestrator()
 
