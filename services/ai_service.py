@@ -2,7 +2,7 @@
 from ai.orchestrator import Orchestrator
 from ai.emotion import detect_emotion
 
-# NEW domain handlers (drop-in, no breakage)
+# NEW domain handlers
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
 
@@ -23,7 +23,7 @@ def process_message(message: str, session_messages: list, intent: str = "general
     # ⚖️ Legal Intelligence
     # -----------------------
     if intent == "law":
-        response = handle_legal_query(message)
+        response = analyze_legal_query(message, session_messages)
         return {
             "response": response,
             "emotion_detected": emotion,
@@ -36,7 +36,7 @@ def process_message(message: str, session_messages: list, intent: str = "general
     # 🩺 Medical Intelligence
     # -----------------------
     if intent == "medicine":
-        response = handle_medical_query(message)
+        response = analyze_medical_query(message, session_messages)
         return {
             "response": response,
             "emotion_detected": emotion,

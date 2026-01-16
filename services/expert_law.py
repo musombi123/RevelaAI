@@ -3,26 +3,14 @@ from ai.orchestrator import Orchestrator
 from ai.json_utils import enforce_base_schema
 
 DISCLAIMER = "This is not legal advice."
-
 orchestrator = Orchestrator()
 
-def analyze_legal_query(query: str, context: dict | None = None) -> dict:
+def analyze_legal_query(query: str, context: list | None = None) -> dict:
     """
-    High-level legal reasoning using the Orchestrator.
+    High-level legal reasoning assistant using Orchestrator.
     """
-    prompt = f"""
-    You are an AI legal analyst.
-    User Question:
-    {query}
+    response = orchestrator.process_prompt(query, context or [])
 
-    Context:
-    {context or "None"}
-
-    Be precise, structured, and neutral.
-    Avoid giving definitive legal judgments.
-    """
-    response = orchestrator.process_prompt(prompt, session_messages=[])
-    
     return enforce_base_schema(
         query=query,
         mode="law",
