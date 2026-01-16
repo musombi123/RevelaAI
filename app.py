@@ -12,6 +12,9 @@ from ai.ai_client import get_groq_client, create_replicate_prediction
 from ai.intent_router import classify_intent
 from services.ai_service import process_message
 from services.memory_service import remember_item, forget_item
+from services.expert_law import analyze_legal_query
+from services.expert_medicine import analyze_medical_query
+from ai.docx_utils import extract_text_from_docx
 
 # -------------------------------
 # Existing imports
@@ -97,6 +100,18 @@ def poll_replicate(prediction_id, token, timeout=60):
         time.sleep(2)
 
 # -------------------------------
+# Helper: Fetch online info
+# -------------------------------
+def fetch_online_data(query: str) -> str:
+    try:
+        resp = requests.get(f"https://api.duckduckgo.com/?q={query}&format=json", timeout=5)
+        resp.raise_for_status()
+        results = resp.json().get("AbstractText", "")
+        return results or "No online data found for your query."
+    except Exception:
+        return "Failed to fetch online data."
+
+# -------------------------------
 # API Endpoint
 # -------------------------------
 @app.route("/ai", methods=["POST"])
@@ -108,7 +123,11 @@ def ai_assistant():
     if "file" in request.files:
         uploaded_file = request.files["file"]
         try:
-            content = uploaded_file.read().decode("utf-8", errors="ignore")
+            file_bytes = uploaded_file.read()
+            if uploaded_file.filename.endswith(".docx"):
+                content = extract_text_from_docx(file_bytes)
+            else:
+                content = file_bytes.decode("utf-8", errors="ignore")
             message = f"Analyze and work with the following document:\n\n{content}"
         except Exception:
             return jsonify(error_response("FILE_READ_ERROR", "Unable to read uploaded file.")), 400
@@ -138,25 +157,13 @@ def ai_assistant():
         if not token:
             return jsonify(error_response("REPLICATE_NOT_CONFIGURED", "Replicate API key missing.")), 500
 
-        headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
-        payload = {
-            "version": "revlacodepro/musombiwilliamworks",
-            "input": {"prompt": message, "width": 1024, "height": 1024, "num_outputs": 3}
-        }
-
         try:
-            r = requests.post("https://api.replicate.com/v1/predictions", headers=headers, json=payload, timeout=30)
-            r.raise_for_status()
-            prediction = r.json()
-
-            # Poll until ready
+            prediction = create_replicate_prediction(
+                version="revlacodepro/musombiwilliamworks",
+                input_data={"prompt": message, "width": 1024, "height": 1024, "num_outputs": 3}
+            )
             final_prediction = poll_replicate(prediction["id"], token)
-            if final_prediction["status"] != "succeeded":
-                return jsonify(error_response("IMAGE_GENERATION_FAILED", "Prediction failed")), 500
-
-            # Collect all output URLs
             output_urls = [item["image"] for item in final_prediction.get("output", [])]
-
         except Exception as e:
             return jsonify(error_response("IMAGE_GENERATION_FAILED", str(e))), 500
 
@@ -171,24 +178,44 @@ def ai_assistant():
         ))
 
     # -------------------------------
-    # TEXT RESPONSE (WITH MEMORY)
+    # TEXT RESPONSE (WITH MEMORY + EXPERT MODULES)
     # -------------------------------
     session["messages"].append({"role": "user", "content": message})
     session["messages"] = session["messages"][-MAX_HISTORY:]
-    raw_reply = get_ai_reply_with_memory(session["messages"])
-    session["messages"].append({"role": "assistant", "content": raw_reply})
+
+    # Expert Law / Medicine Handling
+    expert_response = None
+    if "law" in current_topic or "legal" in message.lower():
+        expert_response = analyze_legal_query(message)
+    elif "medical" in current_topic or "medicine" in message.lower():
+        expert_response = analyze_medical_query(message)
+
+    # Online fetch if requested
+    if "search online" in message.lower() or "look up" in message.lower():
+        online_data = fetch_online_data(message)
+        message += f"\n\n[Online info]: {online_data}"
+
+    # Core AI processing
+    raw_reply_data = process_message(message, session["messages"])
+    session["messages"].append({"role": "assistant", "content": raw_reply_data["response"]})
     session["messages"] = session["messages"][-MAX_HISTORY:]
     SESSION_MEMORY[session_id] = session
 
     wants_json = any(p in message.lower() for p in ["respond in json", "return json", "output json", "give me json"])
-    data = extract_json(raw_reply) if wants_json else {"content": raw_reply}
+    data = extract_json(raw_reply_data["response"]) if wants_json else {"content": raw_reply_data["response"]}
+    if expert_response:
+        data["expert_module"] = expert_response
 
     return jsonify(enforce_base_schema(
         query=message,
         mode=current_topic,
         data=data,
         sources=[],
-        meta={"ai_model": "llama-3.1-8b-instant", "memory": "topic-aware"}
+        meta={
+            "ai_model": "llama-3.1-8b-instant",
+            "memory": "topic-aware",
+            "confidence": raw_reply_data.get("confidence", "medium")
+        }
     ))
 
 # -------------------------------

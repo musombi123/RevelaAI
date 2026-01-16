@@ -78,6 +78,30 @@ def classify_intent(message: str) -> str:
         return "programming"
 
     # -----------------------
+    # ⚖️ Law / Legal reasoning (NEW)
+    # -----------------------
+    law_keywords = [
+        "law", "legal", "court", "judge", "lawsuit",
+        "contract law", "criminal", "civil",
+        "rights", "constitution", "liability",
+        "case law", "legal advice", "sue", "appeal"
+    ]
+    if any(k in msg for k in law_keywords):
+        return "law"
+
+    # -----------------------
+    # 🩺 Medicine / Health (NEW)
+    # -----------------------
+    medicine_keywords = [
+        "medicine", "medical", "health", "symptoms",
+        "disease", "illness", "diagnosis", "treatment",
+        "doctor", "hospital", "mental health",
+        "pain", "infection", "therapy"
+    ]
+    if any(k in msg for k in medicine_keywords):
+        return "medicine"
+
+    # -----------------------
     # Prophecy / eschatology
     # -----------------------
     prophecy_keywords = [
