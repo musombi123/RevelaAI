@@ -5,9 +5,18 @@ from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from ai.ai_client import get_groq_client
-from ai.system_prompt import SYSTEM_PROMPT
+# -------------------------------
+# Newly added imports for services and AI modules
+# -------------------------------
+from ai.ai_client import get_groq_client, create_replicate_prediction
 from ai.intent_router import classify_intent
+from services.ai_service import process_message
+from services.memory_service import remember_item, forget_item
+
+# -------------------------------
+# Existing imports
+# -------------------------------
+from ai.system_prompt import SYSTEM_PROMPT
 from ai.json_utils import extract_json, enforce_base_schema, error_response
 
 # -------------------------------
