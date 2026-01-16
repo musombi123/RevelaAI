@@ -1,39 +1,33 @@
 # ai/orchestrator.py
 """
-Central orchestration for RevelaAI.
-Handles multi-domain routing, memory integration, reasoning, and fallback.
+Neutral orchestrator.
+Delegates all reasoning to the core AI engine.
+No hard-coded responses. No stubs.
 """
 
 from ai.emotion import detect_emotion
 
+
 class Orchestrator:
     def __init__(self):
-        # Can extend later: memory, plugins, system state
         pass
 
-    def process_prompt(self, message: str, context: list, intent: str = "general", session_id: str = None):
+    def process_prompt(
+        self,
+        message: str,
+        context: list,
+        intent: str = "general",
+        session_id: str | None = None
+    ) -> dict:
         """
-        Core AI routing:
-        - law → expert_law
-        - medicine → expert_medicine
-        - fallback → general echo / reasoning
+        Orchestrator is now metadata-only.
+        Reasoning happens in services.ai_service.
         """
+
         emotion = detect_emotion(message)
-        response_data = {"domain": "general", "response": f"Processed: {message}", "emotion": emotion}
 
-        try:
-            if intent == "law":
-                from services.expert_law import analyze_legal_query
-                response_data["response"] = analyze_legal_query(message)["summary"]
-                response_data["domain"] = "law"
-
-            elif intent == "medicine":
-                from services.expert_medicine import analyze_medical_query
-                response_data["response"] = analyze_medical_query(message)["overview"]
-                response_data["domain"] = "medicine"
-
-        except Exception as e:
-            # Fallback to general AI
-            response_data["response"] += f" [Fallback triggered due to: {e}]"
-
-        return response_data
+        return {
+            "domain": intent or "general",
+            "emotion": emotion
+            # ❗ NO response text here
+        }
