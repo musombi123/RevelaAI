@@ -1,7 +1,7 @@
 import os
-import io
+import time
 import requests
-from flask import Flask, request, jsonify, send_file, Response
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -41,17 +41,14 @@ def get_session_id():
 # -------------------------------
 def get_ai_reply_with_memory(session_messages):
     client = get_groq_client()
-
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(session_messages)
-
     completion = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=messages,
         temperature=0.4,
         max_tokens=700
     )
-
     return completion.choices[0].message.content.strip()
 
 # -------------------------------
@@ -59,10 +56,8 @@ def get_ai_reply_with_memory(session_messages):
 # -------------------------------
 def get_ai_reply_streamed(session_messages):
     client = get_groq_client()
-
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(session_messages)
-
     stream = client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=messages,
@@ -70,11 +65,27 @@ def get_ai_reply_streamed(session_messages):
         max_tokens=700,
         stream=True
     )
-
     for chunk in stream:
         delta = chunk.choices[0].delta
         if delta and delta.content:
             yield delta.content
+
+# -------------------------------
+# Poll Replicate Prediction
+# -------------------------------
+def poll_replicate(prediction_id, token, timeout=60):
+    headers = {"Authorization": f"Token {token}"}
+    url = f"https://api.replicate.com/v1/predictions/{prediction_id}"
+    start = time.time()
+    while True:
+        r = requests.get(url, headers=headers, timeout=10)
+        r.raise_for_status()
+        prediction = r.json()
+        if prediction["status"] in ["succeeded", "failed"]:
+            return prediction
+        if time.time() - start > timeout:
+            raise TimeoutError("Image generation timed out")
+        time.sleep(2)
 
 # -------------------------------
 # API Endpoint
@@ -82,41 +93,29 @@ def get_ai_reply_streamed(session_messages):
 @app.route("/ai", methods=["POST"])
 def ai_assistant():
     session_id = get_session_id()
-
-    session = SESSION_MEMORY.get(session_id, {
-        "topic": None,
-        "messages": []
-    })
+    session = SESSION_MEMORY.get(session_id, {"topic": None, "messages": []})
 
     message = ""
-
-    # -------------------------------
-    # FILE UPLOAD
-    # -------------------------------
     if "file" in request.files:
         uploaded_file = request.files["file"]
         try:
             content = uploaded_file.read().decode("utf-8", errors="ignore")
             message = f"Analyze and work with the following document:\n\n{content}"
         except Exception:
-            return jsonify(error_response(
-                "FILE_READ_ERROR",
-                "Unable to read uploaded file."
-            )), 400
+            return jsonify(error_response("FILE_READ_ERROR", "Unable to read uploaded file.")), 400
     else:
         payload = request.get_json(silent=True) or {}
         message = payload.get("message", "").strip()
 
     if not message:
-        return jsonify(error_response(
-            "EMPTY_MESSAGE",
-            "Please provide a message or upload a document."
-        )), 400
+        return jsonify(error_response("EMPTY_MESSAGE", "Please provide a message or upload a document.")), 400
 
     # -------------------------------
     # Intent & Topic Control
     # -------------------------------
     current_topic = classify_intent(message)
+    if any(word in message.lower() for word in ["image", "draw", "generate", "picture", "illustrate"]):
+        current_topic = "image_generation"
 
     if session["topic"] != current_topic:
         session["messages"] = []
@@ -125,56 +124,39 @@ def ai_assistant():
     # -------------------------------
     # 🎨 IMAGE / DESIGN (REPLICATE)
     # -------------------------------
-    if current_topic in ["image_generation", "graphic_design"]:
+    if current_topic == "image_generation":
         token = os.environ.get("REPLICATE_API_TOKEN")
         if not token:
-            return jsonify(error_response(
-                "REPLICATE_NOT_CONFIGURED",
-                "Replicate API key missing."
-            )), 500
+            return jsonify(error_response("REPLICATE_NOT_CONFIGURED", "Replicate API key missing.")), 500
 
-        headers = {
-            "Authorization": f"Token {token}",
-            "Content-Type": "application/json"
-        }
-
+        headers = {"Authorization": f"Token {token}", "Content-Type": "application/json"}
         payload = {
-            # ✅ VALID Replicate SDXL model version
-            "version": "ac732df83cea7fff18b8472768c88ad041fa750ff7682a21b0ed9b3af2f5c8c4",
-            "input": {
-                "prompt": message,
-                "width": 1024,
-                "height": 1024,
-                "num_outputs": 1
-            }
+            "version": "revlacodepro/musombiwilliamworks",
+            "input": {"prompt": message, "width": 1024, "height": 1024, "num_outputs": 3}
         }
 
         try:
-            r = requests.post(
-                "https://api.replicate.com/v1/predictions",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+            r = requests.post("https://api.replicate.com/v1/predictions", headers=headers, json=payload, timeout=30)
             r.raise_for_status()
             prediction = r.json()
+
+            # Poll until ready
+            final_prediction = poll_replicate(prediction["id"], token)
+            if final_prediction["status"] != "succeeded":
+                return jsonify(error_response("IMAGE_GENERATION_FAILED", "Prediction failed")), 500
+
+            # Collect all output URLs
+            output_urls = [item["image"] for item in final_prediction.get("output", [])]
+
         except Exception as e:
-            return jsonify(error_response(
-                "IMAGE_GENERATION_FAILED",
-                str(e)
-            )), 500
+            return jsonify(error_response("IMAGE_GENERATION_FAILED", str(e))), 500
 
         SESSION_MEMORY[session_id] = session
 
         return jsonify(enforce_base_schema(
             query=message,
             mode=current_topic,
-            data={
-                "type": "image",
-                "prediction_id": prediction["id"],
-                "status": prediction["status"],
-                "poll_url": prediction["urls"]["get"]
-            },
+            data={"type": "image", "urls": output_urls},
             sources=[],
             meta={"provider": "replicate"}
         ))
@@ -184,18 +166,12 @@ def ai_assistant():
     # -------------------------------
     session["messages"].append({"role": "user", "content": message})
     session["messages"] = session["messages"][-MAX_HISTORY:]
-
     raw_reply = get_ai_reply_with_memory(session["messages"])
-
     session["messages"].append({"role": "assistant", "content": raw_reply})
     session["messages"] = session["messages"][-MAX_HISTORY:]
-
     SESSION_MEMORY[session_id] = session
 
-    wants_json = any(p in message.lower() for p in [
-        "respond in json", "return json", "output json", "give me json"
-    ])
-
+    wants_json = any(p in message.lower() for p in ["respond in json", "return json", "output json", "give me json"])
     data = extract_json(raw_reply) if wants_json else {"content": raw_reply}
 
     return jsonify(enforce_base_schema(
@@ -203,10 +179,7 @@ def ai_assistant():
         mode=current_topic,
         data=data,
         sources=[],
-        meta={
-            "ai_model": "llama-3.1-8b-instant",
-            "memory": "topic-aware"
-        }
+        meta={"ai_model": "llama-3.1-8b-instant", "memory": "topic-aware"}
     ))
 
 # -------------------------------
@@ -216,19 +189,11 @@ def ai_assistant():
 def ai_stream():
     payload = request.get_json(silent=True) or {}
     message = payload.get("message", "").strip()
-
     if not message:
-        return jsonify(error_response(
-            "EMPTY_MESSAGE",
-            "Message required."
-        )), 400
+        return jsonify(error_response("EMPTY_MESSAGE", "Message required.")), 400
 
     session_id = get_session_id()
-    session = SESSION_MEMORY.get(session_id, {
-        "topic": None,
-        "messages": []
-    })
-
+    session = SESSION_MEMORY.get(session_id, {"topic": None, "messages": []})
     session["messages"].append({"role": "user", "content": message})
     session["messages"] = session["messages"][-MAX_HISTORY:]
     SESSION_MEMORY[session_id] = session
@@ -247,7 +212,7 @@ def health():
     return {"status": "ok"}
 
 # -------------------------------
-# Run Server (Local / Fallback)
+# Run Server
 # -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
