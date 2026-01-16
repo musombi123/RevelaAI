@@ -14,7 +14,7 @@ from services.ai_service import process_message
 from services.memory_service import remember_item, forget_item
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
-from ai.docx_utils import extract_text_from_docx
+from utils.docx_utils import extract_text_from_docx
 
 # -------------------------------
 # Existing imports
