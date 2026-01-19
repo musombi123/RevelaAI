@@ -1,0 +1,2 @@
+self.model = torch.load("model.pth", map_location="cpu")
+self.model.eval()

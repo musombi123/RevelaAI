@@ -1,0 +1,7 @@
+build:
+  python_version: "3.12"
+  python_packages:
+    - torch==2.3.1
+    - pillow
+
+predict: "predict.py:Predictor"
