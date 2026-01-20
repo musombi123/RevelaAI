@@ -39,6 +39,12 @@ CORS(
 )
 
 # -------------------------------
+# WhatsApp Webhook
+# -------------------------------
+from whatsapp_webhook import whatsapp_bp
+app.register_blueprint(whatsapp_bp)
+
+# -------------------------------
 # 🧠 SESSION MEMORY
 # -------------------------------
 SESSION_MEMORY = {}
@@ -145,7 +151,7 @@ def ai_assistant():
                 ), 500
 
             prediction = create_replicate_prediction(
-                version="revlacodepro/musombiwilliamworks",
+                version="musombi123/revelacodepro:9c8f1a2b3d4e",
                 input_data={"prompt": message, "width": 1024, "height": 1024}
             )
 
