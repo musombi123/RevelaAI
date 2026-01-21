@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 venv/
 .env
+venv-wsl/
 
 # Node
 node_modules/
@@ -10,3 +11,10 @@ node_modules/
 # OS / Editor
 .DS_Store
 .vscode/
+
+# Cog build cache
+.cog/
+
+# OS files
+.DS_Store
+Thumbs.db
