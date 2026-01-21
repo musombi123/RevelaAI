@@ -2,18 +2,10 @@ build:
   python_version: "3.10"
   system_packages:
     - git
+  python_packages:
+    - torch
+    - torchvision
+    - pillow  # if you handle images
+    - any-other-packages-you-need
 
-predict:
-  input:
-    prompt:
-      type: string
-      description: Text prompt
-    width:
-      type: integer
-      default: 512
-    height:
-      type: integer
-      default: 512
-  output:
-    type: image
-  command: "python predict.py"
+predict: "predict.py:Predictor"
