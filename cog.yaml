@@ -4,5 +4,7 @@ build:
     - git
   python_packages:
     - pillow
+    - torch
+    - torchvision
 
 predict: "predict.py:Predictor"
