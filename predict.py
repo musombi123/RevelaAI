@@ -1,16 +1,15 @@
 from cog import BasePredictor, Input, Path
 from PIL import Image
-import torch
 from utils import simple_process
 
 
 class Predictor(BasePredictor):
     def setup(self):
         """
-        Load model into memory.
-        If you don't have a trained model yet, this is a placeholder.
+        Load resources into memory.
+        No ML model yet.
         """
-        self.model = None  # replace later with torch.load("model.pth")
+        self.model = None
 
     def predict(
         self,
@@ -18,8 +17,7 @@ class Predictor(BasePredictor):
         scale: float = Input(description="Scale factor", default=1.0),
     ) -> Path:
         """
-        Run a dummy prediction (image passthrough).
-        Replace this with real inference later.
+        Dummy image processing.
         """
         img = Image.open(image)
         output_img = simple_process(img, scale)

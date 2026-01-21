@@ -2,10 +2,5 @@ build:
   python_version: "3.10"
   system_packages:
     - git
-  python_packages:
-    - torch
-    - torchvision
-    - pillow  # if you handle images
-    - any-other-packages-you-need
 
 predict: "predict.py:Predictor"
