@@ -7,6 +7,12 @@ from ai.orchestrator import Orchestrator  # <-- import the orchestrator
 # Instantiate once (can be global)
 orchestrator = Orchestrator()
 
+def process_message(message, context=None, intent=None, session_id=None):
+    # Replace with your real AI logic
+    return {
+        "response": f"You said: {message}"
+    }
+
 def process_message(
     message: str,
     context: list,

@@ -9,3 +9,9 @@ httpx>=0.27
 pdfplumber
 python-docx
 reportlab
+speechrecognition
+pyttsx3
+pyaudio
+vosk
+sounddevice
+numpy

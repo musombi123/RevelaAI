@@ -1,7 +1,8 @@
 import os
 import time
 import requests
-from flask import Flask, request, jsonify, Response
+import tempfile
+from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -14,7 +15,8 @@ from services.ai_service import process_message
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
 from utils.docx_utils import extract_text_from_docx
-
+from voice.voice_assistant import run_voice_assistant
+from voice.voice_output import text_to_speech_file
 # -------------------------------
 # Core Utilities
 # -------------------------------
@@ -96,7 +98,7 @@ def poll_replicate(prediction_id, token, timeout=60):
         time.sleep(2)
 
 # -------------------------------
-# API Endpoint
+# AI Chat / Image Endpoint
 # -------------------------------
 @app.route("/ai", methods=["POST"])
 def ai_assistant():
@@ -179,12 +181,11 @@ def ai_assistant():
 
         if "law" in intent or "legal" in message.lower():
             expert_payload = analyze_legal_query(message)
-
         elif "medical" in intent or "medicine" in message.lower():
             expert_payload = analyze_medical_query(message)
 
         # -------------------------------
-        # CORE AI PROCESSING (SAFE)
+        # CORE AI PROCESSING
         # -------------------------------
         ai_result = process_message(
             message=message,
@@ -259,6 +260,31 @@ def ai_stream():
             yield f"data: {chunk}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
+
+# -------------------------------
+# VOICE ASSISTANT ENDPOINT
+# -------------------------------
+@app.route("/voice", methods=["GET"])
+def voice():
+    # Run voice assistant (listen + AI response)
+    heard, response = run_voice_assistant()
+
+    # Convert AI response to audio
+    audio_path = text_to_speech_file(response)
+
+    return jsonify({
+        "heard": heard,
+        "response": response,
+        "audio_file": f"/voice/audio/{os.path.basename(audio_path)}"
+    })
+
+# Serve generated audio files
+@app.route("/voice/audio/<filename>")
+def serve_audio(filename):
+    path = os.path.join(tempfile.gettempdir(), filename)
+    if not os.path.exists(path):
+        return {"error": "Audio not found"}, 404
+    return send_file(path, mimetype="audio/wav")
 
 # -------------------------------
 # Health
