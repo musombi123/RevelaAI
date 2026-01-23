@@ -11,7 +11,7 @@ python-docx
 reportlab
 speechrecognition
 pyttsx3
-pyaudio
+sounddevice
 vosk
 sounddevice
 numpy
