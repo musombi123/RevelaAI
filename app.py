@@ -266,55 +266,16 @@ def ai_stream():
 # -------------------------------
 @app.route("/voice", methods=["POST"])
 def voice():
-    """
-    Receives audio recorded from USER microphone (frontend / APK),
-    performs speech-to-text, AI processing, and returns speech audio.
-    """
+    payload = request.get_json(silent=True) or {}
+    user_text = payload.get("text", "")
 
-    if "audio" not in request.files:
-        return jsonify(
-            error_response("NO_AUDIO", "Audio file required")
-        ), 400
+    heard, response = run_voice_assistant(user_text)
 
-    audio_file = request.files["audio"]
+    return jsonify({
+        "heard": heard,
+        "response": response
+    })
 
-    # Save uploaded audio temporarily
-    input_path = os.path.join(tempfile.gettempdir(), "input.wav")
-    audio_file.save(input_path)
-
-    # -------------------------------
-    # SPEECH → TEXT (Vosk)
-    # -------------------------------
-    from vosk import Model, KaldiRecognizer
-    import wave
-    import json
-
-    MODEL_PATH = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "vosk-model-small-en-us-0.15", "vosk-model-small-en-us-0.15")
-    )
-
-    model = Model(MODEL_PATH)
-
-    wf = wave.open(input_path, "rb")
-    rec = KaldiRecognizer(model, wf.getframerate())
-
-    heard = ""
-    while True:
-        data = wf.readframes(4000)
-        if len(data) == 0:
-            break
-        if rec.AcceptWaveform(data):
-            res = json.loads(rec.Result())
-            heard += res.get("text", "") + " "
-
-    final = json.loads(rec.FinalResult())
-    heard += final.get("text", "")
-    heard = heard.strip()
-
-    if not heard:
-        return jsonify(
-            error_response("NO_SPEECH", "No speech detected")
-        ), 400
 
     # -------------------------------
     # AI PROCESSING

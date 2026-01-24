@@ -1,33 +1,26 @@
-from voice.voice_input import listen
-from voice.voice_output import speak
 from services.brain import generate_response
 from utils.utils import preprocess, postprocess
 
-def run_voice_assistant():
+def run_voice_assistant(user_text: str):
     """
-    Listen to the user, generate AI response, and speak it.
-    Returns the text heard and AI response.
+    Backend voice processor.
+    Receives text from frontend (microphone handled client-side),
+    generates AI response, and returns text for TTS playback.
     """
     try:
-        # Step 1: Listen to user
-        raw_text = listen()
-        if not raw_text:
+        if not user_text or not user_text.strip():
             return "", "I didn't catch that. Please speak again."
 
-        # Step 2: Preprocess text
-        user_text = preprocess(raw_text)
+        # Step 1: Preprocess
+        clean_text = preprocess(user_text)
 
-        # Step 3: Generate AI response
-        ai_response = generate_response(user_text)
+        # Step 2: Generate AI response
+        ai_response = generate_response(clean_text)
 
-        # Step 4: Postprocess output
+        # Step 3: Postprocess
         final_response = postprocess(ai_response)
 
-        # Step 5: Speak the response
-        speak(final_response)
-
-        return raw_text, final_response
+        return clean_text, final_response
 
     except Exception as e:
-        # Catch errors to prevent Flask from crashing
         return "", f"Voice assistant error: {str(e)}"
