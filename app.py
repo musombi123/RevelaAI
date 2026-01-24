@@ -266,16 +266,30 @@ def ai_stream():
 # -------------------------------
 @app.route("/voice", methods=["POST"])
 def voice():
-    payload = request.get_json(silent=True) or {}
-    user_text = payload.get("text", "")
+    if "audio" not in request.files:
+        return {"error": "No audio provided"}, 400
 
-    heard, response = run_voice_assistant(user_text)
+    audio = request.files["audio"]
+    audio_path = os.path.join(tempfile.gettempdir(), audio.filename)
+    audio.save(audio_path)
+
+    # 🧠 Speech → text (Vosk file-based)
+    heard = transcribe_audio_file(audio_path)
+
+    response = process_message(
+        message=heard,
+        context=[],
+        intent="voice",
+        session_id=get_session_id()
+    ).get("response", "")
+
+    audio_path = text_to_speech_file(response)
 
     return jsonify({
         "heard": heard,
-        "response": response
+        "response": response,
+        "audio_file": f"/voice/audio/{os.path.basename(audio_path)}"
     })
-
 
     # -------------------------------
     # AI PROCESSING
