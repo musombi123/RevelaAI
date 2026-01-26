@@ -16,6 +16,7 @@ from services.ai_service import process_message
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
 from utils.docx_utils import extract_text_from_docx
+from routes.research import research_bp
 from voice.voice_output import text_to_speech_file
 from voice.transcribe import transcribe_audio_file  # <- ensure this exists
 
