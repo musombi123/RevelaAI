@@ -16,3 +16,4 @@ vosk
 sounddevice
 numpy
 feedparser
+beautifulsoup4
