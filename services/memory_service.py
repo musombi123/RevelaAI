@@ -1,13 +1,20 @@
-# services/memory_service.py
-MEMORY_STORE = {}
+from datetime import datetime
+from config.db import memory_col, messages_col
 
-def remember_item(user_id: str, content: str):
-    item_id = str(len(MEMORY_STORE) + 1)
-    MEMORY_STORE[item_id] = {"user_id": user_id, "content": content}
-    return item_id
+def save_memory(user_id, key: str, value: str, mem_type: str):
+    item = {
+        "userId": user_id,
+        "key": key,
+        "value": value,
+        "type": mem_type,
+        "createdAt": datetime.utcnow()
+    }
+    result = memory_col.insert_one(item)
+    item["_id"] = result.inserted_id
+    return item
 
-def forget_item(item_id: str):
-    if item_id in MEMORY_STORE:
-        del MEMORY_STORE[item_id]
-        return True
-    return False
+def get_memory(user_id):
+    return list(memory_col.find({"userId": user_id}).sort("createdAt", -1))
+
+def get_history(user_id, limit: int = 50):
+    return list(messages_col.find({"userId": user_id}).sort("createdAt", -1).limit(limit))

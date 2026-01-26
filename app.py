@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import tempfile
+
 from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -15,13 +16,33 @@ from services.ai_service import process_message
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
 from utils.docx_utils import extract_text_from_docx
-from voice.voice_assistant import run_voice_assistant
 from voice.voice_output import text_to_speech_file
+from voice.transcribe import transcribe_audio_file  # <- ensure this exists
+
 # -------------------------------
 # Core Utilities
 # -------------------------------
 from ai.system_prompt import SYSTEM_PROMPT
 from ai.json_utils import extract_json, enforce_base_schema, error_response
+
+# -------------------------------
+# Routes (Flask Blueprints)
+# -------------------------------
+from routes.users_routes import users_bp
+from routes.chat_routes import chat_bp
+from routes.memory_routes import memory_bp
+from routes.research_routes import research_bp
+from routes.explain_routes import explain_bp
+
+# -------------------------------
+# WhatsApp Webhook Blueprint
+# -------------------------------
+from whatsapp_webhook import whatsapp_bp
+# -------------------------------
+# Database Setup (MongoDB)
+# -------------------------------
+from db.mongo import users_col, memory_col, messages_col
+users_col.insert_one({"name": "Musombi William"})
 
 # -------------------------------
 # Environment & App Setup
@@ -41,9 +62,15 @@ CORS(
 )
 
 # -------------------------------
-# WhatsApp Webhook
+# Register Blueprints (FastAPI style -> Flask)
 # -------------------------------
-from whatsapp_webhook import whatsapp_bp
+app.register_blueprint(users_bp, url_prefix="/api/users")
+app.register_blueprint(chat_bp, url_prefix="/api/chat")
+app.register_blueprint(memory_bp, url_prefix="/api/memory")
+app.register_blueprint(research_bp, url_prefix="/api/research")
+app.register_blueprint(explain_bp, url_prefix="/api/explain")
+
+# WhatsApp
 app.register_blueprint(whatsapp_bp)
 
 # -------------------------------
@@ -52,8 +79,10 @@ app.register_blueprint(whatsapp_bp)
 SESSION_MEMORY = {}
 MAX_HISTORY = 10
 
+
 def get_session_id():
     return request.headers.get("X-Session-ID", request.remote_addr)
+
 
 # -------------------------------
 # LLM Call (STREAMING)
@@ -76,6 +105,7 @@ def get_ai_reply_streamed(session_messages):
         if delta and delta.content:
             yield delta.content
 
+
 # -------------------------------
 # Replicate Polling
 # -------------------------------
@@ -97,8 +127,21 @@ def poll_replicate(prediction_id, token, timeout=60):
 
         time.sleep(2)
 
+
 # -------------------------------
-# AI Chat / Image Endpoint
+# Root
+# -------------------------------
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({
+        "status": "success",
+        "app": os.getenv("APP_NAME", "RevelaAI Flask Backend"),
+        "message": "Backend is live 🚀"
+    })
+
+
+# -------------------------------
+# AI Chat / Image Endpoint (Your original logic)
 # -------------------------------
 @app.route("/ai", methods=["POST"])
 def ai_assistant():
@@ -126,9 +169,7 @@ def ai_assistant():
             message = payload.get("message", "").strip()
 
         if not message:
-            return jsonify(
-                error_response("EMPTY_MESSAGE", "Message or file required.")
-            ), 400
+            return jsonify(error_response("EMPTY_MESSAGE", "Message or file required.")), 400
 
         # -------------------------------
         # Intent Detection
@@ -148,9 +189,7 @@ def ai_assistant():
         if intent == "image_generation":
             token = os.getenv("REPLICATE_API_TOKEN")
             if not token:
-                return jsonify(
-                    error_response("REPLICATE_NOT_CONFIGURED", "Missing API key.")
-                ), 500
+                return jsonify(error_response("REPLICATE_NOT_CONFIGURED", "Missing API key.")), 500
 
             prediction = create_replicate_prediction(
                 version="musombi123/revelacodepro:9c8f1a2b3d4e",
@@ -175,10 +214,9 @@ def ai_assistant():
         session["messages"] = session["messages"][-MAX_HISTORY:]
 
         # -------------------------------
-        # EXPERT COOPERATION (NON-BLOCKING)
+        # EXPERT COOPERATION
         # -------------------------------
         expert_payload = None
-
         if "law" in intent or "legal" in message.lower():
             expert_payload = analyze_legal_query(message)
         elif "medical" in intent or "medicine" in message.lower():
@@ -198,11 +236,7 @@ def ai_assistant():
         if not assistant_text:
             raise RuntimeError("AI returned empty response")
 
-        session["messages"].append({
-            "role": "assistant",
-            "content": assistant_text
-        })
-
+        session["messages"].append({"role": "assistant", "content": assistant_text})
         session["messages"] = session["messages"][-MAX_HISTORY:]
         SESSION_MEMORY[session_id] = session
 
@@ -210,9 +244,7 @@ def ai_assistant():
             "respond in json", "return json", "output json"
         ])
 
-        data = extract_json(assistant_text) if wants_json else {
-            "content": assistant_text
-        }
+        data = extract_json(assistant_text) if wants_json else {"content": assistant_text}
 
         if expert_payload:
             data["expert_module"] = expert_payload
@@ -231,9 +263,8 @@ def ai_assistant():
 
     except Exception as e:
         app.logger.exception("AI request failed")
-        return jsonify(
-            error_response("SERVER_ERROR", str(e))
-        ), 500
+        return jsonify(error_response("SERVER_ERROR", str(e))), 500
+
 
 # -------------------------------
 # STREAMING ENDPOINT
@@ -244,9 +275,7 @@ def ai_stream():
     message = payload.get("message", "").strip()
 
     if not message:
-        return jsonify(
-            error_response("EMPTY_MESSAGE", "Message required.")
-        ), 400
+        return jsonify(error_response("EMPTY_MESSAGE", "Message required.")), 400
 
     session_id = get_session_id()
     session = SESSION_MEMORY.get(session_id, {"topic": None, "messages": []})
@@ -261,39 +290,21 @@ def ai_stream():
 
     return Response(generate(), mimetype="text/event-stream")
 
+
 # -------------------------------
 # VOICE ASSISTANT ENDPOINT
 # -------------------------------
 @app.route("/voice", methods=["POST"])
 def voice():
     if "audio" not in request.files:
-        return {"error": "No audio provided"}, 400
+        return jsonify({"error": "No audio provided"}), 400
 
     audio = request.files["audio"]
     audio_path = os.path.join(tempfile.gettempdir(), audio.filename)
     audio.save(audio_path)
 
-    # 🧠 Speech → text (Vosk file-based)
     heard = transcribe_audio_file(audio_path)
 
-    response = process_message(
-        message=heard,
-        context=[],
-        intent="voice",
-        session_id=get_session_id()
-    ).get("response", "")
-
-    audio_path = text_to_speech_file(response)
-
-    return jsonify({
-        "heard": heard,
-        "response": response,
-        "audio_file": f"/voice/audio/{os.path.basename(audio_path)}"
-    })
-
-    # -------------------------------
-    # AI PROCESSING
-    # -------------------------------
     ai_result = process_message(
         message=heard,
         context=[],
@@ -302,25 +313,22 @@ def voice():
     )
 
     response_text = ai_result.get("response", "")
-
-    # -------------------------------
-    # TEXT → SPEECH
-    # -------------------------------
-    audio_path = text_to_speech_file(response_text)
+    out_audio_path = text_to_speech_file(response_text)
 
     return jsonify({
         "heard": heard,
         "response": response_text,
-        "audio_url": f"/voice/audio/{os.path.basename(audio_path)}"
+        "audio_url": f"/voice/audio/{os.path.basename(out_audio_path)}"
     })
 
-# Serve generated audio files
+
 @app.route("/voice/audio/<filename>")
 def serve_audio(filename):
     path = os.path.join(tempfile.gettempdir(), filename)
     if not os.path.exists(path):
-        return {"error": "Audio not found"}, 404
+        return jsonify({"error": "Audio not found"}), 404
     return send_file(path, mimetype="audio/wav")
+
 
 # -------------------------------
 # Health
@@ -328,6 +336,7 @@ def serve_audio(filename):
 @app.route("/health")
 def health():
     return {"status": "ok"}
+
 
 # -------------------------------
 # Run
