@@ -337,6 +337,10 @@ def serve_audio(filename):
 def health():
     return {"status": "ok"}
 
+@app.route("/test-db")
+def test_db():
+    users_col.insert_one({"test": "db connected"})
+    return {"status": "ok", "message": "MongoDB connected 🚀"}
 
 # -------------------------------
 # Run

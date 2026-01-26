@@ -4,8 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = MongoClient(os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017"))
-db = client[os.getenv("DB_NAME", "revelaai")]
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("DB_NAME", "revelaai")
+
+if not MONGO_URI:
+    raise RuntimeError("❌ MONGO_URI is missing. Set it in Render Environment Variables.")
+
+client = MongoClient(MONGO_URI)
+db = client[DB_NAME]
 
 users_col = db["users"]
 memory_col = db["memory"]

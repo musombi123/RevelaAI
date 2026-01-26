@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = MongoClient(os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017"))
+client = MongoClient(os.getenv("MONGO_URI"))
 db = client[os.getenv("DB_NAME", "revelaai")]
 
 users_col = db["users"]
