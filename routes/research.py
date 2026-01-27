@@ -19,13 +19,11 @@ def research():
         return jsonify({"status": "success", "data": cached, "cached": True})
 
     # ✅ Fetch realtime RSS sources
-    sources = fetch_rss_sources(query=query, limit=8)
-
-    # Sort by date if available
-    sources.sort(key=lambda x: x.get("published_parsed", 0), reverse=True)
+    sources = fetch_rss_sources(query=query, limit=8) or []
+    sources.sort(key=lambda x: x.get("published_parsed", 0) or 0, reverse=True)
 
     # Build strict prompt
-    prompt = build_source_prompt(query, sources)
+    prompt = str(build_source_prompt(query, sources))
 
     # Ask AI to answer only using sources
     ai_result = process_message(
@@ -33,7 +31,7 @@ def research():
         context=[],
         intent="research",
         session_id=None
-    )
+    ) or {}
 
     summary = ai_result.get("response", "Not enough info from sources.")
 
