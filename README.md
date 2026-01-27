@@ -57,4 +57,24 @@ Example:
 ---
 
 ## 🏗️ Architecture Overview
+RevelaAI/
+│
+├── ai/                  # Core AI orchestration modules
+│   ├── ai_client/       # Handles LLM/GROQ/Replicate clients
+│   ├── intent_router.py # Detects user intents to route queries
+│   └── system_prompt.py # Centralized prompts for AI reasoning
+│
+├── config/              # Configuration files and environment settings
+├── core/                # Core application logic and helpers
+├── db/                  # MongoDB connectors & collection setups
+├── features/            # Modular features like emotional intelligence, creativity, decision-making
+├── models/              # AI/ML models, tokenizers, embeddings
+├── routes/              # Flask Blueprints for API endpoints
+├── services/            # Business logic: AI processing, RSS fetching, expert modules
+├── schemas/             # JSON schemas for consistent API responses
+├── utils/               # Utility scripts (docx extraction, JSON helpers, etc.)
+├── voice/               # Text-to-speech & speech-to-text services
+│
+├── app.py               # Main Flask application
+└── predict.py           # Script for standalone AI predictions
 
