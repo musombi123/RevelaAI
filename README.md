@@ -1,80 +1,99 @@
-# RevelaAI 🧠📖  
-**A Philosophical & Theological AI Assistant**
+# **RevelaCode / RevelaAI — README**
 
-RevelaAI is an AI-powered assistant designed to help users explore, compare, and understand **theology, philosophy, prophecy, and scripture** across multiple traditions — neutrally, transparently, and responsibly.
+## 🚀 **RevelaCode | Where Faith Meets Intelligence**
 
-It integrates modern Large Language Models (LLMs) with structured reasoning to analyze sacred texts, prophecies, and theological concepts while clearly distinguishing **interpretation**, **tradition**, and **historical status**.
+RevelaCode is a next-generation, AI-powered platform designed to bridge ancient scripture with modern technology. Built for the digital generation, it transforms biblical verses, symbols, and prophecies into structured, interactive, and meaningful insights through intelligent computation.
 
----
-
-## ✨ Core Features
-
-### 🧠 Theological Intelligence
-- Christianity (Bible – OT & NT)
-- Islam (Qur’an & Hadith references)
-- Hinduism (Vedas, Upanishads, Bhagavad Gita)
-- Judaism (Tanakh references)
-- Traditional & philosophical belief systems
+RevelaAI — the intelligent assistant within the ecosystem — serves as a personal companion for curiosity, learning, and growth, engaging users in human-like dialogue across science, philosophy, technology, and spirituality.
 
 ---
 
-### 📖 Scripture Analysis
-- Verse-by-verse explanations  
-- Neutral interpretation across traditions  
-- Direct scripture quotations  
-- Cross-textual comparisons  
+## 🎯 **Vision**
 
-Example:
-> *“Explain Revelation 3:21 verse by verse”*
+To make wisdom accessible, interactive, and future-proof by fusing AI, faith, and culture into one seamless digital experience.
 
 ---
 
-### 🔍 Prophecy Evaluation Engine
-- Identifies prophetic statements
-- Explains traditional interpretations
-- Assesses **status**:
-  - Fulfilled
-  - Partially fulfilled
-  - Unfulfilled
-  - Symbolic / debated
-- Clearly labels speculation vs doctrine
+## 🧠 **What This Platform Does**
+
+* Decodes scripture using structured logic and AI-assisted reasoning
+* Provides conversational AI through **RevelaAI**
+* Delivers intuitive, professional UI/UX for seamless exploration
+* Supports continuous learning and knowledge expansion
+* Maintains secure and private user interactions
 
 ---
 
-### 📚 Source Transparency
-- Explicit scripture citations (Book, Chapter, Verse)
-- Source IDs for traceability
-- No hidden authority claims
+## 🛠 **Tech Stack**
+
+**Frontend**
+
+* HTML, CSS, JavaScript
+* Responsive UI with modern layout principles
+
+**Backend**
+
+* Node.js
+* RESTful APIs
+* Regex-based text processing
+* Caching for performance optimization
+
+**Deployment**
+
+* Cloud-hosted frontend
+* GitHub for version control and collaboration
 
 ---
 
-### 🌐 Philosophical Neutrality
-- No preaching
-- No forced belief systems
-- Compares viewpoints side-by-side
-- Encourages understanding, not persuasion
+## 🔗 **Live Links**
+
+* 🌐 **RevelaAI / RevelaCode Frontend:** [https://revelacode-frontend.onrender.com/](https://revelacode-frontend.onrender.com/)
+* 🧑‍💻 **Backend Repository:** [https://github.com/musombi123/RevelaCode-Backend](https://github.com/musombi123/RevelaCode-Backend)
 
 ---
 
-## 🏗️ Architecture Overview
-RevelaAI/
-│
-├── ai/                  # Core AI orchestration modules
-│   ├── ai_client/       # Handles LLM/GROQ/Replicate clients
-│   ├── intent_router.py # Detects user intents to route queries
-│   └── system_prompt.py # Centralized prompts for AI reasoning
-│
-├── config/              # Configuration files and environment settings
-├── core/                # Core application logic and helpers
-├── db/                  # MongoDB connectors & collection setups
-├── features/            # Modular features like emotional intelligence, creativity, decision-making
-├── models/              # AI/ML models, tokenizers, embeddings
-├── routes/              # Flask Blueprints for API endpoints
-├── services/            # Business logic: AI processing, RSS fetching, expert modules
-├── schemas/             # JSON schemas for consistent API responses
-├── utils/               # Utility scripts (docx extraction, JSON helpers, etc.)
-├── voice/               # Text-to-speech & speech-to-text services
-│
-├── app.py               # Main Flask application
-└── predict.py           # Script for standalone AI predictions
+## 📂 **Project Structure (High-Level)**
 
+```
+/frontend
+  ├── index.html
+  ├── stylesheet.css
+  ├── assets/
+  └── scripts/
+
+/backend
+  ├── server.js
+  ├── routes/
+  ├── controllers/
+  └── utils/
+```
+
+---
+
+## 🏗 **Key Features**
+
+### 🔹 RevelaAI Capabilities
+
+* Conversational intelligence
+* Cross-disciplinary knowledge
+* Personalized learning guidance
+* Secure and private interaction
+* Continuously updated knowledge base
+
+### 🔹 RevelaCode Capabilities
+
+* Scripture analysis engine
+* Prophecy decoding dashboard
+* User profile & settings panel
+* AI-powered interpretation tools
+
+---
+
+## 👨‍💻 **Creator**
+
+**Musombi William**
+Founder & Lead Engineer — RevelaCode
+Full-Stack Developer | Tech-Faith Innovator
+
+📧 [musombiwilliam769@gmail.com](mailto:musombiwilliam769@gmail.com)
+🔗
