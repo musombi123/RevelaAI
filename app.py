@@ -141,7 +141,7 @@ def get_ai_reply_streamed(session_messages):
         model="llama-3.1-8b-instant",
         messages=messages,
         temperature=0.4,
-        max_tokens=700,
+        max_tokens=300,
         stream=True
     )
 
