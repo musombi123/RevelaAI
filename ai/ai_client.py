@@ -3,6 +3,7 @@ import requests
 
 MVI_API = os.getenv("MVI_API")
 
+print("MVI_API =", MVI_API)
 
 def ask_mvi(
     text,
