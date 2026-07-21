@@ -1,35 +1,32 @@
 import os
 import requests
 
-MVI_API = os.environ.get("MVI_API")
-
-if not MVI_API:
-    raise RuntimeError("MVI_API environment variable is not set.")
+MVI_API = os.getenv("MVI_API")
 
 
-def ask_mvi(text, system_prompt=""):
-    try:
-        response = requests.post(
-            MVI_API,
-            json={
-                "text": text,
-                "system_prompt": system_prompt,
-            },
-            timeout=120,
-        )
+def ask_mvi(
+    text,
+    system_prompt="",
+    session_id=None,
+):
+    headers = {}
 
-        response.raise_for_status()
+    if session_id:
+        headers["X-Session-ID"] = session_id
 
-        return response.json()
+    response = requests.post(
+        MVI_API,
+        headers=headers,
+        json={
+            "text": text,
+            "system_prompt": system_prompt,
+        },
+        timeout=120,
+    )
 
-    except Exception as e:
-        return {
-            "success": False,
-            "response": f"MVI request failed: {e}",
-            "intent": "unknown",
-            "emotion": "unknown",
-        }
+    response.raise_for_status()
 
+    return response.json()
 
 # -------------------------------
 # Replicate Client (Images)
