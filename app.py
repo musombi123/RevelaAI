@@ -62,6 +62,23 @@ CORS(
     supports_credentials=True
 )
 
+# -------- SELF-PING / KEEP-ALIVE --------
+SELF_URL = "https://revelaai.onrender.com/health"
+PING_INTERVAL = 5 * 60  # every 5 minutes
+
+async def keep_alive():
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        while True:
+            try:
+                response = await client.get(SELF_URL)
+                if response.status_code == 200:
+                    print("[KEEP-ALIVE] Ping successful")
+                else:
+                    print(f"[KEEP-ALIVE] Ping failed: {response.status_code}")
+            except Exception as e:
+                print(f"[KEEP-ALIVE] Ping error: {e}")
+            await asyncio.sleep(PING_INTERVAL)
+
 # -------------------------------
 # Register Blueprints
 # -------------------------------
@@ -363,23 +380,6 @@ def serve_audio(filename):
     if not os.path.exists(path):
         return jsonify({"error": "Audio not found"}), 404
     return send_file(path, mimetype="audio/wav")
-
-# -------- SELF-PING / KEEP-ALIVE --------
-SELF_URL = "https://revelaai.onrender.com/health"
-PING_INTERVAL = 5 * 60  # every 5 minutes
-
-async def keep_alive():
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        while True:
-            try:
-                response = await client.get(SELF_URL)
-                if response.status_code == 200:
-                    print("[KEEP-ALIVE] Ping successful")
-                else:
-                    print(f"[KEEP-ALIVE] Ping failed: {response.status_code}")
-            except Exception as e:
-                print(f"[KEEP-ALIVE] Ping error: {e}")
-            await asyncio.sleep(PING_INTERVAL)
 
 # -------------------------------
 # Health

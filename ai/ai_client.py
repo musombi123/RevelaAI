@@ -1,5 +1,6 @@
 import os
 import requests
+import time
 
 MVI_API = os.getenv("MVI_API")
 
@@ -14,6 +15,8 @@ def ask_mvi(
 
     if session_id:
         headers["X-Session-ID"] = session_id
+    
+    start = time.time()
 
     response = requests.post(
         MVI_API,
@@ -24,6 +27,8 @@ def ask_mvi(
         },
         timeout=120,
     )
+
+    print(f"MVI response took {time.time() - start:.2f} seconds")
 
     response.raise_for_status()
 
