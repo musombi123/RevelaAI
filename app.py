@@ -1,48 +1,48 @@
 import os
 import time
-import requests
+import asyncio
 import tempfile
+import requests
+import httpx
+import importlib
+import inspect
 
-from flask import Flask, request, jsonify, Response, send_file
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-# -------------------------------
-# AI & Services
-# -------------------------------
-from ai.ai_client import get_groq_client, create_replicate_prediction
+# AI
+from ai.ai_client import create_replicate_prediction
 from ai.intent_router import classify_intent
 from services.ai_service import process_message
+from ai.json_utils import (
+    extract_json,
+    enforce_base_schema,
+    error_response,
+)
+
+# Expert modules
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
-from utils.docx_utils import extract_text_from_docx
-from routes.research import research_bp
+
+# Voice
 from voice.voice_output import text_to_speech_file
 from voice.transcribe import transcribe_audio_file
 
-# -------------------------------
-# Core Utilities
-# -------------------------------
-from ai.system_prompt import SYSTEM_PROMPT
-from ai.json_utils import extract_json, enforce_base_schema, error_response
+# Documents
+from utils.docx_utils import extract_text_from_docx
 
-# -------------------------------
-# Routes (Flask Blueprints)
-# -------------------------------
+# Database
+from db.mongo import users_col, memory_col, messages_col
+
+# Routes
 from routes.users_routes import users_bp
 from routes.chat_routes import chat_bp
 from routes.memory_routes import memory_bp
 from routes.research_routes import research_bp
 from routes.explain_routes import explain_bp
-
-# WhatsApp Webhook Blueprint
 from whatsapp_webhook import whatsapp_bp
 
-# -------------------------------
-# Database Setup (MongoDB)
-# -------------------------------
-from db.mongo import users_col, memory_col, messages_col
-users_col.insert_one({"name": "Musombi William"})
 
 # -------------------------------
 # Environment & App Setup
@@ -133,7 +133,7 @@ def chat():
 # LLM Call (Streaming)
 # -------------------------------
 def get_ai_reply_streamed(session_messages):
-    client = get_groq_client()
+    client = ask_mvi()
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(session_messages)
 
@@ -281,7 +281,7 @@ def ai_assistant():
             data=data,
             sources=[],
             meta={
-                "ai_model": "llama-3.1-8b-instant",
+                "ai_model": "MVI-AI v3.1",
                 "memory": "topic-aware",
                 "confidence": ai_result.get("confidence", "medium")
             }

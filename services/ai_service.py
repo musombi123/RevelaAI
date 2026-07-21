@@ -1,79 +1,94 @@
-# services/ai_service.py
-
-from ai.ai_client import get_groq_client
+from ai.ai_client import ask_mvi
 from ai.system_prompt import SYSTEM_PROMPT
-from ai.orchestrator import Orchestrator  # <-- import the orchestrator
+from ai.orchestrator import Orchestrator
 
-# Instantiate once (can be global)
+# Instantiate once
 orchestrator = Orchestrator()
 
 
-# ---------------------------------------
-# ✅ ADD THIS HERE (BEFORE process_message)
+# --------------------------------------------------
+# Build source prompt
+# --------------------------------------------------
+
 def build_source_prompt(query: str, sources: list[dict]) -> str:
     prompt = f"""Using ONLY these sources, answer the question.
 
-Query: {query}
+Query:
+{query}
 
 Sources:
 """
+
     for i, s in enumerate(sources, start=1):
         title = s.get("title", "Untitled")
         url = s.get("url", "")
         snippet = s.get("snippet", "") or s.get("full_text", "")
-        prompt += f"\n{i}) {title} - {url}\n{snippet}\n"
+
+        prompt += f"""
+
+{i}) {title}
+{url}
+
+{snippet}
+"""
 
     prompt += """
+
 Rules:
-- Use citations like [1], [2] after each claim.
-- If sources don’t contain enough info, say: "Not enough info from sources."
-- Do NOT add outside knowledge.
+- Use citations like [1], [2].
+- If the sources are insufficient, say:
+  "Not enough information from sources."
+- Do not invent facts.
 """
+
     return prompt
 
 
-# ---------------------------------------
-# ✅ KEEP ONLY ONE process_message
-# ---------------------------------------
+# --------------------------------------------------
+# Main AI Pipeline
+# --------------------------------------------------
+
 def process_message(
     message: str,
-    context: list,
+    context: list = None,
     intent: str = "general",
-    session_id: str | None = None
+    session_id: str | None = None,
 ) -> dict:
-    """
-    Core human-like AI reasoning engine.
-    Answers any question, reasons freely, Real human style.
-    """
 
-    client = get_groq_client()
+    context = context or []
 
-    # Build conversation (ChatGPT-compatible)
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    if context:
-        messages.extend(context[-10:])
-    messages.append({"role": "user", "content": message})
-
-    # 🧠 Orchestrator metadata
+    # Run orchestrator
     orchestrator_data = orchestrator.process_prompt(
         message=message,
         context=context,
         intent=intent,
-        session_id=session_id
+        session_id=session_id,
     )
 
-    completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=messages,
-        temperature=0.7,
-        max_tokens=800
+    # Ask MVI-AI
+    result = ask_mvi(
+        text=message,
+        system_prompt=SYSTEM_PROMPT,
+        session_id=session_id,
     )
 
-    reply = completion.choices[0].message.content.strip()
+    if not result.get("success", False):
+        return {
+            "response": result.get(
+                "response",
+                result.get("error", "Failed to contact MVI-AI."),
+            ),
+            "confidence": "low",
+            "intent": intent,
+            "emotion": "unknown",
+            "orchestrator": orchestrator_data,
+        }
 
     return {
-        "response": reply,
+        "response": result.get("response", ""),
         "confidence": "high",
-        "intent": intent,
-        "orchestrator": orchestrator_data
+        "intent": result.get("intent", intent),
+        "emotion": result.get("emotion", "unknown"),
+        "session_id": result.get("session_id", session_id),
+        "orchestrator": orchestrator_data,
     }
