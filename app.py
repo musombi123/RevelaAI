@@ -24,7 +24,8 @@ from ai.json_utils import (
 # Expert modules
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
-from ai.ai_client import ask_mvi, SYSTEM_PROMPT
+from ai.ai_client import ask_mvi
+from ai.system_prompt import SYSTEM_PROMPT
 
 # Voice
 from voice.voice_output import text_to_speech_file
