@@ -7,7 +7,7 @@ import httpx
 import importlib
 import inspect
 
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -24,6 +24,7 @@ from ai.json_utils import (
 # Expert modules
 from services.expert_law import analyze_legal_query
 from services.expert_medicine import analyze_medical_query
+from ai.ai_client import ask_mvi, SYSTEM_PROMPT
 
 # Voice
 from voice.voice_output import text_to_speech_file
