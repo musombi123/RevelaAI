@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 # AI
 from ai.ai_client import create_replicate_prediction
 from ai.intent_router import classify_intent
-from services.ai_service import process_message
 from ai.json_utils import (
     extract_json,
     enforce_base_schema,
@@ -35,7 +34,7 @@ from voice.transcribe import transcribe_audio_file
 from utils.docx_utils import extract_text_from_docx
 
 # Database
-from db.mongo import users_col, memory_col, messages_col
+from db.mongo import users_col
 
 # Routes
 from routes.users_routes import users_bp
@@ -85,9 +84,6 @@ def get_session_id():
 # -------------------------------
 # Dynamic Feature Loading
 # -------------------------------
-import importlib
-import inspect
-
 FEATURES_DIR = "features"
 
 def load_features():
@@ -130,27 +126,6 @@ def chat():
         "features_used": list(FEATURES.keys()),
         "responses": responses
     })
-
-# -------------------------------
-# LLM Call (Streaming)
-# -------------------------------
-def get_ai_reply_streamed(session_messages):
-    client = ask_mvi()
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    messages.extend(session_messages)
-
-    stream = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=messages,
-        temperature=0.4,
-        max_tokens=300,
-        stream=True
-    )
-
-    for chunk in stream:
-        delta = chunk.choices[0].delta
-        if delta and delta.content:
-            yield delta.content
 
 # -------------------------------
 # Replicate Polling
@@ -253,11 +228,10 @@ def ai_assistant():
             expert_payload = analyze_medical_query(message)
 
         # Core AI processing
-        ai_result = process_message(
-            message=message,
-            context=session["messages"],
-            intent=intent,
-            session_id=session_id
+        ai_result = ask_mvi(
+            text=message,
+            system_prompt=SYSTEM_PROMPT,
+            session_id=session_id,
         )
 
         assistant_text = ai_result.get("response")
@@ -284,15 +258,17 @@ def ai_assistant():
             sources=[],
             meta={
                 "ai_model": "MVI-AI v3.1",
+                "provider": "HuggingFace",
                 "memory": "topic-aware",
-                "confidence": ai_result.get("confidence", "medium")
+                "intent": ai_result.get("intent"),
+                "emotion": ai_result.get("emotion"),
+                "confidence": ai_result.get("confidence", "high"),
             }
         ))
 
     except Exception as e:
         app.logger.exception("AI request failed")
         return jsonify(error_response("SERVER_ERROR", str(e))), 500
-
 # -------------------------------
 # Streaming Endpoint
 # -------------------------------
@@ -302,21 +278,56 @@ def ai_stream():
     message = payload.get("message", "").strip()
 
     if not message:
-        return jsonify(error_response("EMPTY_MESSAGE", "Message required.")), 400
+        return jsonify(
+            error_response("EMPTY_MESSAGE", "Message required.")
+        ), 400
 
     session_id = get_session_id()
-    session = SESSION_MEMORY.get(session_id, {"topic": None, "messages": []})
 
-    session["messages"].append({"role": "user", "content": message})
+    session = SESSION_MEMORY.get(
+        session_id,
+        {"topic": None, "messages": []}
+    )
+
+    session["messages"].append({
+        "role": "user",
+        "content": message
+    })
+
     session["messages"] = session["messages"][-MAX_HISTORY:]
     SESSION_MEMORY[session_id] = session
 
     def generate():
-        for chunk in get_ai_reply_streamed(session["messages"]):
-            yield f"data: {chunk}\n\n"
+        try:
+            ai_result = ask_mvi(
+                text=message,
+                system_prompt=SYSTEM_PROMPT,
+                session_id=session_id,
+            )
 
-    return Response(generate(), mimetype="text/event-stream")
+            response = ai_result.get(
+                "response",
+                "No response generated."
+            )
 
+            session["messages"].append({
+                "role": "assistant",
+                "content": response,
+            })
+
+            session["messages"] = session["messages"][-MAX_HISTORY:]
+            SESSION_MEMORY[session_id] = session
+
+            yield f"data: {response}\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
+
+        except Exception as e:
+            yield f"event: error\ndata: {str(e)}\n\n"
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+    )
 # -------------------------------
 # Voice Endpoints
 # -------------------------------
@@ -331,11 +342,10 @@ def voice():
 
     heard = transcribe_audio_file(audio_path)
 
-    ai_result = process_message(
-        message=heard,
-        context=[],
-        intent=classify_intent(heard),
-        session_id=get_session_id()
+    ai_result = ask_mvi(
+        text=heard,
+        system_prompt=SYSTEM_PROMPT,
+        session_id=get_session_id(),
     )
 
     response_text = ai_result.get("response", "")
@@ -355,7 +365,7 @@ def serve_audio(filename):
     return send_file(path, mimetype="audio/wav")
 
 # -------- SELF-PING / KEEP-ALIVE --------
-SELF_URL = "https://https://revelaai.onrender.com/health"
+SELF_URL = "https://revelaai.onrender.com/health"
 PING_INTERVAL = 5 * 60  # every 5 minutes
 
 async def keep_alive():
