@@ -25,7 +25,7 @@ def ask_mvi(
             "text": text,
             "system_prompt": system_prompt,
         },
-        timeout=120,
+        timeout=(10, 600),
     )
 
     print(f"MVI response took {time.time() - start:.2f} seconds")
@@ -60,6 +60,7 @@ def create_replicate_prediction(version: str, input_data: dict):
             "version": version,
             "input": input_data,
         },
+        timeout=(10, 600),
     )
 
     response.raise_for_status()
