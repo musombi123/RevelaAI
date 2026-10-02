@@ -1,47 +1,41 @@
 """
 RevelaAI Biashara Ecosystem Provider
 
-Connects the RevelaAI intelligence layer to the existing
-RevelaCode Biashara platform through the internal AI Gateway.
+Adapter between RevelaAI and the RevelaCode Backend
+Biashara services.
 
-Biashara remains the source of truth for:
-    - business profiles
-    - sales
-    - orders
-    - customers
-    - products
-    - inventory
-    - expenses
-    - dashboard metrics
-    - business intelligence
+The provider does not access MongoDB directly.
 
-RevelaAI only retrieves the context it needs.
+All platform communication goes through EcosystemClient
+and the internal RevelaCode AI Gateway.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .client import (
-    EcosystemClientError,
-    get_domain_context,
-    try_get_context,
-)
+from .client import EcosystemClient
 
-
-# =========================================================
-# PROVIDER
-# =========================================================
 
 class BiasharaProvider:
     """
-    RevelaAI provider for the Biashara Hub.
+    RevelaAI adapter for the Biashara domain.
     """
 
     domain = "biashara"
 
+    def __init__(
+        self,
+        client: EcosystemClient | None = None,
+    ) -> None:
+        self.client = (
+            client
+            if client is not None
+            else EcosystemClient()
+        )
+
     # =====================================================
-    # CONTEXT
+    # GENERAL CONTEXT
     # =====================================================
 
     def get_context(
@@ -49,40 +43,18 @@ class BiasharaProvider:
         *,
         user_id: str,
         message: str = "",
-        include: dict[str, Any] | None = None,
+        include: dict[str, bool] | None = None,
     ) -> dict:
         """
-        Retrieve Biashara context for one authenticated user.
-
-        Example:
-
-            provider.get_context(
-                user_id="123",
-                message="Why are my sales dropping?",
-            )
+        Retrieve ordinary Biashara platform context.
         """
 
-        normalized_include = (
-            include
-            if isinstance(
-                include,
-                dict,
-            )
-            else {}
-        )
-
-        result = get_domain_context(
-            user_id=str(
-                user_id
-            ),
+        return self.client.get_domain_context(
+            user_id=user_id,
             domain=self.domain,
-            message=str(
-                message or ""
-            ),
-            include=normalized_include,
+            message=message,
+            include=include or {},
         )
-
-        return result
 
     # =====================================================
     # SAFE CONTEXT
@@ -93,221 +65,205 @@ class BiasharaProvider:
         *,
         user_id: str,
         message: str = "",
-        include: dict[str, Any] | None = None,
+        include: dict[str, bool] | None = None,
     ) -> dict:
         """
-        Best-effort Biashara context lookup.
-
-        Used by the orchestrator when ecosystem data should
-        enrich an AI response but should not crash the entire
-        request if the platform is temporarily unavailable.
+        Non-throwing version of get_context().
         """
 
-        return try_get_context(
-            user_id=str(
-                user_id
-            ),
+        return self.client.try_get_context(
+            user_id=user_id,
             domain=self.domain,
-            message=str(
-                message or ""
-            ),
-            include=(
-                include
-                if isinstance(
-                    include,
-                    dict,
-                )
-                else {}
-            ),
+            message=message,
+            include=include or {},
         )
 
     # =====================================================
-    # BUSINESS PROFILE
+    # SPECIALIZED INTELLIGENCE
     # =====================================================
 
-    def get_business(
+    def run_operation(
         self,
         *,
+        operation: str,
         user_id: str,
-    ) -> dict:
-        """
-        Retrieve the authenticated user's business context.
-
-        This uses the same gateway but asks specifically for
-        business information.
-        """
-
-        result = self.get_context(
-            user_id=user_id,
-            message="business profile",
-            include={
-                "business": True,
-            },
-        )
-
-        context = result.get(
-            "data",
-            result,
-        )
-
-        if not isinstance(
-            context,
-            dict,
-        ):
-
-            return {}
-
-        return context
-
-    # =====================================================
-    # PERFORMANCE
-    # =====================================================
-
-    def get_performance(
-        self,
-        *,
-        user_id: str,
+        payload: dict[str, Any] | None = None,
         message: str = "",
     ) -> dict:
         """
-        Retrieve business performance context.
+        Execute a specialized Biashara intelligence
+        operation through the RevelaCode AI Gateway.
 
-        Suitable for questions involving:
+        Examples:
 
-            sales
-            revenue
-            profit
-            orders
-            customers
-            performance trends
+            market_analysis
+            market_forecast
+            product_forecast
+            market_trends
+            economic_indicators
         """
 
-        result = self.get_context(
+        return self.client.run_operation(
+            domain=self.domain,
+            operation=operation,
             user_id=user_id,
-            message=(
-                message
-                or "business performance"
-            ),
-            include={
-                "business": True,
-                "performance": True,
-                "sales": True,
-                "orders": True,
-                "customers": True,
-                "expenses": True,
-            },
+            payload=payload or {},
+            message=message,
         )
 
-        if not isinstance(
-            result,
-            dict,
-        ):
-
-            return {}
-
-        return result
-
     # =====================================================
-    # PRODUCTS / INVENTORY
+    # MARKET ANALYSIS
     # =====================================================
 
-    def get_products_and_inventory(
+    def analyze_market(
         self,
         *,
         user_id: str,
+        payload: dict[str, Any] | None = None,
         message: str = "",
     ) -> dict:
         """
-        Retrieve product and inventory context.
-
-        Useful for questions such as:
-
-            "Which products are low in stock?"
-            "What should I restock?"
-            "Which products are selling?"
+        Run the backend's complete Biashara market analysis.
         """
 
-        result = self.get_context(
+        return self.run_operation(
+            operation="market_analysis",
             user_id=user_id,
-            message=(
-                message
-                or "products and inventory"
-            ),
-            include={
-                "business": True,
-                "products": True,
-                "inventory": True,
-            },
+            payload=payload or {},
+            message=message,
         )
 
-        if not isinstance(
-            result,
-            dict,
-        ):
-
-            return {}
-
-        return result
-
     # =====================================================
-    # FULL BUSINESS ANALYSIS
+    # NEXT-WEEK MARKET FORECAST
     # =====================================================
 
-    def get_analysis_context(
+    def forecast_next_week(
         self,
         *,
         user_id: str,
+        payload: dict[str, Any] | None = None,
         message: str = "",
     ) -> dict:
         """
-        Retrieve a broader Biashara context for analytical
-        questions.
-
-        This is intentionally explicit so the orchestrator
-        can choose a heavier context request only when the
-        question actually requires it.
+        Run the backend's seven-day market forecast.
         """
 
-        return self.get_context(
+        return self.run_operation(
+            operation="market_forecast",
             user_id=user_id,
-            message=(
-                message
-                or "business analysis"
-            ),
-            include={
-                "business": True,
-                "performance": True,
-                "products": True,
-                "orders": True,
-                "customers": True,
-                "inventory": True,
-                "sales": True,
-                "expenses": True,
-                "market": True,
-                "economic": True,
+            payload=payload or {},
+            message=message,
+        )
+
+    # =====================================================
+    # PRODUCT FORECAST
+    # =====================================================
+
+    def forecast_product(
+        self,
+        *,
+        user_id: str,
+        product: dict[str, Any],
+        forecast_days: int = 7,
+        message: str = "",
+    ) -> dict:
+        """
+        Forecast demand/sales for one product.
+        """
+
+        payload = {
+            **product,
+            "forecast_days": forecast_days,
+        }
+
+        return self.run_operation(
+            operation="product_forecast",
+            user_id=user_id,
+            payload=payload,
+            message=message,
+        )
+
+    # =====================================================
+    # MARKET TRENDS
+    # =====================================================
+
+    def get_market_trends(
+        self,
+        *,
+        user_id: str,
+        area_id: str = "",
+        category: str = "",
+        indicator: str = "",
+        days: int = 30,
+        message: str = "",
+    ) -> dict:
+        """
+        Retrieve historical/current market trend data.
+        """
+
+        payload = {
+            "area_id": area_id,
+            "category": category,
+            "indicator": indicator,
+            "days": days,
+        }
+
+        return self.run_operation(
+            operation="market_trends",
+            user_id=user_id,
+            payload=payload,
+            message=message,
+        )
+
+    # =====================================================
+    # ECONOMIC INDICATORS
+    # =====================================================
+
+    def get_economic_indicators(
+        self,
+        *,
+        user_id: str,
+        refresh: bool = False,
+        message: str = "",
+    ) -> dict:
+        """
+        Retrieve current economic indicators.
+        """
+
+        return self.run_operation(
+            operation="economic_indicators",
+            user_id=user_id,
+            payload={
+                "refresh": refresh,
             },
+            message=message,
         )
 
     # =====================================================
     # AVAILABILITY
     # =====================================================
 
-    def is_available(
-        self,
-    ) -> bool:
+    def is_available(self) -> bool:
         """
-        Return whether the RevelaCode gateway appears to be
-        configured and reachable.
-
-        This is a lightweight diagnostic helper.
+        Check whether the Biashara gateway is reachable.
         """
 
         try:
 
-            from .client import service_configured
+            result = self.client.check_gateway()
 
-            return service_configured()
+            return bool(
+                isinstance(
+                    result,
+                    dict,
+                )
+            )
 
         except Exception:
 
             return False
+
+
+__all__ = [
+    "BiasharaProvider",
+]

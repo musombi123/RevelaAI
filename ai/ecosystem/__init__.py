@@ -1,25 +1,38 @@
 """
-RevelaAI Ecosystem Integration
+RevelaAI Ecosystem
 
-Provides the intelligence layer with a controlled interface to
-the RevelaCode platform ecosystem.
+Global registry for authorized RevelaCode ecosystem providers.
 
-Domains:
-    - Biashara
-    - Shamba
-    - Elimu
-    - Community
+RevelaAI does not access MongoDB directly.
+Providers communicate with the RevelaCode Backend through
+the approved ecosystem client / AI Gateway.
 """
 
-from .registry import EcosystemRegistry
+from ai.ecosystem.registry import EcosystemRegistry
+
+from ai.ecosystem.biashara import BiasharaProvider
+from ai.ecosystem.shamba import ShambaProvider
+from ai.ecosystem.elimu import ElimuProvider
+from ai.ecosystem.community import CommunityProvider
 
 
-# Shared registry instance.
-#
-# The registry is intentionally created once so the orchestrator
-# and other AI services can reuse the same ecosystem interface.
-ecosystem = EcosystemRegistry()
+# =========================================================
+# GLOBAL ECOSYSTEM REGISTRY
+# =========================================================
 
+ecosystem = EcosystemRegistry(
+    providers=[
+        BiasharaProvider(),
+        ShambaProvider(),
+        ElimuProvider(),
+        CommunityProvider(),
+    ]
+)
+
+
+# =========================================================
+# PUBLIC EXPORTS
+# =========================================================
 
 __all__ = [
     "EcosystemRegistry",
