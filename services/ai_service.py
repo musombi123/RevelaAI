@@ -408,6 +408,7 @@ def process_message(
     context: list | None = None,
     intent: str = "general",
     session_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
     """
     Execute the complete RevelaAI pipeline.
@@ -453,6 +454,7 @@ def process_message(
                 context=conversation_context,
                 intent=intent,
                 session_id=session_id,
+                user_id=user_id,
             )
         )
 

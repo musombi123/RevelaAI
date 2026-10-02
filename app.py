@@ -52,6 +52,7 @@ from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
 from typing import Any
+import jwt
 
 from dotenv import load_dotenv
 
@@ -61,6 +62,111 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# =========================================================
+# REVELACODE AUTHENTICATION
+# =========================================================
+
+JWT_SECRET = (
+    os.getenv(
+        "JWT_SECRET",
+        "",
+    )
+    .strip()
+)
+
+JWT_ALGORITHM = "HS256"
+
+
+def resolve_revelacode_user_id() -> str | None:
+    """
+    Resolve the authenticated RevelaCode user from the
+    Authorization Bearer JWT.
+
+    The JWT is only used to establish identity.
+
+    Actual platform data is still retrieved through the
+    RevelaCode AI Gateway.
+    """
+
+    authorization = (
+        request.headers.get(
+            "Authorization",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not authorization:
+        return None
+
+    if not authorization.startswith(
+        "Bearer "
+    ):
+        return None
+
+    token = authorization[
+        len("Bearer "):
+    ].strip()
+
+    if not token:
+        return None
+
+    if not JWT_SECRET:
+        app.logger.error(
+            "JWT_SECRET is not configured."
+        )
+        return None
+
+    try:
+
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[
+                JWT_ALGORITHM
+            ],
+            options={
+                "require": [
+                    "sub",
+                    "iat",
+                    "exp",
+                ]
+            },
+        )
+
+    except jwt.ExpiredSignatureError:
+
+        app.logger.warning(
+            "RevelaAI rejected expired RevelaCode JWT."
+        )
+
+        return None
+
+    except jwt.InvalidTokenError:
+
+        app.logger.warning(
+            "RevelaAI rejected invalid RevelaCode JWT."
+        )
+
+        return None
+
+    user_id = (
+        payload.get("sub")
+        or payload.get("user_id")
+        or payload.get("id")
+    )
+
+    if user_id is None:
+        return None
+
+    user_id = str(
+        user_id
+    ).strip()
+
+    if not user_id:
+        return None
+
+    return user_id
 
 # =========================================================
 # FLASK
@@ -1493,6 +1599,10 @@ def ai_assistant():
 
     session_id = get_session_id()
 
+    user_id = (
+        resolve_revelacode_user_id()
+    )
+
     session = get_session(
         session_id
     )
@@ -1798,6 +1908,7 @@ def ai_assistant():
             context=previous_context,
             intent=intent,
             session_id=session_id,
+            user_id=user_id,
         )
 
         assistant_text = (

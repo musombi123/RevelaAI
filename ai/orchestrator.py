@@ -2128,13 +2128,7 @@ class Orchestrator:
                 user_id
             ).strip()
             if user_id
-            else (
-                str(
-                    session_id
-                ).strip()
-                if session_id
-                else None
-            )
+            else None
         )
 
         # -------------------------------------------------
