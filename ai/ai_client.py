@@ -9,6 +9,12 @@ Text generation:
 Image generation:
     Hugging Face Inference Providers
 
+Speech recognition:
+    Hugging Face Inference Providers
+
+Text-to-speech:
+    Hugging Face Inference Providers
+
 Architecture:
 
     RevelaAI
@@ -16,7 +22,9 @@ Architecture:
         └---- Hugging Face
                  |
                  ├── Text: GPT-OSS
-                 └── Image: FLUX / configured image model
+                 ├── Image: FLUX
+                 ├── ASR: Whisper
+                 └── TTS: Kokoro
 
 IMPORTANT:
     HF_TOKEN must remain server-side.
@@ -100,6 +108,36 @@ HF_IMAGE_FALLBACK_MODEL = (
         "",
     )
     .strip()
+)
+
+
+# =========================================================
+# VOICE MODEL CONFIGURATION
+# =========================================================
+
+HF_ASR_MODEL = (
+    os.getenv(
+        "HF_ASR_MODEL",
+        "openai/whisper-large-v3",
+    )
+    .strip()
+)
+
+HF_TTS_MODEL = (
+    os.getenv(
+        "HF_TTS_MODEL",
+        "hexgrad/Kokoro-82M",
+    )
+    .strip()
+)
+
+HF_TTS_MIME_TYPE = (
+    os.getenv(
+        "HF_TTS_MIME_TYPE",
+        "audio/flac",
+    )
+    .strip()
+    or "audio/flac"
 )
 
 
@@ -348,14 +386,14 @@ def build_messages(
 
 
 # =========================================================
-# IMAGE MODEL CLIENT
+# HUGGING FACE INFERENCE CLIENT
 # =========================================================
 
 def _get_inference_client():
     """
     Create a Hugging Face InferenceClient.
 
-    Image and future multimodal operations use this client.
+    Used for image generation, ASR, and TTS.
     """
 
     if not HF_TOKEN:
@@ -406,9 +444,6 @@ def generate_hf_image(
 
     Returns:
         PIL.Image.Image
-
-    Raises:
-        AIClientError
     """
 
     prompt = str(
@@ -527,10 +562,6 @@ def generate_hf_image(
             f"time={elapsed:.2f}s"
         )
 
-        # -------------------------------------------------
-        # IMAGE FALLBACK
-        # -------------------------------------------------
-
         fallback_model = (
             HF_IMAGE_FALLBACK_MODEL
         )
@@ -578,16 +609,6 @@ def generate_hf_image(
                         if seed is not None
                         else None
                     ),
-                )
-
-                elapsed = (
-                    time.time() - start
-                )
-
-                print(
-                    "HF image fallback succeeded | "
-                    f"model={fallback_model} | "
-                    f"time={elapsed:.2f}s"
                 )
 
             except Exception as fallback_exc:
@@ -643,6 +664,273 @@ def generate_image(
         prompt=prompt,
         **kwargs,
     )
+
+
+# =========================================================
+# VOICE — SPEECH TO TEXT
+# =========================================================
+
+def transcribe_hf_audio(
+    audio: bytes,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """
+    Transcribe audio using Hugging Face ASR.
+
+    Hugging Face accepts raw audio bytes and returns an
+    AutomaticSpeechRecognitionOutput containing the text.
+    """
+
+    if not audio:
+
+        raise AIClientError(
+            "Audio data is required.",
+            provider="huggingface",
+            error_code="empty_audio",
+        )
+
+    if not HF_TOKEN:
+
+        raise AIClientError(
+            "HF_TOKEN is not configured.",
+            provider="huggingface",
+            error_code="hf_token_missing",
+        )
+
+    selected_model = (
+        str(
+            model
+        ).strip()
+        if model
+        else HF_ASR_MODEL
+    )
+
+    if not selected_model:
+
+        raise AIClientError(
+            "No Hugging Face ASR model is configured.",
+            provider="huggingface",
+            error_code="asr_model_missing",
+        )
+
+    client = _get_inference_client()
+
+    start = time.time()
+
+    try:
+
+        result = (
+            client.automatic_speech_recognition(
+                audio=audio,
+                model=selected_model,
+            )
+        )
+
+    except Exception as exc:
+
+        elapsed = (
+            time.time() - start
+        )
+
+        print(
+            "HF ASR failed | "
+            f"model={selected_model} | "
+            f"time={elapsed:.2f}s"
+        )
+
+        raise AIClientError(
+            "Hugging Face speech recognition failed.",
+            provider="huggingface",
+            error_code="asr_failed",
+        ) from exc
+
+    elapsed = (
+        time.time() - start
+    )
+
+    transcript = getattr(
+        result,
+        "text",
+        None,
+    )
+
+    if transcript is None and isinstance(
+        result,
+        dict,
+    ):
+        transcript = result.get(
+            "text"
+        )
+
+    transcript = str(
+        transcript or ""
+    ).strip()
+
+    if not transcript:
+
+        raise AIClientError(
+            "Hugging Face returned an empty transcription.",
+            provider="huggingface",
+            error_code="empty_transcription",
+        )
+
+    print(
+        "HF ASR succeeded | "
+        f"model={selected_model} | "
+        f"time={elapsed:.2f}s"
+    )
+
+    return {
+        "success": True,
+        "text": transcript,
+        "provider": "huggingface",
+        "model": selected_model,
+    }
+
+
+# =========================================================
+# VOICE — TEXT TO SPEECH
+# =========================================================
+
+def generate_hf_speech(
+    text: str,
+    model: str | None = None,
+    voice: str | None = None,
+    **generation_kwargs: Any,
+) -> bytes:
+    """
+    Generate speech using Hugging Face TTS.
+
+    Returns:
+        Raw audio bytes.
+
+    The provider/model determines the actual audio encoding.
+    """
+
+    text = str(
+        text or ""
+    ).strip()
+
+    if not text:
+
+        raise AIClientError(
+            "Speech text is required.",
+            provider="huggingface",
+            error_code="empty_speech_text",
+        )
+
+    if not HF_TOKEN:
+
+        raise AIClientError(
+            "HF_TOKEN is not configured.",
+            provider="huggingface",
+            error_code="hf_token_missing",
+        )
+
+    selected_model = (
+        str(
+            model
+        ).strip()
+        if model
+        else HF_TTS_MODEL
+    )
+
+    if not selected_model:
+
+        raise AIClientError(
+            "No Hugging Face TTS model is configured.",
+            provider="huggingface",
+            error_code="tts_model_missing",
+        )
+
+    client = _get_inference_client()
+
+    start = time.time()
+
+    extra_body: dict[str, Any] = {}
+
+    if voice:
+
+        voice_value = str(
+            voice
+        ).strip()
+
+        if voice_value:
+
+            extra_body["voice"] = (
+                voice_value
+            )
+
+    try:
+
+        audio = client.text_to_speech(
+            text=text,
+            model=selected_model,
+            extra_body=(
+                extra_body
+                if extra_body
+                else None
+            ),
+            **generation_kwargs,
+        )
+
+    except Exception as exc:
+
+        elapsed = (
+            time.time() - start
+        )
+
+        print(
+            "HF TTS failed | "
+            f"model={selected_model} | "
+            f"time={elapsed:.2f}s"
+        )
+
+        raise AIClientError(
+            "Hugging Face text-to-speech failed.",
+            provider="huggingface",
+            error_code="tts_failed",
+        ) from exc
+
+    elapsed = (
+        time.time() - start
+    )
+
+    if not audio:
+
+        raise AIClientError(
+            "Hugging Face returned empty audio.",
+            provider="huggingface",
+            error_code="empty_audio_response",
+        )
+
+    if not isinstance(
+        audio,
+        bytes,
+    ):
+
+        try:
+
+            audio = bytes(
+                audio
+            )
+
+        except Exception as exc:
+
+            raise AIClientError(
+                "Hugging Face returned invalid audio data.",
+                provider="huggingface",
+                error_code="invalid_audio_response",
+            ) from exc
+
+    print(
+        "HF TTS succeeded | "
+        f"model={selected_model} | "
+        f"time={elapsed:.2f}s | "
+        f"bytes={len(audio)}"
+    )
+
+    return audio
 
 
 # =========================================================
@@ -726,8 +1014,11 @@ def _extract_hf_response(
                 )
 
                 if part_text:
+
                     parts.append(
-                        str(part_text)
+                        str(
+                            part_text
+                        )
                     )
 
             elif item:
@@ -1137,6 +1428,8 @@ __all__ = [
     "build_messages",
     "generate_hf_image",
     "generate_image",
+    "transcribe_hf_audio",
+    "generate_hf_speech",
     "ask_hf",
     "ask_mvi",
 ]
