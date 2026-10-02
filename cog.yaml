@@ -1,10 +1,66 @@
-build:
-  python_version: "3.10"
-  system_packages:
-    - git
-  python_packages:
-    - pillow
-    - torch
-    - torchvision
+services:
+  - type: web
+    name: revelaai
+    env: python
 
-predict: "predict.py:Predictor"
+    buildCommand: pip install -r requirements.txt
+
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 app:app
+
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+
+      - key: APP_NAME
+        value: RevelaAI
+
+      - key: HF_TOKEN
+        sync: false
+
+      - key: HF_MODEL
+        value: openai/gpt-oss-120b:cheapest
+
+      - key: HF_FALLBACK_MODEL
+        value: openai/gpt-oss-20b:cheapest
+
+      - key: HF_IMAGE_MODEL
+        value: black-forest-labs/FLUX.1-schnell
+
+      - key: HF_ASR_MODEL
+        value: openai/whisper-large-v3
+
+      - key: HF_TTS_MODEL
+        value: hexgrad/Kokoro-82M
+
+      - key: HF_TTS_MIME_TYPE
+        value: audio/flac
+
+      - key: HF_IMAGE_DEFAULT_WIDTH
+        value: "1024"
+
+      - key: HF_IMAGE_DEFAULT_HEIGHT
+        value: "1024"
+
+      - key: HF_IMAGE_DEFAULT_STEPS
+        value: "4"
+
+      - key: MAX_CONTENT_LENGTH
+        value: "26214400"
+
+      - key: MAX_HISTORY
+        value: "10"
+
+      - key: MAX_SESSIONS
+        value: "500"
+
+      - key: SESSION_TTL_SECONDS
+        value: "3600"
+
+      - key: DOCUMENT_MAX_MODEL_CHARS
+        value: "90000"
+
+      - key: VOICE_MAX_BYTES
+        value: "10485760"
+
+      - key: CORS_ORIGINS
+        value: "http://localhost:5173,http://127.0.0.1:5173,https://revelacode-frontend.onrender.com,https://localhost"
