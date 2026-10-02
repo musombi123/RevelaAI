@@ -17,3 +17,5 @@ sounddevice
 numpy
 feedparser
 beautifulsoup4
+huggingface_hub>=1.26.0
+Pillow>=10.0.0

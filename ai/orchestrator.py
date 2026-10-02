@@ -48,7 +48,36 @@ from typing import Any
 
 from ai.emotion import detect_emotion
 from ai.ecosystem import ecosystem
-from ai.tools import web_search
+from services.scraper import (
+    get_live_research,
+    is_realtime_query,
+)
+
+# =========================================================
+# MULTIMODAL INPUT SUPPORT
+# =========================================================
+
+MULTIMODAL_TYPES = {
+    "text",
+    "pdf",
+    "image",
+    "audio",
+}
+
+
+def _safe_text(
+    value: Any,
+) -> str:
+    """
+    Normalize arbitrary input into safe text.
+    """
+
+    if value is None:
+        return ""
+
+    return str(
+        value
+    ).strip()
 
 
 # =========================================================
@@ -798,11 +827,27 @@ class Orchestrator:
     # ONLINE DATA DECISION
     # =====================================================
 
+        # =====================================================
+    # ONLINE DATA DECISION
+    # =====================================================
+
     def requires_online_data(
         self,
         message: str,
         intent: str = "general",
     ) -> bool:
+        """
+        Decide whether this request requires fresh
+        external information.
+
+        Online research is required when:
+
+            1. The explicit intent requires current data.
+            2. The message contains a known online/freshness
+               keyword.
+            3. The realtime query detector identifies the
+               request as time-sensitive.
+        """
 
         normalized_message = (
             str(message or "")
@@ -816,20 +861,66 @@ class Orchestrator:
             .lower()
         )
 
+        if not normalized_message:
+            return False
+
+        # -------------------------------------------------
+        # Explicit intents
+        # -------------------------------------------------
+
         if normalized_intent in {
             "research",
             "politics",
             "law",
+            "news",
         }:
             return True
 
+        # -------------------------------------------------
+        # Known online keywords
+        # -------------------------------------------------
+
         for keyword in ONLINE_KEYWORDS:
 
-            if keyword in normalized_message:
-                return True
+            normalized_keyword = (
+                str(keyword or "")
+                .strip()
+                .lower()
+            )
 
-        return False
+            if not normalized_keyword:
+                continue
 
+            if " " in normalized_keyword:
+
+                if normalized_keyword in normalized_message:
+                    return True
+
+            else:
+
+                pattern = (
+                    r"\b"
+                    + re.escape(
+                        normalized_keyword
+                    )
+                    + r"\b"
+                )
+
+                if re.search(
+                    pattern,
+                    normalized_message,
+                ):
+                    return True
+
+        # -------------------------------------------------
+        # Existing realtime detector
+        # -------------------------------------------------
+
+        return bool(
+            is_realtime_query(
+                normalized_message
+            )
+        )
     # =====================================================
     # SEARCH QUERY
     # =====================================================
@@ -899,6 +990,57 @@ class Orchestrator:
 
         return normalized_message
 
+        # =====================================================
+    # ONLINE CAPABILITY STATUS
+    # =====================================================
+
+    def get_online_status(self) -> dict[str, Any]:
+        """
+        Report the operational state of the online research
+        subsystem.
+
+        This does not perform a search.
+        """
+
+        scraper_configured = False
+        scraper_error = None
+
+        try:
+
+            from services.scraper import (
+                get_live_research,
+                is_realtime_query,
+            )
+
+            scraper_configured = (
+                callable(get_live_research)
+                and callable(is_realtime_query)
+            )
+
+        except Exception as exc:
+
+            scraper_error = str(
+                exc
+            )
+
+        return {
+            "enabled": True,
+            "configured": scraper_configured,
+            "provider": "services.scraper",
+            "research_function": (
+                "get_live_research"
+            ),
+            "realtime_detection": (
+                "is_realtime_query"
+            ),
+            "status": (
+                "active"
+                if scraper_configured
+                else "unavailable"
+            ),
+            "error": scraper_error,
+        }
+
     # =====================================================
     # ONLINE RESEARCH
     # =====================================================
@@ -909,6 +1051,13 @@ class Orchestrator:
         domain: str = "general",
         limit: int = 5,
     ) -> dict:
+        """
+        Retrieve fresh external web evidence through
+        services.scraper.
+
+        The orchestrator decides WHEN to research.
+        The scraper decides HOW to retrieve it.
+        """
 
         query = self.build_search_query(
             message=message,
@@ -916,11 +1065,13 @@ class Orchestrator:
         )
 
         if not query:
-
             return {
                 "available": False,
                 "query": "",
                 "sources": [],
+                "realtime": False,
+                "freshness": "none",
+                "retrieved_at": None,
                 "error": {
                     "code": "empty_search_query",
                     "message": (
@@ -929,9 +1080,13 @@ class Orchestrator:
                 },
             }
 
+        realtime = is_realtime_query(
+            query
+        )
+
         try:
 
-            results = web_search(
+            result = get_live_research(
                 query=query,
                 limit=max(
                     1,
@@ -940,82 +1095,108 @@ class Orchestrator:
                         10,
                     ),
                 ),
+                    realtime=realtime,
+                    force_refresh=realtime,
             )
-
-        except Exception:
-
-            return {
-                "available": False,
-                "query": query,
-                "sources": [],
-                "error": {
-                    "code": "web_search_failed",
-                    "message": (
-                        "Online research is temporarily unavailable."
-                    ),
-                },
-            }
-
-        if not isinstance(
-            results,
-            list,
-        ):
-            results = []
-
-        cleaned_sources = []
-
-        for result in results:
 
             if not isinstance(
                 result,
                 dict,
             ):
-                continue
+                return {
+                    "available": False,
+                    "query": query,
+                    "sources": [],
+                    "realtime": realtime,
+                    "freshness": "unavailable",
+                    "retrieved_at": None,
+                    "error": {
+                        "code": "invalid_research_response",
+                        "message": (
+                            "The live research provider "
+                            "returned an invalid response."
+                        ),
+                    },
+                }
 
-            title = str(
-                result.get(
-                    "title",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            snippet = str(
-                result.get(
-                    "snippet",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            link = str(
-                result.get(
-                    "link",
-                    "",
-                )
-                or ""
-            ).strip()
-
-            if not (
-                title
-                or snippet
-                or link
+            if not result.get(
+                "available",
+                False,
             ):
-                continue
+                return {
+                    "available": False,
+                    "query": query,
+                    "sources": result.get(
+                        "sources",
+                        [],
+                    ),
+                    "realtime": realtime,
+                    "freshness": result.get(
+                        "freshness",
+                        "unavailable",
+                    ),
+                    "retrieved_at": result.get(
+                        "retrieved_at"
+                    ),
+                    "error": result.get(
+                        "error"
+                    ),
+                }
 
-            cleaned_sources.append({
-                "title": title,
-                "snippet": snippet,
-                "url": link,
-            })
+            return {
+                "available": True,
+                "query": result.get(
+                    "query",
+                    query,
+                ),
+                "sources": result.get(
+                    "sources",
+                    [],
+                ),
+                "realtime": result.get(
+                    "realtime",
+                    realtime,
+                ),
+                "freshness": result.get(
+                    "freshness",
+                    "fresh",
+                ),
+                "retrieved_at": result.get(
+                    "retrieved_at"
+                ),
+                "source_count": len(
+                    result.get(
+                        "sources",
+                        [],
+                    )
+                    if isinstance(
+                        result.get(
+                            "sources",
+                            [],
+                        ),
+                        list,
+                    )
+                    else []
+                ),
+                "error": result.get(
+                    "error"
+                ),
+            }
 
-        return {
-            "available": bool(
-                cleaned_sources
-            ),
-            "query": query,
-            "sources": cleaned_sources,
-        }
+        except Exception as exc:
+
+            return {
+                "available": False,
+                "query": query,
+                "sources": [],
+                "realtime": realtime,
+                "freshness": "unavailable",
+                "retrieved_at": None,
+                "error": {
+                    "code": "web_research_failed",
+                    "message": str(exc),
+                },
+            }
 
     # =====================================================
     # BIASHARA INTELLIGENCE EXECUTION
@@ -1559,6 +1740,8 @@ class Orchestrator:
         online_data: dict,
         agriculture_metadata: dict,
         biashara_intelligence: dict,
+        multimodal: dict | None = None,
+        document_context: dict | None = None,
     ) -> str:
         """
         Build the evidence package supplied to the generation layer.
@@ -1572,6 +1755,16 @@ class Orchestrator:
 
             "biashara_intelligence": (
                 biashara_intelligence
+            ),
+
+            "multimodal": (
+                multimodal
+                or {}
+            ),
+
+            "document_context": (
+                document_context
+                or {}
             ),
 
             "agriculture_intelligence": (
@@ -1627,6 +1820,38 @@ class Orchestrator:
                     "When evidence is insufficient, state "
                     "what information is missing."
                 ),
+                (
+                    "When a PDF is supplied, use its extracted "
+                    "content as document evidence."
+                ),
+                (
+                    "Preserve page references when citing "
+                    "information from a PDF."
+                ),
+                (
+                    "Do not invent information that is absent "
+                    "from the supplied document."
+                ),
+                (
+                    "If the document is incomplete or unreadable, "
+                    "state that limitation."
+                ),
+                (
+                    "Audio transcripts are user-provided input "
+                    "and may contain transcription errors."
+                ),
+                (
+                    "Use online evidence when the online "
+                    "research subsystem reports available=true."
+                ),
+                (
+                    "Never claim to have searched the web when "
+                    "online research was not actually performed."
+                ),
+                (
+                    "Do not treat stale cached information as "
+                    "current unless its freshness is known."
+                ),
             ],
         }
 
@@ -1636,6 +1861,93 @@ class Orchestrator:
             indent=2,
             default=str,
         )
+
+    # =====================================================
+    # MULTIMODAL INPUT METADATA
+    # =====================================================
+
+    def build_multimodal_metadata(
+        self,
+        *,
+        input_type: str = "text",
+        filename: str | None = None,
+        mime_type: str | None = None,
+        document_pages: int | None = None,
+        document_chunks: int | None = None,
+        transcript: str | None = None,
+        image_description: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Build normalized metadata for multimodal inputs.
+
+        The orchestrator does not decode PDFs, images, or audio.
+        Specialized processors perform those operations first.
+        """
+
+        normalized_type = (
+            _safe_text(
+                input_type
+            ).lower()
+        )
+
+        if (
+            normalized_type
+            not in MULTIMODAL_TYPES
+        ):
+            normalized_type = "text"
+
+        return {
+            "type": normalized_type,
+
+            "filename": (
+                _safe_text(
+                    filename
+                )
+                if filename
+                else None
+            ),
+
+            "mime_type": (
+                _safe_text(
+                    mime_type
+                )
+                if mime_type
+                else None
+            ),
+
+            "document": {
+                "pages": (
+                    int(document_pages)
+                    if document_pages is not None
+                    else None
+                ),
+                "chunks": (
+                    int(document_chunks)
+                    if document_chunks is not None
+                    else None
+                ),
+            },
+
+            "audio": {
+                "transcript": (
+                    _safe_text(
+                        transcript
+                    )
+                    if transcript
+                    else None
+                ),
+            },
+
+            "image": {
+                "description": (
+                    _safe_text(
+                        image_description
+                    )
+                    if image_description
+                    else None
+                ),
+            },
+        }
 
     # =====================================================
     # MAIN PIPELINE
@@ -1648,6 +1960,12 @@ class Orchestrator:
         intent: str = "general",
         session_id: str | None = None,
         user_id: str | None = None,
+        input_type: str = "text",
+        filename: str | None = None,
+        mime_type: str | None = None,
+        document_context: dict | None = None,
+        transcript: str | None = None,
+        image_description: str | None = None,
     ) -> dict:
         """
         Execute the complete orchestration pipeline.
@@ -1666,6 +1984,63 @@ class Orchestrator:
             str(message or "")
             .strip()
         )
+
+        multimodal_metadata = (
+            self.build_multimodal_metadata(
+                input_type=input_type,
+                filename=filename,
+                mime_type=mime_type,
+                document_pages=(
+                    document_context.get("metadata", {}).get("pages")
+                    if isinstance(document_context, dict)
+                    else None
+                ),
+                document_chunks=(
+                    len(
+                        document_context.get(
+                            "chunks",
+                            [],
+                        )
+                    )
+                    if isinstance(document_context, dict)
+                    and isinstance(
+                        document_context.get(
+                            "chunks"
+                        ),
+                        list,
+                    )
+                    else None
+                ),
+                transcript=transcript,
+                image_description=image_description,
+            )
+        )
+
+        document_text = ""
+
+        if isinstance(
+            document_context,
+            dict,
+        ):
+            document_text = _safe_text(
+                document_context.get(
+                    "text",
+                    "",
+                )
+            )
+
+        if (
+            document_text
+            and normalized_message
+        ):
+            normalized_message = (
+                f"{normalized_message}\n\n"
+                f"Document content:\n"
+                f"{document_text}"
+            )
+
+        elif document_text:
+            normalized_message = document_text
 
         normalized_intent = (
             str(intent or "general")
@@ -1791,13 +2166,25 @@ class Orchestrator:
             primary_domain == "biashara"
             and biashara_intent
         ):
+            biashara_payload: dict[str, Any] = {}
+
+            if biashara_intent == "market_forecast":
+                biashara_payload.update({
+                    "forecast_days": 7,
+                    "forecast_horizon": "short_term",
+                })
+
+            elif biashara_intent == "product_forecast":
+                biashara_payload.update({
+                    "forecast_days": 7,
+                })
 
             biashara_intelligence = (
                 self.gather_biashara_intelligence(
                     user_id=resolved_user_id,
                     operation=biashara_intent,
                     message=normalized_message,
-                    payload={},
+                    payload=biashara_payload,
                 )
             )
 
@@ -1856,6 +2243,11 @@ class Orchestrator:
                 biashara_intelligence=(
                     biashara_intelligence
                 ),
+                multimodal=multimodal_metadata,
+                document_context=(
+                    document_context
+                    or {}
+                ),
             )
         )
 
@@ -1893,7 +2285,11 @@ class Orchestrator:
 
             "domains": domains,
 
-            "intent": normalized_intent,
+            "intent": (
+                biashara_intent
+                or agriculture_intent
+                or normalized_intent
+            ),
 
             "biashara": {
                 "detected": (
@@ -1918,6 +2314,8 @@ class Orchestrator:
 
             "agriculture": agriculture_metadata,
 
+            "multimodal": multimodal_metadata,
+
             "emotion": emotion,
 
             "session_id": session_id,
@@ -1939,7 +2337,58 @@ class Orchestrator:
                 ),
             },
 
-            "online": online_data,
+            "online": {
+                "enabled": True,
+                "required": online_required,
+                "available": online_available,
+                "status": (
+                    "active"
+                    if online_available
+                    else (
+                        "required_but_unavailable"
+                        if online_required
+                        else "idle"
+                    )
+                ),
+                "query": online_data.get(
+                    "query",
+                    "",
+                ),
+                "sources": online_data.get(
+                    "sources",
+                    [],
+                ),
+                "source_count": online_data.get(
+                    "source_count",
+                    len(
+                        online_data.get(
+                            "sources",
+                            [],
+                        )
+                        if isinstance(
+                            online_data.get(
+                                "sources",
+                                [],
+                            ),
+                            list,
+                        )
+                        else []
+                    ),
+                ),
+                "realtime": online_data.get(
+                    "realtime",
+                    False,
+                ),
+                "freshness": online_data.get(
+                    "freshness",
+                ),
+                "retrieved_at": online_data.get(
+                    "retrieved_at"
+                ),
+                "error": online_data.get(
+                    "error"
+                ),
+            },
 
             "conversation_context": {
                 "items": len(

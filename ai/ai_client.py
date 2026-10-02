@@ -7,23 +7,20 @@ Text generation:
     Hugging Face Inference Providers
 
 Image generation:
-    Replicate
+    Hugging Face Inference Providers
 
 Architecture:
 
     RevelaAI
         |
-        +---- Hugging Face
-        |        |
-        |        └── openai/gpt-oss-120b
-        |
-        └---- Replicate
+        └---- Hugging Face
                  |
-                 └── image/video models
+                 ├── Text: GPT-OSS
+                 └── Image: FLUX / configured image model
 
 IMPORTANT:
-    HF_TOKEN and REPLICATE_API_TOKEN must remain server-side.
-    They must NEVER be exposed to the frontend.
+    HF_TOKEN must remain server-side.
+    It must NEVER be exposed to the frontend.
 """
 
 from __future__ import annotations
@@ -55,6 +52,19 @@ HF_TOKEN = (
     .strip()
 )
 
+HF_API_URL = (
+    os.getenv(
+        "HF_API_URL",
+        "https://router.huggingface.co/v1/chat/completions",
+    )
+    .strip()
+)
+
+
+# =========================================================
+# TEXT MODEL CONFIGURATION
+# =========================================================
+
 HF_MODEL = (
     os.getenv(
         "HF_MODEL",
@@ -63,13 +73,39 @@ HF_MODEL = (
     .strip()
 )
 
-HF_API_URL = (
+HF_FALLBACK_MODEL = (
     os.getenv(
-        "HF_API_URL",
-        "https://router.huggingface.co/v1/chat/completions",
+        "HF_FALLBACK_MODEL",
+        "openai/gpt-oss-20b:cheapest",
     )
     .strip()
 )
+
+
+# =========================================================
+# IMAGE MODEL CONFIGURATION
+# =========================================================
+
+HF_IMAGE_MODEL = (
+    os.getenv(
+        "HF_IMAGE_MODEL",
+        "black-forest-labs/FLUX.1-schnell",
+    )
+    .strip()
+)
+
+HF_IMAGE_FALLBACK_MODEL = (
+    os.getenv(
+        "HF_IMAGE_FALLBACK_MODEL",
+        "",
+    )
+    .strip()
+)
+
+
+# =========================================================
+# TIMEOUTS
+# =========================================================
 
 HF_CONNECT_TIMEOUT = float(
     os.getenv(
@@ -84,6 +120,18 @@ HF_READ_TIMEOUT = float(
         "120",
     )
 )
+
+HF_IMAGE_TIMEOUT = float(
+    os.getenv(
+        "HF_IMAGE_TIMEOUT",
+        "300",
+    )
+)
+
+
+# =========================================================
+# TEXT GENERATION PARAMETERS
+# =========================================================
 
 HF_MAX_TOKENS = int(
     os.getenv(
@@ -101,24 +149,28 @@ HF_TEMPERATURE = float(
 
 
 # =========================================================
-# OPTIONAL FALLBACK MODEL
+# IMAGE GENERATION PARAMETERS
 # =========================================================
 
-HF_FALLBACK_MODEL = (
+HF_IMAGE_DEFAULT_WIDTH = int(
     os.getenv(
-        "HF_FALLBACK_MODEL",
-        "openai/gpt-oss-20b:cheapest",
+        "HF_IMAGE_DEFAULT_WIDTH",
+        "1024",
     )
-    .strip()
 )
 
+HF_IMAGE_DEFAULT_HEIGHT = int(
+    os.getenv(
+        "HF_IMAGE_DEFAULT_HEIGHT",
+        "1024",
+    )
+)
 
-# =========================================================
-# REPLICATE CONFIGURATION
-# =========================================================
-
-REPLICATE_API_URL = (
-    "https://api.replicate.com/v1/predictions"
+HF_IMAGE_DEFAULT_STEPS = int(
+    os.getenv(
+        "HF_IMAGE_DEFAULT_STEPS",
+        "4",
+    )
 )
 
 
@@ -139,9 +191,7 @@ class AIClientError(Exception):
         status_code: int | None = None,
         error_code: str | None = None,
     ):
-        super().__init__(
-            message
-        )
+        super().__init__(message)
 
         self.provider = provider
         self.status_code = status_code
@@ -149,12 +199,12 @@ class AIClientError(Exception):
 
 
 # =========================================================
-# HF CONFIGURATION
+# HUGGING FACE CONFIGURATION CHECK
 # =========================================================
 
 def hf_configured() -> bool:
     """
-    Return whether the Hugging Face token is configured.
+    Return whether Hugging Face is configured.
     """
 
     return bool(
@@ -163,7 +213,7 @@ def hf_configured() -> bool:
 
 
 # =========================================================
-# HF HEADERS
+# HUGGING FACE HEADERS
 # =========================================================
 
 def get_hf_headers() -> dict[str, str]:
@@ -182,9 +232,7 @@ def get_hf_headers() -> dict[str, str]:
         )
 
     return {
-        "Authorization": (
-            f"Bearer {HF_TOKEN}"
-        ),
+        "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "RevelaAI/1.0",
@@ -213,6 +261,10 @@ def _normalize_message_content(
     )
 
 
+# =========================================================
+# CHAT MESSAGE BUILDER
+# =========================================================
+
 def build_messages(
     *,
     text: str,
@@ -221,12 +273,9 @@ def build_messages(
 ) -> list[dict[str, str]]:
     """
     Build OpenAI-compatible chat messages.
-
-    `context` is optional and intended for conversation
-    history supplied by RevelaAI.
     """
 
-    messages = []
+    messages: list[dict[str, str]] = []
 
     if system_prompt.strip():
 
@@ -297,51 +346,17 @@ def build_messages(
 
     return messages
 
+
 # =========================================================
-# HUGGING FACE IMAGE GENERATION
+# IMAGE MODEL CLIENT
 # =========================================================
 
-HF_IMAGE_MODEL = (
-    os.getenv(
-        "HF_IMAGE_MODEL",
-        "black-forest-labs/FLUX.1-schnell",
-    )
-    .strip()
-)
-
-
-def generate_hf_image(
-    prompt: str,
-    *,
-    model: str | None = None,
-    width: int = 1024,
-    height: int = 1024,
-    num_inference_steps: int | None = None,
-):
+def _get_inference_client():
     """
-    Generate an image through Hugging Face Inference Providers.
+    Create a Hugging Face InferenceClient.
 
-    Uses automatic provider selection so Hugging Face can route
-    the request to an available provider.
-
-    Returns:
-        PIL.Image.Image
-
-    Raises:
-        AIClientError
+    Image and future multimodal operations use this client.
     """
-
-    prompt = str(
-        prompt or ""
-    ).strip()
-
-    if not prompt:
-
-        raise AIClientError(
-            "Image prompt is required.",
-            provider="huggingface",
-            error_code="empty_image_prompt",
-        )
 
     if not HF_TOKEN:
 
@@ -365,15 +380,103 @@ def generate_hf_image(
             error_code="huggingface_hub_missing",
         ) from exc
 
-    selected_model = (
-        model
-        or HF_IMAGE_MODEL
-    )
-
-    client = InferenceClient(
+    return InferenceClient(
         api_key=HF_TOKEN,
         provider="auto",
     )
+
+
+# =========================================================
+# HUGGING FACE IMAGE GENERATION
+# =========================================================
+
+def generate_hf_image(
+    prompt: str,
+    *,
+    model: str | None = None,
+    negative_prompt: str | None = None,
+    width: int = HF_IMAGE_DEFAULT_WIDTH,
+    height: int = HF_IMAGE_DEFAULT_HEIGHT,
+    num_inference_steps: int | None = HF_IMAGE_DEFAULT_STEPS,
+    guidance_scale: float | None = None,
+    seed: int | None = None,
+):
+    """
+    Generate an image through Hugging Face Inference Providers.
+
+    Returns:
+        PIL.Image.Image
+
+    Raises:
+        AIClientError
+    """
+
+    prompt = str(
+        prompt or ""
+    ).strip()
+
+    if not prompt:
+
+        raise AIClientError(
+            "Image prompt is required.",
+            provider="huggingface",
+            error_code="empty_image_prompt",
+        )
+
+    selected_model = (
+        str(
+            model
+        ).strip()
+        if model
+        else HF_IMAGE_MODEL
+    )
+
+    if not selected_model:
+
+        raise AIClientError(
+            "No Hugging Face image model is configured.",
+            provider="huggingface",
+            error_code="image_model_missing",
+        )
+
+    try:
+
+        width = int(
+            width
+        )
+
+        height = int(
+            height
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+
+        raise AIClientError(
+            "Image width and height must be integers.",
+            provider="huggingface",
+            error_code="invalid_image_dimensions",
+        ) from exc
+
+    if width < 256 or width > 2048:
+
+        raise AIClientError(
+            "Image width must be between 256 and 2048 pixels.",
+            provider="huggingface",
+            error_code="invalid_image_width",
+        )
+
+    if height < 256 or height > 2048:
+
+        raise AIClientError(
+            "Image height must be between 256 and 2048 pixels.",
+            provider="huggingface",
+            error_code="invalid_image_height",
+        )
+
+    client = _get_inference_client()
 
     start = time.time()
 
@@ -382,11 +485,32 @@ def generate_hf_image(
         image = client.text_to_image(
             prompt=prompt,
             model=selected_model,
-            width=int(width),
-            height=int(height),
+            negative_prompt=(
+                str(
+                    negative_prompt
+                ).strip()
+                if negative_prompt
+                else None
+            ),
+            width=width,
+            height=height,
             num_inference_steps=(
-                int(num_inference_steps)
+                int(
+                    num_inference_steps
+                )
                 if num_inference_steps is not None
+                else None
+            ),
+            guidance_scale=(
+                float(
+                    guidance_scale
+                )
+                if guidance_scale is not None
+                else None
+            ),
+            seed=(
+                int(seed)
+                if seed is not None
                 else None
             ),
         )
@@ -403,11 +527,84 @@ def generate_hf_image(
             f"time={elapsed:.2f}s"
         )
 
-        raise AIClientError(
-            "Hugging Face image generation failed.",
-            provider="huggingface",
-            error_code="image_generation_failed",
-        ) from exc
+        # -------------------------------------------------
+        # IMAGE FALLBACK
+        # -------------------------------------------------
+
+        fallback_model = (
+            HF_IMAGE_FALLBACK_MODEL
+        )
+
+        if (
+            fallback_model
+            and fallback_model != selected_model
+        ):
+
+            print(
+                "HF image fallback | "
+                f"model={fallback_model}"
+            )
+
+            try:
+
+                image = client.text_to_image(
+                    prompt=prompt,
+                    model=fallback_model,
+                    negative_prompt=(
+                        str(
+                            negative_prompt
+                        ).strip()
+                        if negative_prompt
+                        else None
+                    ),
+                    width=width,
+                    height=height,
+                    num_inference_steps=(
+                        int(
+                            num_inference_steps
+                        )
+                        if num_inference_steps is not None
+                        else None
+                    ),
+                    guidance_scale=(
+                        float(
+                            guidance_scale
+                        )
+                        if guidance_scale is not None
+                        else None
+                    ),
+                    seed=(
+                        int(seed)
+                        if seed is not None
+                        else None
+                    ),
+                )
+
+                elapsed = (
+                    time.time() - start
+                )
+
+                print(
+                    "HF image fallback succeeded | "
+                    f"model={fallback_model} | "
+                    f"time={elapsed:.2f}s"
+                )
+
+            except Exception as fallback_exc:
+
+                raise AIClientError(
+                    "Hugging Face image generation failed.",
+                    provider="huggingface",
+                    error_code="image_generation_failed",
+                ) from fallback_exc
+
+        else:
+
+            raise AIClientError(
+                "Hugging Face image generation failed.",
+                provider="huggingface",
+                error_code="image_generation_failed",
+            ) from exc
 
     elapsed = (
         time.time() - start
@@ -428,6 +625,25 @@ def generate_hf_image(
         )
 
     return image
+
+
+# =========================================================
+# GENERIC IMAGE ALIAS
+# =========================================================
+
+def generate_image(
+    prompt: str,
+    **kwargs,
+):
+    """
+    Canonical RevelaAI image-generation entry point.
+    """
+
+    return generate_hf_image(
+        prompt=prompt,
+        **kwargs,
+    )
+
 
 # =========================================================
 # RESPONSE EXTRACTION
@@ -489,11 +705,8 @@ def _extract_hf_response(
     )
 
     if content is None:
-
         content = ""
 
-    # Some compatible providers may return a list of content
-    # blocks instead of a plain string.
     if isinstance(
         content,
         list,
@@ -628,7 +841,7 @@ def _extract_provider_error(
 
 
 # =========================================================
-# HF REQUEST
+# HF CHAT REQUEST
 # =========================================================
 
 def _request_hf(
@@ -687,7 +900,9 @@ def _request_hf(
             error_code="hf_request_error",
         ) from exc
 
-    elapsed = time.time() - start
+    elapsed = (
+        time.time() - start
+    )
 
     print(
         "HF response | "
@@ -750,10 +965,6 @@ def ask_hf(
 ) -> dict:
     """
     Generate an answer using Hugging Face Inference Providers.
-
-    `session_id` is preserved for compatibility with the
-    existing RevelaAI pipeline. Session persistence itself
-    remains the responsibility of RevelaAI.
     """
 
     if not str(
@@ -769,9 +980,7 @@ def ask_hf(
         }
 
     messages = build_messages(
-        text=str(
-            text
-        ),
+        text=str(text),
         system_prompt=str(
             system_prompt or ""
         ),
@@ -816,18 +1025,13 @@ def ask_hf(
 
     except AIClientError as primary_error:
 
-        # -------------------------------------------------
-        # Fallback model
-        # -------------------------------------------------
-
         fallback_model = (
             HF_FALLBACK_MODEL
         )
 
         if (
             not fallback_model
-            or fallback_model
-            == primary_model
+            or fallback_model == primary_model
         ):
 
             return {
@@ -909,16 +1113,10 @@ def ask_mvi(
     session_id=None,
 ):
     """
-    Backward-compatible alias.
+    Temporary compatibility alias.
 
-    Existing imports can continue working temporarily:
-
-        from ai.ai_client import ask_mvi
-
-    Internally, requests now go to Hugging Face instead of
-    the MVI Space.
-
-    This lets us migrate services.ai_service.py separately.
+    Existing imports can continue using ask_mvi()
+    while they migrate to ask_hf().
     """
 
     return ask_hf(
@@ -929,62 +1127,16 @@ def ask_mvi(
 
 
 # =========================================================
-# REPLICATE CLIENT
+# PUBLIC API
 # =========================================================
 
-def get_replicate_headers():
-    """
-    Return headers required by Replicate.
-    """
-
-    api_token = (
-        os.environ.get(
-            "REPLICATE_API_TOKEN"
-        )
-        or ""
-    ).strip()
-
-    if not api_token:
-
-        raise RuntimeError(
-            "REPLICATE_API_TOKEN is not set"
-        )
-
-    return {
-        "Authorization": (
-            f"Token {api_token}"
-        ),
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-
-def create_replicate_prediction(
-    version: str,
-    input_data: dict,
-):
-    """
-    Create a Replicate prediction.
-
-    Kept separate from the Hugging Face text-generation
-    pipeline so image/video functionality is not affected.
-    """
-
-    headers = get_replicate_headers()
-
-    response = requests.post(
-        REPLICATE_API_URL,
-        headers=headers,
-        json={
-            "version": version,
-            "input": input_data,
-        },
-        timeout=(
-            10,
-            600,
-        ),
-    )
-
-    response.raise_for_status()
-
-    return response.json()
+__all__ = [
+    "AIClientError",
+    "hf_configured",
+    "get_hf_headers",
+    "build_messages",
+    "generate_hf_image",
+    "generate_image",
+    "ask_hf",
+    "ask_mvi",
+]

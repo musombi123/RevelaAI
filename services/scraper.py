@@ -1,0 +1,478 @@
+from __future__ import annotations
+
+"""RevelaAI live web research provider.
+
+Search is live by default for time-sensitive questions. Cache is only a
+short-lived performance optimisation and is never treated as authoritative.
+"""
+
+import hashlib
+import json
+import logging
+import os
+import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote, quote_plus, urlparse
+
+import requests
+from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+LOGGER = logging.getLogger(__name__)
+
+SERPAPI_ENDPOINT = "https://serpapi.com/search"
+USER_AGENT = os.getenv(
+    "REVELAAI_WEB_USER_AGENT",
+    "RevelaAI/2.0 (+live research)",
+)
+TIMEOUT = max(4, int(os.getenv("REVELAAI_WEB_TIMEOUT", "12")))
+RESULT_LIMIT = max(1, min(int(os.getenv("REVELAAI_WEB_RESULTS", "5")), 10))
+ENRICH_LIMIT = max(0, min(int(os.getenv("REVELAAI_WEB_ENRICH_RESULTS", "3")), 5))
+MAX_CONTENT_CHARS = max(1200, int(os.getenv("REVELAAI_WEB_MAX_CHARS", "7000")))
+NORMAL_TTL = max(0, int(os.getenv("REVELAAI_WEB_CACHE_TTL", "900")))
+REALTIME_TTL = max(0, int(os.getenv("REVELAAI_WEB_REALTIME_TTL", "60")))
+CACHE_FILE = Path(os.getenv("REVELAAI_WEB_CACHE_FILE", "/tmp/revelaai_web_cache.json"))
+
+_REALTIME_TERMS = (
+    "latest", "newest", "recent", "recently", "today", "tonight",
+    "yesterday", "tomorrow", "current", "currently", "now", "this week",
+    "this month", "this year", "breaking", "live", "as of today", "right now",
+)
+_NEWS_TERMS = (
+    "news", "breaking", "headline", "headlines", "latest news", "today's news",
+)
+_SKIP_ENRICH = {"youtube.com", "youtu.be", "facebook.com", "instagram.com", "tiktok.com", "x.com", "twitter.com"}
+_CACHE: dict[str, dict] = {}
+_LOCK = threading.RLock()
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso() -> str:
+    return _now().isoformat()
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    try:
+        text = str(value or "").strip().replace("Z", "+00:00")
+        if not text:
+            return None
+        result = datetime.fromisoformat(text)
+        return result if result.tzinfo else result.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_cache() -> dict[str, dict]:
+    global _CACHE
+    with _LOCK:
+        if _CACHE:
+            return _CACHE
+        try:
+            if CACHE_FILE.exists():
+                data = json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+                _CACHE = data if isinstance(data, dict) else {}
+        except Exception as exc:
+            LOGGER.warning("Web cache load failed: %s", exc)
+            _CACHE = {}
+        return _CACHE
+
+
+def _save_cache() -> None:
+    with _LOCK:
+        try:
+            CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = CACHE_FILE.with_suffix(CACHE_FILE.suffix + ".tmp")
+            tmp.write_text(json.dumps(_CACHE, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(CACHE_FILE)
+        except Exception as exc:
+            LOGGER.warning("Web cache save failed: %s", exc)
+
+
+def _cache_key(query: str, news: bool) -> str:
+    raw = f"{query.strip().lower()}|{'news' if news else 'web'}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(key: str, ttl: int) -> dict | None:
+    if ttl <= 0:
+        return None
+    item = _load_cache().get(key)
+    if not isinstance(item, dict):
+        return None
+    at = _parse_iso(item.get("retrieved_at"))
+    if not at or (_now() - at).total_seconds() > ttl:
+        return None
+    payload = item.get("payload")
+    return payload if isinstance(payload, dict) else None
+
+
+def _cache_set(key: str, payload: dict) -> None:
+    with _LOCK:
+        _load_cache()[key] = {"retrieved_at": payload.get("retrieved_at", _iso()), "payload": payload}
+        _save_cache()
+
+
+def _session() -> requests.Session:
+    session = requests.Session()
+    retry = Retry(
+        total=2,
+        connect=2,
+        read=2,
+        backoff_factor=0.35,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset({"GET"}),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update({
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.8",
+        "Cache-Control": "no-cache",
+    })
+    return session
+
+
+def normalize_query(query: str) -> str:
+    return re.sub(r"\s+", " ", str(query or "").strip())
+
+
+def is_realtime_query(query: str) -> bool:
+    text = normalize_query(query).lower()
+    return any(term in text for term in _REALTIME_TERMS)
+
+
+def is_news_query(query: str) -> bool:
+    text = normalize_query(query).lower()
+    return any(term in text for term in _NEWS_TERMS)
+
+
+def clean_text(text: Any) -> str:
+    value = str(text or "")
+    value = re.sub(r"\[\d{1,4}\]", "", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def fetch(url: str, timeout: int | None = None) -> str:
+    target = str(url or "").strip()
+    if not target:
+        return ""
+    try:
+        response = _session().get(target, timeout=timeout or TIMEOUT, allow_redirects=True)
+        if response.status_code >= 400:
+            return ""
+        return response.text
+    except requests.RequestException as exc:
+        LOGGER.info("Live fetch failed for %s: %s", target, exc)
+        return ""
+
+
+def extract_paragraphs(html: str, limit_chars: int = MAX_CONTENT_CHARS) -> list[str]:
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header", "form", "aside"]):
+        tag.decompose()
+    output, total = [], 0
+    for node in soup.find_all("p"):
+        text = clean_text(node.get_text(" ", strip=True))
+        if len(text) < 40:
+            continue
+        if any(x in text.lower() for x in ("skip to main content", "privacy policy", "cookie policy", "sign up", "log in")):
+            continue
+        remaining = limit_chars - total
+        if remaining <= 0:
+            break
+        if len(text) > remaining:
+            text = text[:remaining].rsplit(" ", 1)[0]
+        if text:
+            output.append(text)
+            total += len(text)
+    return output
+
+
+def extract_page(url: str, html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+    title = clean_text(soup.title.get_text(" ", strip=True) if soup.title else "")
+    description = ""
+    meta = soup.find("meta", attrs={"name": re.compile(r"^description$", re.I)})
+    if meta:
+        description = clean_text(meta.get("content", ""))
+    paragraphs = extract_paragraphs(html)
+    return {
+        "title": title,
+        "description": description,
+        "content": clean_text(" ".join(paragraphs)),
+        "url": url,
+    }
+
+
+def _serp_key() -> str:
+    return (os.getenv("SERPAPI_API_KEY") or os.getenv("SERPAPI_KEY") or "").strip()
+
+
+def _search_serpapi(query: str, limit: int, realtime: bool) -> dict:
+    key = _serp_key()
+    if not key:
+        return {"available": False, "provider": "serpapi", "sources": [], "error": {"code": "missing_search_key", "message": "SERPAPI_API_KEY or SERPAPI_KEY is not configured."}}
+
+    news = is_news_query(query)
+    params = {
+        "engine": "google_news" if news else "google",
+        "q": query,
+        "api_key": key,
+        "hl": "en",
+        "gl": "ke",
+        "num": limit,
+        "no_cache": "true" if realtime else "false",
+    }
+    if news:
+        params["so"] = "1"
+
+    try:
+        response = _session().get(SERPAPI_ENDPOINT, params=params, timeout=TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            raise ValueError("Invalid search response")
+        if data.get("error"):
+            return {"available": False, "provider": "serpapi", "sources": [], "error": {"code": "search_provider_error", "message": str(data["error"])}}
+
+        raw = data.get("news_results", []) if news else data.get("organic_results", [])
+        sources = []
+        for item in raw if isinstance(raw, list) else []:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("link") or item.get("redirect_link") or "").strip()
+            title = clean_text(item.get("title"))
+            snippet = clean_text(item.get("snippet") or item.get("description"))
+            if not (url or title or snippet):
+                continue
+            sources.append({
+                "title": title,
+                "snippet": snippet,
+                "url": url,
+                "source": clean_text(item.get("source")),
+                "published": clean_text(item.get("date")),
+                "author": clean_text(item.get("author")),
+                "provider": "serpapi",
+                "position": item.get("position"),
+            })
+
+        return {"available": bool(sources), "provider": "serpapi", "sources": sources[:limit]}
+    except Exception as exc:
+        return {"available": False, "provider": "serpapi", "sources": [], "error": {"code": "search_request_failed", "message": str(exc)}}
+
+
+def wikipedia_search(query: str) -> str:
+    try:
+        response = _session().get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "list": "search", "srsearch": query, "format": "json", "utf8": "1", "srlimit": 1},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+        rows = data.get("query", {}).get("search", [])
+        if not rows:
+            return ""
+        title = str(rows[0].get("title") or "").strip()
+        return "https://en.wikipedia.org/wiki/" + quote(title.replace(" ", "_"), safe="_()") if title else ""
+    except Exception:
+        return ""
+
+
+def duckduckgo_search(query: str) -> list[str]:
+    html = fetch("https://duckduckgo.com/html/?q=" + quote_plus(query))
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    links = []
+    for anchor in soup.select(".result__a"):
+        href = str(anchor.get("href") or "").strip()
+        if href.startswith("http") and href not in links:
+            links.append(href)
+        if len(links) >= 5:
+            break
+    return links
+
+
+def _fallback_search(query: str, limit: int) -> list[dict]:
+    sources = []
+    wiki = wikipedia_search(query)
+    if wiki:
+        sources.append({"title": "Wikipedia", "snippet": "", "url": wiki, "source": "Wikipedia", "published": "", "provider": "wikipedia"})
+    for url in duckduckgo_search(query):
+        if url == wiki:
+            continue
+        sources.append({"title": "", "snippet": "", "url": url, "source": "", "published": "", "provider": "duckduckgo"})
+        if len(sources) >= limit:
+            break
+    return sources[:limit]
+
+
+def _host(url: str) -> str:
+    try:
+        host = urlparse(url).netloc.lower()
+        return host[4:] if host.startswith("www.") else host
+    except Exception:
+        return ""
+
+
+def _enrich(source: dict) -> dict:
+    result = dict(source)
+    url = str(source.get("url") or "").strip()
+    host = _host(url)
+    if not url or not host or host in _SKIP_ENRICH or any(host.endswith("." + d) for d in _SKIP_ENRICH):
+        result["retrieved"] = False
+        return result
+    html = fetch(url)
+    if not html:
+        result["retrieved"] = False
+        return result
+    try:
+        page = extract_page(url, html)
+        result["title"] = result.get("title") or page.get("title", "")
+        result["snippet"] = result.get("snippet") or page.get("description", "")
+        result["content"] = page.get("content", "")
+        result["retrieved"] = bool(result.get("content") or result.get("snippet"))
+    except Exception:
+        result["retrieved"] = False
+    return result
+
+
+def _rank(sources: list[dict], query: str) -> list[dict]:
+    words = {w for w in re.findall(r"\b\w+\b", query.lower()) if len(w) >= 3}
+    def score(item: dict) -> float:
+        title = str(item.get("title") or "").lower()
+        snippet = str(item.get("snippet") or "").lower()
+        content = str(item.get("content") or "").lower()
+        value = 0.0
+        for word in words:
+            value += 4 if word in title else 0
+            value += 2 if word in snippet else 0
+            value += 1 if word in content else 0
+        value += 0.5 if item.get("retrieved") else 0
+        value += 0.2 if item.get("published") else 0
+        return value
+    return sorted(sources, key=score, reverse=True)
+
+
+class LiveWebResearcher:
+    def search(self, query: str, limit: int = RESULT_LIMIT, *, realtime: bool | None = None, force_refresh: bool = False) -> dict:
+        query = normalize_query(query)
+        if not query:
+            return {"available": False, "query": "", "sources": [], "realtime": False, "freshness": "none", "retrieved_at": _iso(), "error": {"code": "empty_query", "message": "A search query is required."}}
+
+        limit = max(1, min(int(limit), 10))
+        realtime_mode = is_realtime_query(query) if realtime is None else bool(realtime)
+        news = is_news_query(query)
+        ttl = REALTIME_TTL if realtime_mode else NORMAL_TTL
+        key = _cache_key(query, news)
+
+        if not force_refresh:
+            cached = _cache_get(key, ttl)
+            if cached is not None:
+                cached = dict(cached)
+                cached["cache"] = "hit"
+                cached["freshness"] = "cached"
+                return cached
+
+        retrieved_at = _iso()
+        result = _search_serpapi(query, limit, realtime_mode)
+        errors = []
+        if isinstance(result.get("error"), dict):
+            errors.append(result["error"])
+        sources = result.get("sources", []) if isinstance(result.get("sources"), list) else []
+
+        if not sources:
+            fallback = _fallback_search(query, limit)
+            sources = fallback
+
+        enrich_n = min(ENRICH_LIMIT, len(sources))
+        enriched = []
+        if enrich_n:
+            with ThreadPoolExecutor(max_workers=enrich_n) as pool:
+                futures = [pool.submit(_enrich, source) for source in sources[:enrich_n]]
+                for future in as_completed(futures):
+                    try:
+                        enriched.append(future.result())
+                    except Exception as exc:
+                        LOGGER.info("Source enrichment failed: %s", exc)
+            enriched = _rank(enriched, query)
+            seen = {x.get("url") for x in enriched}
+            enriched.extend(x for x in sources[enrich_n:] if x.get("url") not in seen)
+        else:
+            enriched = sources
+
+        final_sources = []
+        for source in enriched[:limit]:
+            item = dict(source)
+            content = str(item.get("content") or "")
+            item["content"] = content[:MAX_CONTENT_CHARS]
+            item["retrieved_at"] = retrieved_at
+            item["freshness"] = "live" if realtime_mode else "recent"
+            item["source_domain"] = _host(str(item.get("url") or ""))
+            final_sources.append(item)
+
+        payload = {
+            "available": bool(final_sources),
+            "query": query,
+            "realtime": realtime_mode,
+            "provider": result.get("provider") or ("fallback" if final_sources else None),
+            "retrieved_at": retrieved_at,
+            "freshness": "live" if realtime_mode else "recent",
+            "sources": final_sources,
+            "errors": errors,
+            "cache": "miss",
+        }
+        if final_sources:
+            _cache_set(key, payload)
+        return payload
+
+    def scrape_knowledge(self, query: str, limit: int = 5) -> list[dict]:
+        return scrape_knowledge(query, limit=limit)
+
+
+_RESEARCHER = LiveWebResearcher()
+
+
+def scrape_knowledge(query: str, limit: int = 5, *, realtime: bool | None = None, force_refresh: bool = False) -> list[dict]:
+    result = _RESEARCHER.search(query, limit=limit, realtime=realtime, force_refresh=force_refresh)
+    output = []
+    for source in result.get("sources", []):
+        output.append({
+            "query": query,
+            "title": source.get("title", ""),
+            "text": source.get("content") or source.get("snippet", ""),
+            "url": source.get("url", ""),
+            "source": source.get("source", ""),
+            "published": source.get("published", ""),
+            "retrieved_at": source.get("retrieved_at", result.get("retrieved_at")),
+            "realtime": result.get("realtime", False),
+            "freshness": result.get("freshness", "unknown"),
+            "timestamp": time.time(),
+        })
+    return output
+
+
+def get_live_research(query: str, limit: int = 5, *, realtime: bool | None = None, force_refresh: bool = False) -> dict:
+    return _RESEARCHER.search(query, limit=limit, realtime=realtime, force_refresh=force_refresh)
+
+
+__all__ = [
+    "LiveWebResearcher", "get_live_research", "scrape_knowledge", "fetch",
+    "extract_paragraphs", "extract_page", "scrape_wikipedia", "wikipedia_search",
+    "duckduckgo_search", "normalize_query", "is_realtime_query", "is_news_query",
+]
