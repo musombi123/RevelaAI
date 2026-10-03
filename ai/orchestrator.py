@@ -48,14 +48,15 @@ from typing import Any
 
 from ai.emotion import detect_emotion
 from ai.ecosystem import ecosystem
+from ai.platform_knowledge import get_platform_knowledge
+
 from services.scraper import (
+    extract_urls,
+    fetch_direct_urls,
     get_live_research,
     is_realtime_query,
 )
 
-from ai.platform_knowledge import (
-    get_platform_knowledge,
-)
 
 # =========================================================
 # MULTIMODAL INPUT SUPPORT
@@ -69,19 +70,14 @@ MULTIMODAL_TYPES = {
 }
 
 
-def _safe_text(
-    value: Any,
-) -> str:
+def _safe_text(value: Any) -> str:
     """
     Normalize arbitrary input into safe text.
     """
-
     if value is None:
         return ""
 
-    return str(
-        value
-    ).strip()
+    return str(value).strip()
 
 
 # =========================================================
@@ -132,6 +128,7 @@ DOMAIN_ALIASES = {
     "student": "elimu",
     "students": "elimu",
     "teacher": "elimu",
+    "teachers": "elimu",
 
     # Community
     "social": "community",
@@ -248,7 +245,7 @@ DOMAIN_KEYWORDS = {
         "price",
         "shop",
         "market",
-        " biashara",
+        "biashara",
     },
 
     "shamba": {
@@ -550,10 +547,7 @@ class Orchestrator:
         self,
         domain: str | None,
     ) -> str:
-
-        value = str(
-            domain or "general"
-        ).strip().lower()
+        value = str(domain or "general").strip().lower()
 
         if not value:
             return "general"
@@ -562,6 +556,9 @@ class Orchestrator:
             value,
             value,
         )
+
+        if normalized not in SUPPORTED_DOMAINS:
+            return normalized
 
         return normalized
 
@@ -577,11 +574,7 @@ class Orchestrator:
         Detect specialized Biashara intelligence operations.
         """
 
-        text = (
-            str(message or "")
-            .strip()
-            .lower()
-        )
+        text = str(message or "").strip().lower()
 
         if not text:
             return None
@@ -589,14 +582,10 @@ class Orchestrator:
         scores: dict[str, int] = {}
 
         for operation, phrases in BIASHARA_INTENTS.items():
-
             score = 0
 
             for phrase in phrases:
-
-                normalized_phrase = (
-                    phrase.strip().lower()
-                )
+                normalized_phrase = phrase.strip().lower()
 
                 if (
                     normalized_phrase
@@ -605,9 +594,7 @@ class Orchestrator:
                     score += 2
 
             if score:
-                scores[
-                    operation
-                ] = score
+                scores[operation] = score
 
         if not scores:
             return None
@@ -625,7 +612,6 @@ class Orchestrator:
         self,
         message: str,
     ) -> str | None:
-
         normalized_message = (
             str(message or "")
             .strip()
@@ -638,11 +624,9 @@ class Orchestrator:
         scores: dict[str, int] = {}
 
         for intent, phrases in AGRICULTURE_INTENTS.items():
-
             score = 0
 
             for phrase in phrases:
-
                 phrase_normalized = (
                     phrase.strip().lower()
                 )
@@ -654,9 +638,7 @@ class Orchestrator:
                     score += 2
 
             if score:
-                scores[
-                    intent
-                ] = score
+                scores[intent] = score
 
         if not scores:
             return None
@@ -678,7 +660,6 @@ class Orchestrator:
         message: str,
         intent: str = "general",
     ) -> list[str]:
-
         normalized_message = (
             str(message or "")
             .strip()
@@ -693,16 +674,12 @@ class Orchestrator:
 
         detected: list[str] = []
 
-        biashara_intent = (
-            self.detect_biashara_intent(
-                normalized_message
-            )
+        biashara_intent = self.detect_biashara_intent(
+            normalized_message
         )
 
-        agriculture_intent = (
-            self.detect_agriculture_intent(
-                normalized_message
-            )
+        agriculture_intent = self.detect_agriculture_intent(
+            normalized_message
         )
 
         if biashara_intent:
@@ -721,18 +698,14 @@ class Orchestrator:
             and explicit_domain != "general"
             and explicit_domain not in detected
         ):
-            detected.append(
-                explicit_domain
-            )
+            detected.append(explicit_domain)
 
         scores: dict[str, int] = {}
 
         for domain, keywords in DOMAIN_KEYWORDS.items():
-
             score = 0
 
             for keyword in keywords:
-
                 keyword_normalized = (
                     keyword.strip().lower()
                 )
@@ -741,20 +714,13 @@ class Orchestrator:
                     continue
 
                 if " " in keyword_normalized:
-
-                    if (
-                        keyword_normalized
-                        in normalized_message
-                    ):
+                    if keyword_normalized in normalized_message:
                         score += 2
 
                 else:
-
                     pattern = (
                         r"\b"
-                        + re.escape(
-                            keyword_normalized
-                        )
+                        + re.escape(keyword_normalized)
                         + r"\b"
                     )
 
@@ -765,9 +731,7 @@ class Orchestrator:
                         score += 1
 
             if score:
-                scores[
-                    domain
-                ] = score
+                scores[domain] = score
 
         ranked = sorted(
             scores.items(),
@@ -776,7 +740,6 @@ class Orchestrator:
         )
 
         for domain, _score in ranked:
-
             if domain not in detected:
                 detected.append(domain)
 
@@ -784,25 +747,10 @@ class Orchestrator:
                 break
 
         if not detected:
-
-            if normalized_intent in (
-                "research",
-                "scripture",
-                "programming",
-                "medicine",
-                "law",
-                "science",
-                "philosophy",
-                "politics",
-                "general",
-            ):
-                detected.append(
-                    normalized_intent
-                )
+            if normalized_intent in SUPPORTED_DOMAINS:
+                detected.append(normalized_intent)
             else:
-                detected.append(
-                    "general"
-                )
+                detected.append("general")
 
         return detected
 
@@ -815,7 +763,6 @@ class Orchestrator:
         message: str,
         intent: str = "general",
     ) -> str:
-
         domains = self.detect_domains(
             message=message,
             intent=intent,
@@ -831,26 +778,16 @@ class Orchestrator:
     # ONLINE DATA DECISION
     # =====================================================
 
-        # =====================================================
-    # ONLINE DATA DECISION
-    # =====================================================
-
     def requires_online_data(
         self,
         message: str,
         intent: str = "general",
     ) -> bool:
         """
-        Decide whether this request requires fresh
-        external information.
+        Decide whether this request requires fresh external
+        information.
 
-        Online research is required when:
-
-            1. The explicit intent requires current data.
-            2. The message contains a known online/freshness
-               keyword.
-            3. The realtime query detector identifies the
-               request as time-sensitive.
+        Explicit URLs always require online retrieval.
         """
 
         normalized_message = (
@@ -869,7 +806,14 @@ class Orchestrator:
             return False
 
         # -------------------------------------------------
-        # Explicit intents
+        # EXPLICIT USER URL
+        # -------------------------------------------------
+
+        if extract_urls(normalized_message):
+            return True
+
+        # -------------------------------------------------
+        # EXPLICIT INTENTS
         # -------------------------------------------------
 
         if normalized_intent in {
@@ -881,11 +825,10 @@ class Orchestrator:
             return True
 
         # -------------------------------------------------
-        # Known online keywords
+        # KNOWN ONLINE KEYWORDS
         # -------------------------------------------------
 
         for keyword in ONLINE_KEYWORDS:
-
             normalized_keyword = (
                 str(keyword or "")
                 .strip()
@@ -896,17 +839,13 @@ class Orchestrator:
                 continue
 
             if " " in normalized_keyword:
-
                 if normalized_keyword in normalized_message:
                     return True
 
             else:
-
                 pattern = (
                     r"\b"
-                    + re.escape(
-                        normalized_keyword
-                    )
+                    + re.escape(normalized_keyword)
                     + r"\b"
                 )
 
@@ -917,14 +856,18 @@ class Orchestrator:
                     return True
 
         # -------------------------------------------------
-        # Existing realtime detector
+        # REALTIME DETECTOR
         # -------------------------------------------------
 
-        return bool(
-            is_realtime_query(
-                normalized_message
+        try:
+            return bool(
+                is_realtime_query(
+                    normalized_message
+                )
             )
-        )
+        except Exception:
+            return False
+
     # =====================================================
     # SEARCH QUERY
     # =====================================================
@@ -934,59 +877,33 @@ class Orchestrator:
         message: str,
         domain: str = "general",
     ) -> str:
-
         normalized_domain = self.normalize_domain(
             domain
         )
 
         domain_hint = {
-            "biashara": (
-                "business market economics"
-            ),
-            "shamba": (
-                "agriculture farming agronomy"
-            ),
-            "elimu": (
-                "education Kenya CBC"
-            ),
-            "community": (
-                "community"
-            ),
-            "scripture": (
-                "Bible theology biblical studies"
-            ),
-            "programming": (
-                "software programming technology"
-            ),
-            "law": (
-                "Kenya law regulation"
-            ),
-            "medicine": (
-                "medical health"
-            ),
-            "politics": (
-                "politics Kenya"
-            ),
-            "science": (
-                "science research"
-            ),
-            "philosophy": (
-                "philosophy"
-            ),
+            "biashara": "business market economics",
+            "shamba": "agriculture farming agronomy",
+            "elimu": "education Kenya CBC",
+            "community": "community",
+            "scripture": "Bible theology biblical studies",
+            "programming": "software programming technology",
+            "law": "Kenya law regulation",
+            "medicine": "medical health",
+            "politics": "politics Kenya",
+            "science": "science research",
+            "philosophy": "philosophy",
         }.get(
             normalized_domain,
             "",
         )
 
-        normalized_message = str(
-            message or ""
-        ).strip()
+        normalized_message = str(message or "").strip()
 
         if not normalized_message:
             return ""
 
         if domain_hint:
-
             return (
                 f"{normalized_message} "
                 f"{domain_hint}"
@@ -994,7 +911,7 @@ class Orchestrator:
 
         return normalized_message
 
-        # =====================================================
+    # =====================================================
     # ONLINE CAPABILITY STATUS
     # =====================================================
 
@@ -1010,33 +927,19 @@ class Orchestrator:
         scraper_error = None
 
         try:
-
-            from services.scraper import (
-                get_live_research,
-                is_realtime_query,
-            )
-
             scraper_configured = (
                 callable(get_live_research)
                 and callable(is_realtime_query)
             )
-
         except Exception as exc:
-
-            scraper_error = str(
-                exc
-            )
+            scraper_error = str(exc)
 
         return {
             "enabled": True,
             "configured": scraper_configured,
             "provider": "services.scraper",
-            "research_function": (
-                "get_live_research"
-            ),
-            "realtime_detection": (
-                "is_realtime_query"
-            ),
+            "research_function": "get_live_research",
+            "realtime_detection": "is_realtime_query",
             "status": (
                 "active"
                 if scraper_configured
@@ -1056,12 +959,100 @@ class Orchestrator:
         limit: int = 5,
     ) -> dict:
         """
-        Retrieve fresh external web evidence through
-        services.scraper.
+        Retrieve external evidence.
 
-        The orchestrator decides WHEN to research.
-        The scraper decides HOW to retrieve it.
+        Priority:
+
+            1. Explicit URLs supplied by the user.
+            2. Search/research provider.
+
+        Explicit URLs are treated as primary source evidence.
         """
+
+        safe_limit = max(
+            1,
+            min(
+                int(limit),
+                10,
+            ),
+        )
+
+        # -------------------------------------------------
+        # DIRECT USER URLS
+        # -------------------------------------------------
+
+        direct_urls = extract_urls(message)
+
+        if direct_urls:
+            try:
+                app_result = fetch_direct_urls(
+                    direct_urls,
+                    limit=safe_limit,
+                )
+            except Exception as exc:
+                return {
+                    "available": False,
+                    "runtime_available": True,
+                    "runtime_status": "connected",
+                    "status": "required_but_unavailable",
+                    "query": " ".join(direct_urls),
+                    "sources": [],
+                    "source_count": 0,
+                    "realtime": True,
+                    "freshness": "unavailable",
+                    "retrieved_at": None,
+                    "provider": "direct_url",
+                    "error": {
+                        "code": "direct_url_fetch_failed",
+                        "message": str(exc),
+                    },
+                }
+
+            if not isinstance(app_result, dict):
+                app_result = {}
+
+            sources = app_result.get(
+                "sources",
+                [],
+            )
+
+            if not isinstance(sources, list):
+                sources = []
+
+            errors = app_result.get("errors")
+
+            return {
+                "available": bool(
+                    app_result.get(
+                        "available",
+                        False,
+                    )
+                ),
+                "runtime_available": True,
+                "runtime_status": "connected",
+                "status": (
+                    "active"
+                    if app_result.get(
+                        "available",
+                        False,
+                    )
+                    else "required_but_unavailable"
+                ),
+                "query": " ".join(direct_urls),
+                "sources": sources,
+                "source_count": len(sources),
+                "realtime": True,
+                "freshness": "live",
+                "retrieved_at": app_result.get(
+                    "retrieved_at"
+                ),
+                "provider": "direct_url",
+                "error": errors if errors else None,
+            }
+
+        # -------------------------------------------------
+        # NORMAL SEARCH
+        # -------------------------------------------------
 
         query = self.build_search_query(
             message=message,
@@ -1071,11 +1062,16 @@ class Orchestrator:
         if not query:
             return {
                 "available": False,
+                "runtime_available": True,
+                "runtime_status": "connected",
+                "status": "required_but_unavailable",
                 "query": "",
                 "sources": [],
+                "source_count": 0,
                 "realtime": False,
                 "freshness": "none",
                 "retrieved_at": None,
+                "provider": None,
                 "error": {
                     "code": "empty_search_query",
                     "message": (
@@ -1084,36 +1080,34 @@ class Orchestrator:
                 },
             }
 
-        realtime = is_realtime_query(
-            query
-        )
+        try:
+            realtime = bool(
+                is_realtime_query(query)
+            )
+        except Exception:
+            realtime = False
 
         try:
-
             result = get_live_research(
                 query=query,
-                limit=max(
-                    1,
-                    min(
-                        int(limit),
-                        10,
-                    ),
-                ),
-                    realtime=realtime,
-                    force_refresh=realtime,
+                limit=safe_limit,
+                realtime=realtime,
+                force_refresh=realtime,
             )
 
-            if not isinstance(
-                result,
-                dict,
-            ):
+            if not isinstance(result, dict):
                 return {
                     "available": False,
+                    "runtime_available": True,
+                    "runtime_status": "connected",
+                    "status": "required_but_unavailable",
                     "query": query,
                     "sources": [],
+                    "source_count": 0,
                     "realtime": realtime,
                     "freshness": "unavailable",
                     "retrieved_at": None,
+                    "provider": None,
                     "error": {
                         "code": "invalid_research_response",
                         "message": (
@@ -1123,40 +1117,45 @@ class Orchestrator:
                     },
                 }
 
-            if not result.get(
-                "available",
-                False,
-            ):
-                return {
-                    "available": False,
-                    "query": query,
-                    "sources": result.get(
-                        "sources",
-                        [],
-                    ),
-                    "realtime": realtime,
-                    "freshness": result.get(
-                        "freshness",
-                        "unavailable",
-                    ),
-                    "retrieved_at": result.get(
-                        "retrieved_at"
-                    ),
-                    "error": result.get(
-                        "error"
-                    ),
-                }
+            sources = result.get(
+                "sources",
+                [],
+            )
+
+            if not isinstance(sources, list):
+                sources = []
+
+            available = bool(
+                result.get(
+                    "available",
+                    False,
+                )
+            )
 
             return {
-                "available": True,
+                "available": available,
+                "runtime_available": result.get(
+                    "runtime_available",
+                    True,
+                ),
+                "runtime_status": result.get(
+                    "runtime_status",
+                    "connected",
+                ),
+                "status": result.get(
+                    "status",
+                    (
+                        "active"
+                        if sources
+                        else "required_but_unavailable"
+                    ),
+                ),
                 "query": result.get(
                     "query",
                     query,
                 ),
-                "sources": result.get(
-                    "sources",
-                    [],
-                ),
+                "sources": sources,
+                "source_count": len(sources),
                 "realtime": result.get(
                     "realtime",
                     realtime,
@@ -1168,19 +1167,8 @@ class Orchestrator:
                 "retrieved_at": result.get(
                     "retrieved_at"
                 ),
-                "source_count": len(
-                    result.get(
-                        "sources",
-                        [],
-                    )
-                    if isinstance(
-                        result.get(
-                            "sources",
-                            [],
-                        ),
-                        list,
-                    )
-                    else []
+                "provider": result.get(
+                    "provider"
                 ),
                 "error": result.get(
                     "error"
@@ -1188,14 +1176,18 @@ class Orchestrator:
             }
 
         except Exception as exc:
-
             return {
                 "available": False,
+                "runtime_available": True,
+                "runtime_status": "connected",
+                "status": "required_but_unavailable",
                 "query": query,
                 "sources": [],
+                "source_count": 0,
                 "realtime": realtime,
                 "freshness": "unavailable",
                 "retrieved_at": None,
+                "provider": None,
                 "error": {
                     "code": "web_research_failed",
                     "message": str(exc),
@@ -1222,7 +1214,6 @@ class Orchestrator:
         """
 
         if not user_id:
-
             return {
                 "available": False,
                 "operation": operation,
@@ -1237,7 +1228,6 @@ class Orchestrator:
             }
 
         if not operation:
-
             return {
                 "available": False,
                 "operation": None,
@@ -1245,15 +1235,11 @@ class Orchestrator:
             }
 
         try:
-
-            provider = (
-                self.ecosystem.get_provider(
-                    "biashara"
-                )
+            provider = self.ecosystem.get_provider(
+                "biashara"
             )
 
             if provider is None:
-
                 return {
                     "available": False,
                     "operation": operation,
@@ -1273,10 +1259,7 @@ class Orchestrator:
                 None,
             )
 
-            if not callable(
-                run_operation
-            ):
-
+            if not callable(run_operation):
                 return {
                     "available": False,
                     "operation": operation,
@@ -1292,9 +1275,7 @@ class Orchestrator:
 
             result = run_operation(
                 operation=operation,
-                user_id=str(
-                    user_id
-                ),
+                user_id=str(user_id),
                 payload=payload or {},
                 message=message,
             )
@@ -1309,8 +1290,7 @@ class Orchestrator:
                 "result": result,
             }
 
-        except Exception:
-
+        except Exception as exc:
             return {
                 "available": False,
                 "operation": operation,
@@ -1321,6 +1301,7 @@ class Orchestrator:
                         "Biashara intelligence is "
                         "temporarily unavailable."
                     ),
+                    "details": str(exc),
                 },
             }
 
@@ -1334,7 +1315,6 @@ class Orchestrator:
         domain: str,
         agriculture_intent: str | None = None,
     ) -> dict[str, bool]:
-
         normalized_domain = self.normalize_domain(
             domain
         )
@@ -1350,6 +1330,9 @@ class Orchestrator:
         # -------------------------------------------------
 
         if normalized_domain == "biashara":
+            biashara_intent = (
+                self.detect_biashara_intent(text)
+            )
 
             return {
                 "business": True,
@@ -1357,15 +1340,10 @@ class Orchestrator:
 
                 "products": (
                     True
-                    if (
-                        self.detect_biashara_intent(
-                            text
-                        )
-                        in {
-                            "market_forecast",
-                            "product_forecast",
-                        }
-                    )
+                    if biashara_intent in {
+                        "market_forecast",
+                        "product_forecast",
+                    }
                     else any(
                         word in text
                         for word in [
@@ -1382,9 +1360,7 @@ class Orchestrator:
 
                 "orders": (
                     True
-                    if self.detect_biashara_intent(
-                        text
-                    ) == "market_forecast"
+                    if biashara_intent == "market_forecast"
                     else any(
                         word in text
                         for word in [
@@ -1407,9 +1383,7 @@ class Orchestrator:
 
                 "inventory": (
                     True
-                    if self.detect_biashara_intent(
-                        text
-                    ) == "market_forecast"
+                    if biashara_intent == "market_forecast"
                     else any(
                         word in text
                         for word in [
@@ -1433,7 +1407,6 @@ class Orchestrator:
                 ),
 
                 "market": True,
-
                 "economic": True,
             }
 
@@ -1442,7 +1415,6 @@ class Orchestrator:
         # -------------------------------------------------
 
         if normalized_domain == "shamba":
-
             policy = {
                 "farmer": True,
                 "farms": True,
@@ -1454,7 +1426,6 @@ class Orchestrator:
             }
 
             if agriculture_intent == "crop_suitability":
-
                 policy.update({
                     "crops": True,
                     "market": True,
@@ -1462,7 +1433,6 @@ class Orchestrator:
                 })
 
             elif agriculture_intent == "production_plan":
-
                 policy.update({
                     "crops": True,
                     "activities": True,
@@ -1471,7 +1441,6 @@ class Orchestrator:
                 })
 
             elif agriculture_intent == "yield_forecast":
-
                 policy.update({
                     "crops": True,
                     "activities": True,
@@ -1480,7 +1449,6 @@ class Orchestrator:
                 })
 
             elif agriculture_intent == "farm_risk":
-
                 policy.update({
                     "crops": True,
                     "activities": True,
@@ -1490,7 +1458,6 @@ class Orchestrator:
                 })
 
             elif agriculture_intent == "season_planning":
-
                 policy.update({
                     "crops": True,
                     "harvests": True,
@@ -1499,7 +1466,6 @@ class Orchestrator:
                 })
 
             else:
-
                 policy.update({
                     "crops": any(
                         word in text
@@ -1524,9 +1490,7 @@ class Orchestrator:
                         ]
                     ),
 
-                    "harvests": (
-                        "harvest" in text
-                    ),
+                    "harvests": "harvest" in text,
 
                     "market": (
                         "market" in text
@@ -1547,7 +1511,6 @@ class Orchestrator:
         # -------------------------------------------------
 
         if normalized_domain == "elimu":
-
             return {
                 "profile": True,
                 "school": True,
@@ -1575,7 +1538,6 @@ class Orchestrator:
         # -------------------------------------------------
 
         if normalized_domain == "community":
-
             return {
                 "feed": True,
                 "posts": True,
@@ -1595,9 +1557,7 @@ class Orchestrator:
         message: str,
         agriculture_intent: str | None,
     ) -> dict[str, Any]:
-
         if not agriculture_intent:
-
             return {
                 "detected": False,
                 "intent": None,
@@ -1613,9 +1573,7 @@ class Orchestrator:
                 agriculture_intent,
             ),
             "requires_forecast_engine": True,
-            "question": str(
-                message or ""
-            ).strip(),
+            "question": str(message or "").strip(),
         }
 
     # =====================================================
@@ -1630,9 +1588,7 @@ class Orchestrator:
         domains: list[str],
         agriculture_intent: str | None = None,
     ) -> dict:
-
         if not user_id:
-
             return {
                 "available": False,
                 "domains": domains,
@@ -1649,56 +1605,36 @@ class Orchestrator:
         normalized_domains: list[str] = []
 
         for domain in domains:
+            normalized = self.normalize_domain(domain)
 
-            normalized = self.normalize_domain(
-                domain
-            )
-
-            if (
-                normalized
-                not in normalized_domains
-            ):
-                normalized_domains.append(
-                    normalized
-                )
+            if normalized not in normalized_domains:
+                normalized_domains.append(normalized)
 
         if not normalized_domains:
-
-            normalized_domains = [
-                "general"
-            ]
+            normalized_domains = ["general"]
 
         results: dict[str, Any] = {}
 
         for domain in normalized_domains:
-
-            include = (
-                self.build_include_policy(
-                    message=message,
-                    domain=domain,
-                    agriculture_intent=(
-                        agriculture_intent
-                        if domain == "shamba"
-                        else None
-                    ),
-                )
+            include = self.build_include_policy(
+                message=message,
+                domain=domain,
+                agriculture_intent=(
+                    agriculture_intent
+                    if domain == "shamba"
+                    else None
+                ),
             )
 
             try:
-
-                result = (
-                    self.ecosystem.get_context(
-                        user_id=str(
-                            user_id
-                        ),
-                        domain=domain,
-                        message=message,
-                        include=include,
-                    )
+                result = self.ecosystem.get_context(
+                    user_id=str(user_id),
+                    domain=domain,
+                    message=message,
+                    include=include,
                 )
 
-            except Exception:
-
+            except Exception as exc:
                 result = {
                     "available": False,
                     "error": {
@@ -1707,22 +1643,15 @@ class Orchestrator:
                             "The ecosystem provider "
                             "could not retrieve context."
                         ),
+                        "details": str(exc),
                     },
                 }
 
-            results[
-                domain
-            ] = result
+            results[domain] = result
 
         available = any(
-            isinstance(
-                result,
-                dict,
-            )
-            and result.get(
-                "available",
-                False,
-            )
+            isinstance(result, dict)
+            and result.get("available", False)
             for result in results.values()
         )
 
@@ -1759,8 +1688,7 @@ class Orchestrator:
             "user_question": message,
 
             "platform_knowledge": (
-                platform_knowledge
-                or {}
+                platform_knowledge or {}
             ),
 
             "biashara_intelligence": (
@@ -1768,13 +1696,11 @@ class Orchestrator:
             ),
 
             "multimodal": (
-                multimodal
-                or {}
+                multimodal or {}
             ),
 
             "document_context": (
-                document_context
-                or {}
+                document_context or {}
             ),
 
             "agriculture_intelligence": (
@@ -1895,32 +1821,23 @@ class Orchestrator:
         """
 
         normalized_type = (
-            _safe_text(
-                input_type
-            ).lower()
+            _safe_text(input_type).lower()
         )
 
-        if (
-            normalized_type
-            not in MULTIMODAL_TYPES
-        ):
+        if normalized_type not in MULTIMODAL_TYPES:
             normalized_type = "text"
 
         return {
             "type": normalized_type,
 
             "filename": (
-                _safe_text(
-                    filename
-                )
+                _safe_text(filename)
                 if filename
                 else None
             ),
 
             "mime_type": (
-                _safe_text(
-                    mime_type
-                )
+                _safe_text(mime_type)
                 if mime_type
                 else None
             ),
@@ -1940,9 +1857,7 @@ class Orchestrator:
 
             "audio": {
                 "transcript": (
-                    _safe_text(
-                        transcript
-                    )
+                    _safe_text(transcript)
                     if transcript
                     else None
                 ),
@@ -1950,9 +1865,7 @@ class Orchestrator:
 
             "image": {
                 "description": (
-                    _safe_text(
-                        image_description
-                    )
+                    _safe_text(image_description)
                     if image_description
                     else None
                 ),
@@ -1983,65 +1896,68 @@ class Orchestrator:
 
         context = (
             context
-            if isinstance(
-                context,
-                list,
-            )
+            if isinstance(context, list)
             else []
         )
 
         normalized_message = (
-            str(message or "")
-            .strip()
+            str(message or "").strip()
         )
 
         # -------------------------------------------------
         # PLATFORM KNOWLEDGE
         # -------------------------------------------------
 
-        platform_knowledge = (
-            get_platform_knowledge(
+        try:
+            platform_knowledge = get_platform_knowledge(
                 normalized_message
-                )
-        )
+            )
+        except Exception:
+            platform_knowledge = {}
+
+        # -------------------------------------------------
+        # MULTIMODAL METADATA
+        # -------------------------------------------------
+
+        document_pages = None
+        document_chunks = None
+
+        if isinstance(document_context, dict):
+            metadata = document_context.get(
+                "metadata",
+                {},
+            )
+
+            if isinstance(metadata, dict):
+                document_pages = metadata.get("pages")
+
+            chunks = document_context.get(
+                "chunks",
+                [],
+            )
+
+            if isinstance(chunks, list):
+                document_chunks = len(chunks)
 
         multimodal_metadata = (
             self.build_multimodal_metadata(
                 input_type=input_type,
                 filename=filename,
                 mime_type=mime_type,
-                document_pages=(
-                    document_context.get("metadata", {}).get("pages")
-                    if isinstance(document_context, dict)
-                    else None
-                ),
-                document_chunks=(
-                    len(
-                        document_context.get(
-                            "chunks",
-                            [],
-                        )
-                    )
-                    if isinstance(document_context, dict)
-                    and isinstance(
-                        document_context.get(
-                            "chunks"
-                        ),
-                        list,
-                    )
-                    else None
-                ),
+                document_pages=document_pages,
+                document_chunks=document_chunks,
                 transcript=transcript,
                 image_description=image_description,
             )
         )
 
+        # -------------------------------------------------
+        # DOCUMENT CONTEXT
+        # -------------------------------------------------
+
         document_text = ""
 
-        if isinstance(
-            document_context,
-            dict,
-        ):
+        if isinstance(document_context, dict):
             document_text = _safe_text(
                 document_context.get(
                     "text",
@@ -2049,10 +1965,7 @@ class Orchestrator:
                 )
             )
 
-        if (
-            document_text
-            and normalized_message
-        ):
+        if document_text and normalized_message:
             normalized_message = (
                 f"{normalized_message}\n\n"
                 f"Document content:\n"
@@ -2068,9 +1981,16 @@ class Orchestrator:
             .lower()
         )
 
-        emotion = detect_emotion(
-            normalized_message
-        )
+        # -------------------------------------------------
+        # EMOTION
+        # -------------------------------------------------
+
+        try:
+            emotion = detect_emotion(
+                normalized_message
+            )
+        except Exception:
+            emotion = None
 
         # -------------------------------------------------
         # SPECIALIZED INTENTS
@@ -2108,11 +2028,8 @@ class Orchestrator:
         # -------------------------------------------------
 
         if biashara_intent:
-
             if "biashara" in domains:
-                domains.remove(
-                    "biashara"
-                )
+                domains.remove("biashara")
 
             domains.insert(
                 0,
@@ -2120,15 +2037,11 @@ class Orchestrator:
             )
 
             domains = domains[:2]
-
             primary_domain = "biashara"
 
         elif agriculture_intent:
-
             if "shamba" in domains:
-                domains.remove(
-                    "shamba"
-                )
+                domains.remove("shamba")
 
             domains.insert(
                 0,
@@ -2136,7 +2049,6 @@ class Orchestrator:
             )
 
             domains = domains[:2]
-
             primary_domain = "shamba"
 
         # -------------------------------------------------
@@ -2144,9 +2056,7 @@ class Orchestrator:
         # -------------------------------------------------
 
         resolved_user_id = (
-            str(
-                user_id
-            ).strip()
+            str(user_id).strip()
             if user_id
             else None
         )
@@ -2160,9 +2070,7 @@ class Orchestrator:
                 user_id=resolved_user_id,
                 message=normalized_message,
                 domains=domains,
-                agriculture_intent=(
-                    agriculture_intent
-                ),
+                agriculture_intent=agriculture_intent,
             )
         )
 
@@ -2203,7 +2111,7 @@ class Orchestrator:
             )
 
         # -------------------------------------------------
-        # ONLINE
+        # ONLINE RESEARCH
         # -------------------------------------------------
 
         online_required = (
@@ -2217,10 +2125,15 @@ class Orchestrator:
             "available": False,
             "query": "",
             "sources": [],
+            "source_count": 0,
+            "realtime": False,
+            "freshness": None,
+            "retrieved_at": None,
+            "provider": None,
+            "error": None,
         }
 
         if online_required:
-
             online_data = (
                 self.gather_online_data(
                     message=normalized_message,
@@ -2236,9 +2149,7 @@ class Orchestrator:
         agriculture_metadata = (
             self.build_agriculture_metadata(
                 message=normalized_message,
-                agriculture_intent=(
-                    agriculture_intent
-                ),
+                agriculture_intent=agriculture_intent,
             )
         )
 
@@ -2249,21 +2160,14 @@ class Orchestrator:
         grounding_context = (
             self.build_grounding_context(
                 message=normalized_message,
-                platform_knowledge=(
-                    platform_knowledge
-                ),
+                platform_knowledge=platform_knowledge,
                 ecosystem_data=ecosystem_data,
                 online_data=online_data,
-                agriculture_metadata=(
-                    agriculture_metadata
-                ),
-                biashara_intelligence=(
-                    biashara_intelligence
-                ),
+                agriculture_metadata=agriculture_metadata,
+                biashara_intelligence=biashara_intelligence,
                 multimodal=multimodal_metadata,
                 document_context=(
-                    document_context
-                    or {}
+                    document_context or {}
                 ),
             )
         )
@@ -2294,7 +2198,7 @@ class Orchestrator:
         )
 
         # -------------------------------------------------
-        # RETURN
+        # FINAL ORCHESTRATION RESULT
         # -------------------------------------------------
 
         return {
@@ -2313,19 +2217,28 @@ class Orchestrator:
                     biashara_intent is not None
                 ),
                 "intent": biashara_intent,
-                "label": BIASHARA_INTENT_LABELS.get(
-                    biashara_intent
-                )
-                if biashara_intent
-                else None,
-                "available": (
-                    biashara_available
+                "label": (
+                    BIASHARA_INTENT_LABELS.get(
+                        biashara_intent
+                    )
+                    if biashara_intent
+                    else None
                 ),
-                "operation": biashara_intelligence.get(
-                    "operation"
+                "available": biashara_available,
+                "operation": (
+                    biashara_intelligence.get(
+                        "operation"
+                    )
                 ),
-                "result": biashara_intelligence.get(
-                    "result"
+                "result": (
+                    biashara_intelligence.get(
+                        "result"
+                    )
+                ),
+                "error": (
+                    biashara_intelligence.get(
+                        "error"
+                    )
                 ),
             },
 
@@ -2333,9 +2246,7 @@ class Orchestrator:
 
             "multimodal": multimodal_metadata,
 
-            "platform_knowledge": (
-                platform_knowledge
-            ),
+            "platform_knowledge": platform_knowledge,
 
             "emotion": emotion,
 
@@ -2343,18 +2254,17 @@ class Orchestrator:
 
             "user_id": resolved_user_id,
 
-            "requires_online_data": (
-                online_required
-            ),
+            "requires_online_data": online_required,
 
             "ecosystem": {
-                "available": (
-                    ecosystem_available
-                ),
+                "available": ecosystem_available,
                 "domains": domains,
                 "data": ecosystem_data.get(
                     "data",
                     {},
+                ),
+                "error": ecosystem_data.get(
+                    "error"
                 ),
             },
 
@@ -2381,30 +2291,20 @@ class Orchestrator:
                 ),
                 "source_count": online_data.get(
                     "source_count",
-                    len(
-                        online_data.get(
-                            "sources",
-                            [],
-                        )
-                        if isinstance(
-                            online_data.get(
-                                "sources",
-                                [],
-                            ),
-                            list,
-                        )
-                        else []
-                    ),
+                    0,
                 ),
                 "realtime": online_data.get(
                     "realtime",
                     False,
                 ),
                 "freshness": online_data.get(
-                    "freshness",
+                    "freshness"
                 ),
                 "retrieved_at": online_data.get(
                     "retrieved_at"
+                ),
+                "provider": online_data.get(
+                    "provider"
                 ),
                 "error": online_data.get(
                     "error"
@@ -2412,12 +2312,8 @@ class Orchestrator:
             },
 
             "conversation_context": {
-                "items": len(
-                    context
-                ),
+                "items": len(context),
             },
 
-            "grounding_context": (
-                grounding_context
-            ),
+            "grounding_context": grounding_context,
         }
