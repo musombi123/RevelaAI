@@ -421,8 +421,7 @@ def _get_inference_client():
         ) from exc
 
     return InferenceClient(
-        provider="fal-ai",
-        provider=...
+        api_key=HF_TOKEN,
     )
 
 
