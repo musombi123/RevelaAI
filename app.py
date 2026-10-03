@@ -1,5 +1,3 @@
-# app.py
-
 """
 RevelaAI Production Application
 
@@ -37,6 +35,7 @@ Production principles:
     - Protect generated-file paths.
     - Do not expose database testing endpoints.
     - Keep image/audio files temporary.
+    - Image requests must never silently fall through to text AI.
 """
 
 from __future__ import annotations
@@ -52,8 +51,8 @@ from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
 from typing import Any
-import jwt
 
+import jwt
 from dotenv import load_dotenv
 
 # =========================================================
@@ -84,7 +83,7 @@ def resolve_revelacode_user_id() -> str | None:
 
     The JWT is only used to establish identity.
 
-    Actual platform data is still retrieved through the
+    Actual platform data is retrieved through the
     RevelaCode AI Gateway.
     """
 
@@ -168,6 +167,7 @@ def resolve_revelacode_user_id() -> str | None:
 
     return user_id
 
+
 # =========================================================
 # FLASK
 # =========================================================
@@ -179,6 +179,7 @@ from flask import (
     jsonify,
     request,
     send_file,
+    stream_with_context,
 )
 
 from flask_cors import CORS
@@ -366,6 +367,74 @@ AUDIO_RETENTION_SECONDS = int(
 
 
 # =========================================================
+# BUILD / RELEASE IDENTITY
+# =========================================================
+
+REVELAAI_BUILD_ID = (
+    os.getenv(
+        "REVELAAI_BUILD_ID",
+        "image-routing-v2",
+    ).strip()
+    or "image-routing-v2"
+)
+
+
+# =========================================================
+# FEATURE FLAGS
+# =========================================================
+
+REVELAAI_ENABLE_HF_TTS = (
+    os.getenv(
+        "REVELAAI_ENABLE_HF_TTS",
+        "false",
+    ).strip().lower()
+    in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+)
+
+
+# =========================================================
+# IMAGE CONFIGURATION
+# =========================================================
+
+HF_IMAGE_MODEL_NAME = (
+    os.getenv(
+        "HF_IMAGE_MODEL",
+        "black-forest-labs/FLUX.1-schnell",
+    ).strip()
+    or "black-forest-labs/FLUX.1-schnell"
+)
+
+
+HF_IMAGE_WIDTH = int(
+    os.getenv(
+        "HF_IMAGE_DEFAULT_WIDTH",
+        "1024",
+    )
+)
+
+
+HF_IMAGE_HEIGHT = int(
+    os.getenv(
+        "HF_IMAGE_DEFAULT_HEIGHT",
+        "1024",
+    )
+)
+
+
+HF_IMAGE_STEPS = int(
+    os.getenv(
+        "HF_IMAGE_DEFAULT_STEPS",
+        "4",
+    )
+)
+
+
+# =========================================================
 # LOGGING
 # =========================================================
 
@@ -408,6 +477,7 @@ app.config.update({
 # Render sits behind a proxy/load balancer.
 # ProxyFix allows request.host_url and scheme information
 # to correctly reflect the public HTTPS URL.
+
 app.wsgi_app = ProxyFix(
     app.wsgi_app,
     x_for=1,
@@ -544,6 +614,7 @@ def add_response_headers(response):
     RequestEntityTooLarge
 )
 def handle_request_too_large(error):
+
     return jsonify(
         error_response(
             "REQUEST_TOO_LARGE",
@@ -557,6 +628,7 @@ def handle_request_too_large(error):
 
 @app.errorhandler(404)
 def handle_not_found(error):
+
     return jsonify({
         "status": "error",
         "error": {
@@ -573,6 +645,7 @@ def handle_not_found(error):
 
 @app.errorhandler(405)
 def handle_method_not_allowed(error):
+
     return jsonify({
         "status": "error",
         "error": {
@@ -688,8 +761,6 @@ def get_session_id() -> str:
 
     Final fallback:
         short-lived generated ID
-
-    Anonymous clients should preferably send X-Session-ID.
     """
 
     header_id = (
@@ -1346,21 +1417,42 @@ def process_uploaded_document(
 
 IMAGE_INTENT_PHRASES = {
     "generate image",
+    "generate an image",
     "create image",
+    "create an image",
     "make an image",
+    "make me an image",
     "draw",
+    "draw an image",
     "generate a picture",
     "create a picture",
+    "make a picture",
     "image generation",
-    "create an image",
-    "make me an image",
     "generate an illustration",
+    "create an illustration",
+    "make an illustration",
+    "generate artwork",
+    "create artwork",
+    "make artwork",
+    "generate a photo",
+    "create a photo",
+    "make a photo",
+    "generate art",
+    "create art",
 }
 
 
 def is_image_generation_request(
     message: str,
 ) -> bool:
+    """
+    Determine whether the user's request explicitly asks
+    for image generation.
+
+    This function intentionally runs before the general
+    intent router so GPT-OSS cannot accidentally treat an
+    image-generation request as a normal text question.
+    """
 
     lowered = (
         str(
@@ -1370,10 +1462,201 @@ def is_image_generation_request(
         .lower()
     )
 
-    return any(
-        phrase in lowered
-        for phrase in IMAGE_INTENT_PHRASES
+    if not lowered:
+        return False
+
+    for phrase in IMAGE_INTENT_PHRASES:
+
+        if phrase in lowered:
+            return True
+
+    return False
+
+
+# =========================================================
+# IMAGE RESPONSE HELPER
+# =========================================================
+
+def generate_image_response(
+    message: str,
+) -> dict[str, Any]:
+    """
+    Generate an image and return the canonical RevelaAI
+    image response.
+
+    The response format is intentionally stable for the
+    frontend:
+
+        mode=image
+
+        data={
+            type=image,
+            urls=[...]
+        }
+    """
+
+    app.logger.info(
+        "IMAGE GENERATION BRANCH | "
+        "request_id=%s | model=%s | build=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        HF_IMAGE_MODEL_NAME,
+        REVELAAI_BUILD_ID,
     )
+
+    try:
+
+        image = generate_hf_image(
+            prompt=message,
+            model=HF_IMAGE_MODEL_NAME,
+            width=HF_IMAGE_WIDTH,
+            height=HF_IMAGE_HEIGHT,
+            num_inference_steps=HF_IMAGE_STEPS,
+        )
+
+    except Exception as exc:
+
+        app.logger.exception(
+            "Image generation failed | "
+            "request_id=%s | model=%s | error=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            HF_IMAGE_MODEL_NAME,
+            exc,
+        )
+
+        return {
+            "ok": False,
+            "response": jsonify(
+                error_response(
+                    "IMAGE_GENERATION_FAILED",
+                    (
+                        "Hugging Face image generation "
+                        "is temporarily unavailable."
+                    ),
+                )
+            ),
+            "status_code": 502,
+        }
+
+    if image is None:
+
+        app.logger.error(
+            "Image provider returned None | request_id=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+        )
+
+        return {
+            "ok": False,
+            "response": jsonify(
+                error_response(
+                    "IMAGE_GENERATION_EMPTY",
+                    "Hugging Face returned no image.",
+                )
+            ),
+            "status_code": 502,
+        }
+
+    filename = (
+        "revelaai_"
+        f"{uuid.uuid4().hex}.png"
+    )
+
+    filepath = os.path.join(
+        IMAGE_DIR,
+        filename,
+    )
+
+    try:
+
+        image.save(
+            filepath,
+            format="PNG",
+        )
+
+    except Exception as exc:
+
+        app.logger.exception(
+            "Generated image could not be saved | "
+            "request_id=%s | error=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            exc,
+        )
+
+        return {
+            "ok": False,
+            "response": jsonify(
+                error_response(
+                    "IMAGE_SAVE_FAILED",
+                    "Generated image could not be stored.",
+                )
+            ),
+            "status_code": 500,
+        }
+
+    image_url = (
+        request.host_url.rstrip("/")
+        + "/ai/images/"
+        + filename
+    )
+
+    app.logger.info(
+        "IMAGE GENERATED SUCCESSFULLY | "
+        "request_id=%s | file=%s | url=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        filename,
+        image_url,
+    )
+
+    response = enforce_base_schema(
+        query=message,
+        mode="image",
+        data={
+            "type": "image",
+            "urls": [
+                image_url
+            ],
+        },
+        sources=[],
+        meta={
+            "provider": "huggingface",
+            "model": HF_IMAGE_MODEL_NAME,
+            "build_id": REVELAAI_BUILD_ID,
+            "intent": "image_generation",
+            "multimodal": {
+                "type": "image",
+            },
+        },
+    )
+
+    return {
+        "ok": True,
+        "response": jsonify(
+            response
+        ),
+        "status_code": 200,
+        "filename": filename,
+        "filepath": filepath,
+        "image_url": image_url,
+    }
 
 
 # =========================================================
@@ -1451,6 +1734,7 @@ def feature_chat():
             "request_id",
             None,
         ),
+        "build_id": REVELAAI_BUILD_ID,
     })
 
 
@@ -1469,6 +1753,7 @@ def root():
         "service": "revelaai",
         "app": APP_NAME,
         "environment": ENVIRONMENT,
+        "build_id": REVELAAI_BUILD_ID,
         "message": (
             "RevelaAI is live."
         ),
@@ -1504,6 +1789,7 @@ def capabilities():
         )
 
     except Exception:
+
         online_available = False
 
     pdf_available = False
@@ -1519,11 +1805,13 @@ def capabilities():
         )
 
     except Exception:
+
         pdf_available = False
 
     return jsonify({
         "status": "success",
         "service": "revelaai",
+        "build_id": REVELAAI_BUILD_ID,
 
         "capabilities": {
             "text": {
@@ -1538,16 +1826,11 @@ def capabilities():
             "image_generation": {
                 "enabled": bool(
                     hf_configured()
-                    and os.getenv(
-                        "HF_IMAGE_MODEL",
-                        "",
-                    )
+                    and HF_IMAGE_MODEL_NAME
                 ),
                 "provider": "huggingface",
-                "model": os.getenv(
-                    "HF_IMAGE_MODEL",
-                    "black-forest-labs/FLUX.1-schnell",
-                ),
+                "model": HF_IMAGE_MODEL_NAME,
+                "routing": "explicit",
             },
 
             "online_research": {
@@ -1575,6 +1858,7 @@ def capabilities():
                     "HF_TTS_MODEL",
                     "hexgrad/Kokoro-82M",
                 ),
+                "tts_enabled": REVELAAI_ENABLE_HF_TTS,
             },
 
             "ecosystem": {
@@ -1688,11 +1972,30 @@ def ai_assistant():
             message
         )
 
-        if is_image_generation_request(
-            message
-        ):
+        image_request = (
+            is_image_generation_request(
+                message
+            )
+        )
+
+        if image_request:
 
             intent = "image_generation"
+
+        app.logger.info(
+            "IMAGE ROUTING | "
+            "request_id=%s | detected=%s | intent=%s | "
+            "build=%s | message=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            image_request,
+            intent,
+            REVELAAI_BUILD_ID,
+            message[:200],
+        )
 
         lowered = message.lower()
 
@@ -1716,115 +2019,23 @@ def ai_assistant():
         # IMAGE GENERATION
         # -------------------------------------------------
 
+        # IMPORTANT:
+        # Image requests return immediately.
+        # They NEVER enter process_message().
+        # This prevents GPT-OSS from hallucinating image
+        # markdown instead of invoking FLUX.
+
         if intent == "image_generation":
 
-            try:
-
-                image = generate_hf_image(
-                    prompt=message,
-                    model=os.getenv(
-                        "HF_IMAGE_MODEL",
-                        "black-forest-labs/FLUX.1-schnell",
-                    ),
-                    width=int(
-                        os.getenv(
-                            "HF_IMAGE_DEFAULT_WIDTH",
-                            "1024",
-                        )
-                    ),
-                    height=int(
-                        os.getenv(
-                            "HF_IMAGE_DEFAULT_HEIGHT",
-                            "1024",
-                        )
-                    ),
-                    num_inference_steps=int(
-                        os.getenv(
-                            "HF_IMAGE_DEFAULT_STEPS",
-                            "4",
-                        )
-                    ),
+            image_result = (
+                generate_image_response(
+                    message
                 )
-
-            except Exception:
-
-                app.logger.exception(
-                    "Image generation failed | request_id=%s",
-                    getattr(
-                        g,
-                        "request_id",
-                        None,
-                    ),
-                )
-
-                return jsonify(
-                    error_response(
-                        "IMAGE_GENERATION_FAILED",
-                        (
-                            "Hugging Face image generation "
-                            "is temporarily unavailable."
-                        ),
-                    )
-                ), 502
-
-            filename = (
-                "revelaai_"
-                f"{uuid.uuid4().hex}.png"
             )
 
-            filepath = os.path.join(
-                IMAGE_DIR,
-                filename,
-            )
-
-            try:
-
-                image.save(
-                    filepath,
-                    format="PNG",
-                )
-
-            except Exception:
-
-                app.logger.exception(
-                    "Generated image could not be saved."
-                )
-
-                return jsonify(
-                    error_response(
-                        "IMAGE_SAVE_FAILED",
-                        "Generated image could not be stored.",
-                    )
-                ), 500
-
-            image_url = (
-                request.host_url.rstrip("/")
-                + "/ai/images/"
-                + filename
-            )
-
-            return jsonify(
-                enforce_base_schema(
-                    query=message,
-                    mode="image",
-                    data={
-                        "type": "image",
-                        "urls": [
-                            image_url
-                        ],
-                    },
-                    sources=[],
-                    meta={
-                        "provider": "huggingface",
-                        "model": os.getenv(
-                            "HF_IMAGE_MODEL",
-                            "black-forest-labs/FLUX.1-schnell",
-                        ),
-                        "multimodal": {
-                            "type": "image",
-                        },
-                    },
-                )
+            return (
+                image_result["response"],
+                image_result["status_code"],
             )
 
         # -------------------------------------------------
@@ -2078,6 +2289,8 @@ def ai_assistant():
                     else {}
                 )
             ),
+
+            "build_id": REVELAAI_BUILD_ID,
         }
 
         return jsonify(
@@ -2093,12 +2306,13 @@ def ai_assistant():
     except Exception as exc:
 
         app.logger.exception(
-            "AI request failed | request_id=%s",
+            "AI request failed | request_id=%s | error=%s",
             getattr(
                 g,
                 "request_id",
                 None,
             ),
+            exc,
         )
 
         return jsonify(
@@ -2138,6 +2352,7 @@ def serve_generated_image(
                 "code": "INVALID_FILENAME",
                 "message": "Invalid image filename.",
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 400
 
     filepath = os.path.join(
@@ -2155,6 +2370,7 @@ def serve_generated_image(
                 "code": "IMAGE_NOT_FOUND",
                 "message": "Image not found.",
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 404
 
     response = send_file(
@@ -2206,9 +2422,180 @@ def ai_stream():
 
     session_id = get_session_id()
 
+    user_id = (
+        resolve_revelacode_user_id()
+    )
+
     session = get_session(
         session_id
     )
+
+    # -----------------------------------------------------
+    # INTENT
+    # -----------------------------------------------------
+
+    intent = classify_intent(
+        message
+    )
+
+    image_request = (
+        is_image_generation_request(
+            message
+        )
+    )
+
+    if image_request:
+
+        intent = "image_generation"
+
+    app.logger.info(
+        "STREAM ROUTING | "
+        "request_id=%s | image=%s | intent=%s | build=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        image_request,
+        intent,
+        REVELAAI_BUILD_ID,
+    )
+
+    # -----------------------------------------------------
+    # IMAGE STREAMING
+    # -----------------------------------------------------
+
+    if intent == "image_generation":
+
+        image_host_url = (
+            request.host_url.rstrip("/")
+        )
+
+        @stream_with_context
+        def generate_image_stream():
+
+            try:
+
+                app.logger.info(
+                    "STREAM IMAGE GENERATION BRANCH | "
+                    "request_id=%s | model=%s",
+                    getattr(
+                        g,
+                        "request_id",
+                        None,
+                    ),
+                    HF_IMAGE_MODEL_NAME,
+                )
+
+                image = generate_hf_image(
+                    prompt=message,
+                    model=HF_IMAGE_MODEL_NAME,
+                    width=HF_IMAGE_WIDTH,
+                    height=HF_IMAGE_HEIGHT,
+                    num_inference_steps=HF_IMAGE_STEPS,
+                )
+
+                if image is None:
+                    raise RuntimeError(
+                        "Hugging Face returned no image."
+                    )
+
+                filename = (
+                    "revelaai_"
+                    f"{uuid.uuid4().hex}.png"
+                )
+
+                filepath = os.path.join(
+                    IMAGE_DIR,
+                    filename,
+                )
+
+                image.save(
+                    filepath,
+                    format="PNG",
+                )
+
+                image_url = (
+                    image_host_url
+                    + "/ai/images/"
+                    + filename
+                )
+
+                image_payload = {
+                    "success": True,
+                    "mode": "image",
+                    "query": message,
+                    "data": {
+                        "type": "image",
+                        "urls": [
+                            image_url
+                        ],
+                    },
+                    "sources": [],
+                    "meta": {
+                        "intent": "image_generation",
+                        "provider": "huggingface",
+                        "model": HF_IMAGE_MODEL_NAME,
+                        "build_id": REVELAAI_BUILD_ID,
+                        "multimodal": {
+                            "type": "image",
+                        },
+                    },
+                }
+
+                import json
+
+                yield (
+                    "event: image\n"
+                    "data: "
+                    f"{json.dumps(image_payload)}\n\n"
+                )
+
+                yield (
+                    "event: done\n"
+                    "data: [DONE]\n\n"
+                )
+
+            except Exception as exc:
+
+                app.logger.exception(
+                    "AI stream image failed | "
+                    "request_id=%s | error=%s",
+                    getattr(
+                        g,
+                        "request_id",
+                        None,
+                    ),
+                    exc,
+                )
+
+                yield (
+                    "event: error\n"
+                    "data: Image generation failed.\n\n"
+                )
+
+        response = Response(
+            generate_image_stream(),
+            mimetype="text/event-stream",
+        )
+
+        response.headers[
+            "Cache-Control"
+        ] = "no-cache"
+
+        response.headers[
+            "X-Accel-Buffering"
+        ] = "no"
+
+        response.headers[
+            "Connection"
+        ] = "keep-alive"
+
+        return response
+
+    # -----------------------------------------------------
+    # NORMAL STREAMING
+    # -----------------------------------------------------
 
     previous_context = [
         {
@@ -2251,10 +2638,7 @@ def ai_stream():
         session,
     )
 
-    intent = classify_intent(
-        message
-    )
-
+    @stream_with_context
     def generate():
 
         try:
@@ -2264,6 +2648,7 @@ def ai_stream():
                 context=previous_context,
                 intent=intent,
                 session_id=session_id,
+                user_id=user_id,
             )
 
             response_text = (
@@ -2291,9 +2676,28 @@ def ai_stream():
                 f"data: {response_text}\n\n"
             )
 
+            import json
+
+            metadata = {
+                "intent": (
+                    ai_result.get(
+                        "intent",
+                        intent,
+                    )
+                ),
+                "domain": (
+                    ai_result.get(
+                        "domain",
+                        "general",
+                    )
+                ),
+                "build_id": REVELAAI_BUILD_ID,
+            }
+
             yield (
                 "event: metadata\n"
-                f"data: {{\"intent\":\"{intent}\"}}\n\n"
+                "data: "
+                f"{json.dumps(metadata)}\n\n"
             )
 
             yield (
@@ -2304,12 +2708,14 @@ def ai_stream():
         except Exception as exc:
 
             app.logger.exception(
-                "AI stream failed | request_id=%s",
+                "AI stream failed | "
+                "request_id=%s | error=%s",
                 getattr(
                     g,
                     "request_id",
                     None,
                 ),
+                exc,
             )
 
             yield (
@@ -2387,6 +2793,7 @@ def voice():
                 "code": "AUDIO_REQUIRED",
                 "message": "No audio file was provided.",
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 400
 
     audio_bytes = uploaded.read()
@@ -2399,6 +2806,7 @@ def voice():
                 "code": "EMPTY_AUDIO",
                 "message": "Uploaded audio is empty.",
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 400
 
     if len(
@@ -2414,6 +2822,7 @@ def voice():
                     "allowed size."
                 ),
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 413
 
     # -----------------------------------------------------
@@ -2428,15 +2837,17 @@ def voice():
             )
         )
 
-    except Exception:
+    except Exception as exc:
 
         app.logger.exception(
-            "Voice transcription failed | request_id=%s",
+            "Voice transcription failed | "
+            "request_id=%s | error=%s",
             getattr(
                 g,
                 "request_id",
                 None,
             ),
+            exc,
         )
 
         return jsonify({
@@ -2448,6 +2859,7 @@ def voice():
                     "temporarily unavailable."
                 ),
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 502
 
     heard = str(
@@ -2468,6 +2880,7 @@ def voice():
                     "No speech could be transcribed."
                 ),
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 400
 
     # -----------------------------------------------------
@@ -2475,6 +2888,10 @@ def voice():
     # -----------------------------------------------------
 
     session_id = get_session_id()
+
+    user_id = (
+        resolve_revelacode_user_id()
+    )
 
     session = get_session(
         session_id
@@ -2507,6 +2924,134 @@ def voice():
         heard
     )
 
+    # Image requests through voice must also route to FLUX.
+
+    if is_image_generation_request(
+        heard
+    ):
+
+        intent = "image_generation"
+
+        app.logger.info(
+            "VOICE IMAGE ROUTING | "
+            "request_id=%s | build=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            REVELAAI_BUILD_ID,
+        )
+
+    # -----------------------------------------------------
+    # VOICE IMAGE REQUEST
+    # -----------------------------------------------------
+
+    if intent == "image_generation":
+
+        try:
+
+            image_result = (
+                generate_image_response(
+                    heard
+                )
+            )
+
+            if not image_result.get(
+                "ok",
+                False,
+            ):
+
+                return (
+                    image_result["response"],
+                    image_result["status_code"],
+                )
+
+            # Use the generated image URL as the spoken
+            # response metadata. TTS remains optional.
+
+            image_url = (
+                image_result.get(
+                    "image_url"
+                )
+            )
+
+            session[
+                "messages"
+            ].append({
+                "role": "user",
+                "content": heard,
+            })
+
+            session[
+                "messages"
+            ].append({
+                "role": "assistant",
+                "content": (
+                    "Image generated successfully."
+                ),
+            })
+
+            save_session(
+                session_id,
+                session,
+            )
+
+            return jsonify({
+                "status": "success",
+                "heard": heard,
+                "response": (
+                    "Image generated successfully."
+                ),
+                "image_url": image_url,
+                "audio_url": None,
+                "voice": {
+                    "input": transcription,
+                    "output": {
+                        "available": False,
+                        "reason": (
+                            "image_generation_request"
+                        ),
+                    },
+                },
+                "meta": {
+                    "intent": "image_generation",
+                    "domain": "image",
+                    "provider": "huggingface",
+                    "model": HF_IMAGE_MODEL_NAME,
+                    "build_id": REVELAAI_BUILD_ID,
+                },
+            })
+
+        except Exception as exc:
+
+            app.logger.exception(
+                "Voice image generation failed | "
+                "request_id=%s | error=%s",
+                getattr(
+                    g,
+                    "request_id",
+                    None,
+                ),
+                exc,
+            )
+
+            return jsonify({
+                "status": "error",
+                "error": {
+                    "code": "VOICE_IMAGE_GENERATION_FAILED",
+                    "message": (
+                        "Image generation is "
+                        "temporarily unavailable."
+                    ),
+                },
+                "build_id": REVELAAI_BUILD_ID,
+            }), 502
+
+    # -----------------------------------------------------
+    # SAVE NORMAL VOICE USER MESSAGE
+    # -----------------------------------------------------
+
     session[
         "messages"
     ].append({
@@ -2531,17 +3076,20 @@ def voice():
             context=previous_context,
             intent=intent,
             session_id=session_id,
+            user_id=user_id,
         )
 
-    except Exception:
+    except Exception as exc:
 
         app.logger.exception(
-            "Voice AI processing failed | request_id=%s",
+            "Voice AI processing failed | "
+            "request_id=%s | error=%s",
             getattr(
                 g,
                 "request_id",
                 None,
             ),
+            exc,
         )
 
         return jsonify({
@@ -2553,6 +3101,7 @@ def voice():
                     "the transcribed request."
                 ),
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 502
 
     response_text = str(
@@ -2573,6 +3122,7 @@ def voice():
                     "RevelaAI returned an empty response."
                 ),
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 502
 
     session[
@@ -2591,6 +3141,37 @@ def voice():
     # TEXT TO SPEECH
     # -----------------------------------------------------
 
+    # HF TTS is disabled by default because provider credits
+    # may be exhausted. This prevents every voice request
+    # from making a guaranteed-failing TTS call.
+
+    if not REVELAAI_ENABLE_HF_TTS:
+
+        return jsonify({
+            "status": "success",
+            "heard": heard,
+            "response": response_text,
+            "audio_url": None,
+            "voice": {
+                "input": transcription,
+                "output": {
+                    "available": False,
+                    "reason": "tts_disabled",
+                },
+            },
+            "meta": {
+                "intent": ai_result.get(
+                    "intent",
+                    intent,
+                ),
+                "domain": ai_result.get(
+                    "domain",
+                    "general",
+                ),
+                "build_id": REVELAAI_BUILD_ID,
+            },
+        })
+
     try:
 
         audio_output = (
@@ -2599,15 +3180,17 @@ def voice():
             )
         )
 
-    except Exception:
+    except Exception as exc:
 
         app.logger.exception(
-            "Voice synthesis failed | request_id=%s",
+            "Voice synthesis failed | "
+            "request_id=%s | error=%s",
             getattr(
                 g,
                 "request_id",
                 None,
             ),
+            exc,
         )
 
         return jsonify({
@@ -2619,7 +3202,19 @@ def voice():
                 "input": transcription,
                 "output": {
                     "available": False,
+                    "reason": "tts_provider_failed",
                 },
+            },
+            "meta": {
+                "intent": ai_result.get(
+                    "intent",
+                    intent,
+                ),
+                "domain": ai_result.get(
+                    "domain",
+                    "general",
+                ),
+                "build_id": REVELAAI_BUILD_ID,
             },
         })
 
@@ -2634,16 +3229,28 @@ def voice():
                 "input": transcription,
                 "output": {
                     "available": False,
+                    "reason": "empty_tts_response",
                 },
+            },
+            "meta": {
+                "intent": ai_result.get(
+                    "intent",
+                    intent,
+                ),
+                "domain": ai_result.get(
+                    "domain",
+                    "general",
+                ),
+                "build_id": REVELAAI_BUILD_ID,
             },
         })
 
     mime_type = (
         os.getenv(
             "HF_TTS_MIME_TYPE",
-            "audio/flac",
+            "audio/wav",
         ).strip()
-        or "audio/flac"
+        or "audio/wav"
     )
 
     extension = (
@@ -2674,10 +3281,17 @@ def voice():
                 audio_output
             )
 
-    except Exception:
+    except Exception as exc:
 
         app.logger.exception(
-            "Voice audio could not be saved."
+            "Voice audio could not be saved | "
+            "request_id=%s | error=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            exc,
         )
 
         return jsonify({
@@ -2689,7 +3303,19 @@ def voice():
                 "input": transcription,
                 "output": {
                     "available": False,
+                    "reason": "audio_save_failed",
                 },
+            },
+            "meta": {
+                "intent": ai_result.get(
+                    "intent",
+                    intent,
+                ),
+                "domain": ai_result.get(
+                    "domain",
+                    "general",
+                ),
+                "build_id": REVELAAI_BUILD_ID,
             },
         })
 
@@ -2736,6 +3362,7 @@ def voice():
                 "domain",
                 "general",
             ),
+            "build_id": REVELAAI_BUILD_ID,
         },
     })
 
@@ -2766,6 +3393,7 @@ def serve_audio(
                 "code": "INVALID_FILENAME",
                 "message": "Invalid audio filename.",
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 400
 
     filepath = os.path.join(
@@ -2783,6 +3411,7 @@ def serve_audio(
                 "code": "AUDIO_NOT_FOUND",
                 "message": "Audio not found.",
             },
+            "build_id": REVELAAI_BUILD_ID,
         }), 404
 
     extension = (
@@ -2847,6 +3476,7 @@ def health():
         )
 
     except Exception:
+
         online_available = False
 
     pdf_available = False
@@ -2862,6 +3492,7 @@ def health():
         )
 
     except Exception:
+
         pdf_available = False
 
     return jsonify({
@@ -2869,6 +3500,11 @@ def health():
         "service": "revelaai",
 
         "environment": ENVIRONMENT,
+
+        "build": {
+            "id": REVELAAI_BUILD_ID,
+            "image_routing": "explicit",
+        },
 
         "providers": {
             "text": {
@@ -2883,10 +3519,8 @@ def health():
             "image": {
                 "provider": "huggingface",
                 "configured": hf_configured(),
-                "model": os.getenv(
-                    "HF_IMAGE_MODEL",
-                    "black-forest-labs/FLUX.1-schnell",
-                ),
+                "model": HF_IMAGE_MODEL_NAME,
+                "routing": "explicit",
             },
 
             "voice": {
@@ -2900,6 +3534,7 @@ def health():
                     "HF_TTS_MODEL",
                     "hexgrad/Kokoro-82M",
                 ),
+                "tts_enabled": REVELAAI_ENABLE_HF_TTS,
             },
         },
 
@@ -2944,10 +3579,7 @@ def ready():
     checks[
         "image_model"
     ] = bool(
-        os.getenv(
-            "HF_IMAGE_MODEL",
-            "",
-        ).strip()
+        HF_IMAGE_MODEL_NAME
     )
 
     try:
@@ -3003,11 +3635,103 @@ def ready():
             else "degraded"
         ),
         "service": "revelaai",
+        "build_id": REVELAAI_BUILD_ID,
         "checks": checks,
     }), (
         200
         if ready_status
         else 503
+    )
+
+
+# =========================================================
+# BLUEPRINT REGISTRATION
+# =========================================================
+
+# Keep the existing application architecture intact.
+# These blueprints expose the project's established routes.
+
+try:
+
+    app.register_blueprint(
+        chat_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "chat_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        explain_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "explain_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        memory_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "memory_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        research_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "research_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        users_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "users_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        whatsapp_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "whatsapp_bp registration failed | error=%s",
+        exc,
     )
 
 
@@ -3019,6 +3743,7 @@ if __name__ == "__main__":
 
     # This block is for local development only.
     # Render production uses Gunicorn.
+
     app.run(
         host="0.0.0.0",
         port=PORT,
