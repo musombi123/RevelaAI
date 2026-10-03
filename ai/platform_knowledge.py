@@ -1,24 +1,19 @@
 """
 RevelaAI Platform Knowledge Client
 
-Retrieves public, authoritative knowledge about RevelaCode.
+Retrieves authoritative public knowledge about RevelaCode.
 
-This is separate from user-scoped ecosystem context.
+Sources:
+    - RevelaCode public platform information
+    - RevelaCode public legal documents
+    - Official public URLs
 
-Platform knowledge:
-    - identity
-    - capabilities
-    - hubs
-    - public links
-    - legal documents
+Important:
 
-User context:
-    - business records
-    - farm records
-    - school information
-    - community information
+    RevelaAI never accesses MongoDB directly.
 
-RevelaAI never accesses MongoDB directly.
+    Public legal documents are retrieved through the
+    public RevelaCode HTTP endpoints.
 """
 
 from __future__ import annotations
@@ -48,18 +43,14 @@ PLATFORM_ENDPOINT = (
     "/api/ai/platform"
 )
 
-LEGAL_ENDPOINT = (
-    f"{REVELACODE_BACKEND_URL}"
-    "/api/ai/platform/legal"
-)
-
-REQUEST_TIMEOUT = (
+REQUEST_TIMEOUT = max(
+    4,
     float(
         os.getenv(
             "PLATFORM_KNOWLEDGE_TIMEOUT",
             "10",
         )
-    )
+    ),
 )
 
 
@@ -74,20 +65,85 @@ def now_utc() -> str:
 
 
 # =========================================================
+# PUBLIC URL HELPERS
+# =========================================================
+
+def public_url(
+    env_name: str,
+    fallback: str,
+) -> str:
+    return (
+        os.getenv(
+            env_name,
+            fallback,
+        )
+        .strip()
+        .rstrip("/")
+    )
+
+
+# =========================================================
 # FALLBACK MANIFEST
 # =========================================================
 
 def fallback_platform_manifest() -> dict[str, Any]:
     """
-    Fallback knowledge guarantees that RevelaAI still
-    understands its own identity if the backend knowledge
-    endpoint is temporarily unreachable.
-
-    This is intentionally public/non-sensitive data.
+    Safe fallback containing only public,
+    non-sensitive RevelaCode information.
     """
 
+    revelacode_url = public_url(
+        "REVELACODE_PUBLIC_URL",
+        "https://revelacode-frontend.onrender.com",
+    )
+
+    revelacode_backend_url = public_url(
+        "REVELACODE_BACKEND_PUBLIC_URL",
+        "https://revelacode-backend.onrender.com",
+    )
+
+    revelaai_url = public_url(
+        "REVELAAI_PUBLIC_URL",
+        "https://revelaai.onrender.com",
+    )
+
+    github_frontend = (
+        os.getenv(
+            "REVELACODE_GITHUB_FRONTEND",
+            "https://github.com/musombi123/RevelaCode-Frontend",
+        )
+        .strip()
+    )
+
+    github_backend = (
+        os.getenv(
+            "REVELACODE_GITHUB_BACKEND",
+            "https://github.com/musombi123/RevelaCode-Backend",
+        )
+        .strip()
+    )
+
+    github_ai = (
+        os.getenv(
+            "REVELAAI_GITHUB",
+            "https://github.com/musombi123/RevelaAI",
+        )
+        .strip()
+    )
+
+    public_docs = (
+        os.getenv(
+            "REVELACODE_DOCS_URL",
+            "https://musombiwilliam.github.io/",
+        )
+        .strip()
+    )
+
     return {
-        "source": "revelaai_fallback_platform_knowledge",
+        "source": (
+            "revelaai_fallback_platform_knowledge"
+        ),
+
         "source_layer": "platform_knowledge",
 
         "retrieved_at": now_utc(),
@@ -96,20 +152,52 @@ def fallback_platform_manifest() -> dict[str, Any]:
             "platform": "RevelaCode",
             "ai": "RevelaAI",
             "ecosystem": "Jumuiya",
+            "description": (
+                "RevelaCode is a technology platform with "
+                "RevelaAI as its intelligence layer and "
+                "Jumuiya as its connected ecosystem."
+            ),
+        },
+
+        "architecture": {
+            "platform_layer": "RevelaCode Backend",
+            "intelligence_layer": "RevelaAI",
+            "ecosystem": "Jumuiya",
         },
 
         "hubs": {
             "biashara": {
+                "name": "Biashara",
                 "supported": True,
+                "description": (
+                    "Business operations, marketplace, "
+                    "products, sales, customers, inventory, "
+                    "expenses and business intelligence."
+                ),
             },
+
             "shamba": {
+                "name": "Shamba",
                 "supported": True,
+                "description": (
+                    "Agricultural and farm intelligence."
+                ),
             },
+
             "elimu": {
+                "name": "Elimu",
                 "supported": True,
+                "description": (
+                    "Education and learning support."
+                ),
             },
+
             "community": {
+                "name": "Community",
                 "supported": True,
+                "description": (
+                    "Community communication and discussions."
+                ),
             },
         },
 
@@ -182,47 +270,43 @@ def fallback_platform_manifest() -> dict[str, Any]:
         },
 
         "public_links": {
-            "revelacode": (
-                "https://revelacode-frontend.onrender.com"
-            ),
+            "revelacode": revelacode_url,
             "revelacode_backend": (
-                "https://revelacode-backend.onrender.com"
+                revelacode_backend_url
             ),
-            "revelaai": (
-                "https://revelaai.onrender.com"
-            ),
-            "github_frontend": (
-                "https://github.com/"
-                "musombi123/RevelaCode-Frontend"
-            ),
-            "github_backend": (
-                "https://github.com/"
-                "musombi123/RevelaCode-Backend"
-            ),
-            "github_revelaai": (
-                "https://github.com/"
-                "musombi123/RevelaAI"
-            ),
-            "documentation": (
-                "https://musombiwilliam.github.io/"
-            ),
+            "revelaai": revelaai_url,
+
+            "github_frontend": github_frontend,
+            "github_backend": github_backend,
+            "github_revelaai": github_ai,
+
+            "documentation": public_docs,
+
             "privacy_policy": (
-                "https://revelacode-backend.onrender.com/"
-                "api/legal/privacy"
+                f"{revelacode_backend_url}"
+                "/api/legal/privacy"
             ),
+
             "terms_of_service": (
-                "https://revelacode-backend.onrender.com/"
-                "api/legal/terms"
+                f"{revelacode_backend_url}"
+                "/api/legal/terms"
             ),
         },
     }
 
 
 # =========================================================
-# FETCH MANIFEST
+# FETCH PLATFORM MANIFEST
 # =========================================================
 
 def fetch_platform_manifest() -> dict[str, Any]:
+    """
+    Fetch the platform manifest when available.
+
+    Falls back to the safe public manifest if the endpoint
+    is unavailable.
+    """
+
     try:
 
         response = requests.get(
@@ -230,7 +314,7 @@ def fetch_platform_manifest() -> dict[str, Any]:
             headers={
                 "Accept": "application/json",
                 "User-Agent": (
-                    "RevelaAI-PlatformKnowledge/1.0"
+                    "RevelaAI-PlatformKnowledge/2.0"
                 ),
             },
             timeout=REQUEST_TIMEOUT,
@@ -238,25 +322,42 @@ def fetch_platform_manifest() -> dict[str, Any]:
 
         response.raise_for_status()
 
-        payload = (
-            response.json()
-        )
+        payload = response.json()
 
-        data = (
-            payload.get(
+        if not isinstance(
+            payload,
+            dict,
+        ):
+            raise ValueError(
+                "Platform manifest must be an object."
+            )
+
+        # Support both:
+        #
+        # {"data": {...}}
+        #
+        # and:
+        #
+        # {...manifest...}
+
+        if isinstance(
+            payload.get("data"),
+            dict,
+        ):
+
+            data = payload[
                 "data"
-            )
-            if isinstance(
-                payload,
-                dict,
-            )
-            else None
-        )
+            ]
+
+        else:
+
+            data = payload
 
         if not isinstance(
             data,
             dict,
         ):
+
             raise ValueError(
                 "Platform manifest is invalid."
             )
@@ -269,7 +370,122 @@ def fetch_platform_manifest() -> dict[str, Any]:
 
 
 # =========================================================
-# FETCH LEGAL DOCUMENT
+# EXTRACT DOCUMENT PAYLOAD
+# =========================================================
+
+def _extract_document_payload(
+    payload: Any,
+    document_type: str,
+) -> dict[str, Any] | None:
+    """
+    Normalize several supported public-document
+    response shapes.
+
+    Supported:
+
+        {
+            "status": "success",
+            "type": "terms",
+            "content": "...",
+            "version": "2.0"
+        }
+
+    and:
+
+        {
+            "data": {
+                "content": "...",
+                "version": "2.0"
+            }
+        }
+    """
+
+    if not isinstance(
+        payload,
+        dict,
+    ):
+        return None
+
+    candidate = payload
+
+    nested = payload.get(
+        "data"
+    )
+
+    if isinstance(
+        nested,
+        dict,
+    ):
+        candidate = nested
+
+    content = str(
+        candidate.get(
+            "content",
+            "",
+        )
+        or candidate.get(
+            "text",
+            "",
+        )
+        or candidate.get(
+            "full_text",
+            "",
+        )
+        or ""
+    ).strip()
+
+    if not content:
+        return None
+
+    version = (
+        candidate.get(
+            "version",
+            "1.0",
+        )
+        or "1.0"
+    )
+
+    resolved_type = (
+        candidate.get(
+            "type",
+            document_type,
+        )
+        or document_type
+    )
+
+    updated_at = (
+        candidate.get(
+            "updated_at"
+        )
+        or candidate.get(
+            "effective_at"
+        )
+    )
+
+    if hasattr(
+        updated_at,
+        "isoformat",
+    ):
+        updated_at = (
+            updated_at.isoformat()
+        )
+
+    return {
+        "available": True,
+        "source": "revelacode_public_legal_endpoint",
+        "document_type": str(
+            resolved_type
+        ).strip().lower(),
+        "version": str(
+            version
+        ),
+        "content": content,
+        "updated_at": updated_at,
+    }
+
+
+# =========================================================
+# FETCH LEGAL DOCUMENT DIRECTLY
 # =========================================================
 
 def fetch_legal_document(
@@ -288,60 +504,90 @@ def fetch_legal_document(
         "privacy",
         "terms",
     }:
+
         return {
             "available": False,
-            "error": "unsupported_document_type",
+            "document_type": normalized,
+            "error": (
+                "unsupported_document_type"
+            ),
         }
+
+    # The REAL public endpoint is:
+    #
+    # /api/legal/<doc_type>
+    #
+    # It is not the /api/ai/platform/legal endpoint.
+
+    public_endpoint = (
+        f"{REVELACODE_BACKEND_URL}"
+        f"/api/legal/{normalized}"
+    )
 
     try:
 
         response = requests.get(
-            f"{LEGAL_ENDPOINT}/{normalized}",
+            public_endpoint,
             headers={
                 "Accept": "application/json",
                 "User-Agent": (
-                    "RevelaAI-LegalKnowledge/1.0"
+                    "RevelaAI-LegalKnowledge/2.0"
                 ),
             },
             timeout=REQUEST_TIMEOUT,
+            allow_redirects=True,
         )
 
         response.raise_for_status()
 
         payload = response.json()
 
-        data = (
-            payload.get(
-                "data"
-            )
-            if isinstance(
+        document = (
+            _extract_document_payload(
                 payload,
-                dict,
+                normalized,
             )
-            else None
         )
 
-        if not isinstance(
-            data,
-            dict,
-        ):
-            raise ValueError(
-                "Legal document response is invalid."
-            )
+        if document is None:
 
-        return data
+            return {
+                "available": False,
+                "document_type": normalized,
+                "url": public_endpoint,
+                "error": (
+                    "legal_document_content_missing"
+                ),
+            }
 
-    except Exception:
+        document[
+            "url"
+        ] = public_endpoint
+
+        document[
+            "retrieved_at"
+        ] = now_utc()
+
+        return document
+
+    except Exception as exc:
 
         return {
             "available": False,
             "document_type": normalized,
-            "error": "legal_document_unavailable",
+            "url": public_endpoint,
+            "retrieved_at": now_utc(),
+            "error": (
+                "legal_document_unavailable"
+            ),
+            "error_detail": str(
+                exc
+            ),
         }
 
 
 # =========================================================
-# RELEVANCE
+# LEGAL REQUEST DETECTION
 # =========================================================
 
 def legal_document_requested(
@@ -368,6 +614,7 @@ def legal_document_requested(
             "my data",
         ]
     ):
+
         requested.append(
             "privacy"
         )
@@ -382,6 +629,7 @@ def legal_document_requested(
             "legal terms",
         ]
     ):
+
         requested.append(
             "terms"
         )
@@ -398,12 +646,6 @@ def get_platform_knowledge(
 ) -> dict[str, Any]:
     """
     Retrieve platform knowledge and relevant legal documents.
-
-    Manifest retrieval happens for every AI request because
-    the payload is small and this keeps the assistant aligned
-    with the current platform.
-
-    Legal content is retrieved only when relevant.
     """
 
     manifest = (
@@ -412,10 +654,14 @@ def get_platform_knowledge(
 
     legal_documents = {}
 
-    for document_type in (
+    requested_documents = (
         legal_document_requested(
             message
         )
+    )
+
+    for document_type in (
+        requested_documents
     ):
 
         legal_documents[
@@ -436,9 +682,7 @@ def get_platform_knowledge(
         ),
 
         "legal_documents_requested": (
-            list(
-                legal_documents.keys()
-            )
+            requested_documents
         ),
 
         "retrieved_at": now_utc(),
@@ -448,5 +692,7 @@ def get_platform_knowledge(
 __all__ = [
     "fetch_platform_manifest",
     "fetch_legal_document",
+    "legal_document_requested",
     "get_platform_knowledge",
 ]
+
