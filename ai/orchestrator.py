@@ -53,6 +53,10 @@ from services.scraper import (
     is_realtime_query,
 )
 
+from ai.platform_knowledge import (
+    get_platform_knowledge,
+)
+
 # =========================================================
 # MULTIMODAL INPUT SUPPORT
 # =========================================================
@@ -1740,6 +1744,7 @@ class Orchestrator:
         online_data: dict,
         agriculture_metadata: dict,
         biashara_intelligence: dict,
+        platform_knowledge: dict | None = None,
         multimodal: dict | None = None,
         document_context: dict | None = None,
     ) -> str:
@@ -1752,6 +1757,11 @@ class Orchestrator:
 
         grounding = {
             "user_question": message,
+
+            "platform_knowledge": (
+                platform_knowledge
+                or {}
+            ),
 
             "biashara_intelligence": (
                 biashara_intelligence
@@ -1983,6 +1993,16 @@ class Orchestrator:
         normalized_message = (
             str(message or "")
             .strip()
+        )
+
+        # -------------------------------------------------
+        # PLATFORM KNOWLEDGE
+        # -------------------------------------------------
+
+        platform_knowledge = (
+            get_platform_knowledge(
+                normalized_message
+                )
         )
 
         multimodal_metadata = (
@@ -2229,6 +2249,9 @@ class Orchestrator:
         grounding_context = (
             self.build_grounding_context(
                 message=normalized_message,
+                platform_knowledge=(
+                    platform_knowledge
+                ),
                 ecosystem_data=ecosystem_data,
                 online_data=online_data,
                 agriculture_metadata=(
@@ -2309,6 +2332,10 @@ class Orchestrator:
             "agriculture": agriculture_metadata,
 
             "multimodal": multimodal_metadata,
+
+            "platform_knowledge": (
+                platform_knowledge
+            ),
 
             "emotion": emotion,
 

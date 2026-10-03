@@ -33,8 +33,10 @@ IMPORTANT:
 
 from __future__ import annotations
 
-import os
-import time
+import io 
+import os 
+import time 
+import wave 
 from typing import Any
 
 import requests
@@ -134,10 +136,10 @@ HF_TTS_MODEL = (
 HF_TTS_MIME_TYPE = (
     os.getenv(
         "HF_TTS_MIME_TYPE",
-        "audio/flac",
+        "audio/wav",
     )
     .strip()
-    or "audio/flac"
+    or "audio/wav"
 )
 
 
@@ -419,8 +421,8 @@ def _get_inference_client():
         ) from exc
 
     return InferenceClient(
-        api_key=HF_TOKEN,
-        provider="auto",
+        provider="fal-ai",
+        provider=...
     )
 
 
@@ -667,6 +669,136 @@ def generate_image(
 
 
 # =========================================================
+# VOICE — WAV VALIDATION
+# =========================================================
+
+def _inspect_wav_audio(
+    audio: bytes,
+) -> dict[str, Any]:
+    """
+    Validate a browser-generated WAV file.
+
+    Expected:
+        PCM WAV
+        16-bit samples
+        mono preferred
+
+    The sample rate may be 44100 or 48000 Hz depending
+    on the browser/device.
+    """
+
+    if not audio:
+
+        raise AIClientError(
+            "Audio data is required.",
+            provider="huggingface",
+            error_code="empty_audio",
+        )
+
+    if len(audio) < 44:
+
+        raise AIClientError(
+            "Audio is too small to be a valid WAV file.",
+            provider="huggingface",
+            error_code="invalid_wav",
+        )
+
+    if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+
+        raise AIClientError(
+            "Voice input must be a valid WAV file.",
+            provider="huggingface",
+            error_code="invalid_wav",
+        )
+
+    try:
+
+        with wave.open(
+            io.BytesIO(audio),
+            "rb",
+        ) as wav:
+
+            channels = wav.getnchannels()
+            sample_width = wav.getsampwidth()
+            sample_rate = wav.getframerate()
+            frame_count = wav.getnframes()
+            compression = wav.getcomptype()
+
+            duration = (
+                frame_count / sample_rate
+                if sample_rate
+                else 0.0
+            )
+
+    except (
+        EOFError,
+        wave.Error,
+        ValueError,
+    ) as exc:
+
+        raise AIClientError(
+            "The uploaded WAV file could not be decoded.",
+            provider="huggingface",
+            error_code="invalid_wav",
+        ) from exc
+
+    if compression != "NONE":
+
+        raise AIClientError(
+            "Compressed WAV audio is not supported. "
+            "Please send PCM WAV audio.",
+            provider="huggingface",
+            error_code="unsupported_wav_compression",
+        )
+
+    if channels < 1:
+
+        raise AIClientError(
+            "WAV contains no audio channels.",
+            provider="huggingface",
+            error_code="invalid_wav_channels",
+        )
+
+    if sample_width != 2:
+
+        raise AIClientError(
+            "Voice input must use 16-bit PCM WAV audio.",
+            provider="huggingface",
+            error_code="unsupported_wav_bit_depth",
+        )
+
+    if sample_rate < 8000:
+
+        raise AIClientError(
+            "Voice sample rate is too low.",
+            provider="huggingface",
+            error_code="unsupported_sample_rate",
+        )
+
+    if duration < 0.25:
+
+        raise AIClientError(
+            "Voice recording is too short.",
+            provider="huggingface",
+            error_code="audio_too_short",
+        )
+
+    return {
+        "format": "wav",
+        "codec": "pcm_s16le",
+        "channels": channels,
+        "sample_width": sample_width,
+        "sample_rate": sample_rate,
+        "frames": frame_count,
+        "duration_seconds": round(
+            duration,
+            3,
+        ),
+        "bytes": len(audio),
+    }
+
+
+# =========================================================
 # VOICE — SPEECH TO TEXT
 # =========================================================
 
@@ -675,10 +807,10 @@ def transcribe_hf_audio(
     model: str | None = None,
 ) -> dict[str, Any]:
     """
-    Transcribe audio using Hugging Face ASR.
+    Transcribe browser-generated WAV audio through
+    Hugging Face Inference Providers.
 
-    Hugging Face accepts raw audio bytes and returns an
-    AutomaticSpeechRecognitionOutput containing the text.
+    The frontend does NOT perform transcription.
     """
 
     if not audio:
@@ -698,9 +830,7 @@ def transcribe_hf_audio(
         )
 
     selected_model = (
-        str(
-            model
-        ).strip()
+        str(model).strip()
         if model
         else HF_ASR_MODEL
     )
@@ -713,17 +843,39 @@ def transcribe_hf_audio(
             error_code="asr_model_missing",
         )
 
-    client = _get_inference_client()
+    audio_info = _inspect_wav_audio(
+        audio
+    )
+
+    try:
+
+        from huggingface_hub import (
+            InferenceClient,
+        )
+
+    except ImportError as exc:
+
+        raise AIClientError(
+            "huggingface_hub is not installed.",
+            provider="huggingface",
+            error_code="huggingface_hub_missing",
+        ) from exc
+
+    # Whisper is explicitly routed through fal-ai.
+    # Do NOT change the global _get_inference_client()
+    # to fal-ai because image/TTS use that shared client.
+    client = InferenceClient(
+        api_key=HF_TOKEN,
+        provider="fal-ai",
+    )
 
     start = time.time()
 
     try:
 
-        result = (
-            client.automatic_speech_recognition(
-                audio=audio,
-                model=selected_model,
-            )
+        result = client.automatic_speech_recognition(
+            audio=audio,
+            model=selected_model,
         )
 
     except Exception as exc:
@@ -735,6 +887,11 @@ def transcribe_hf_audio(
         print(
             "HF ASR failed | "
             f"model={selected_model} | "
+            "provider=fal-ai | "
+            f"bytes={audio_info['bytes']} | "
+            f"duration={audio_info['duration_seconds']}s | "
+            f"sample_rate={audio_info['sample_rate']} | "
+            f"channels={audio_info['channels']} | "
             f"time={elapsed:.2f}s"
         )
 
@@ -758,6 +915,7 @@ def transcribe_hf_audio(
         result,
         dict,
     ):
+
         transcript = result.get(
             "text"
         )
@@ -766,27 +924,31 @@ def transcribe_hf_audio(
         transcript or ""
     ).strip()
 
+    print(
+        "HF ASR result | "
+        f"model={selected_model} | "
+        "provider=fal-ai | "
+        f"duration={audio_info['duration_seconds']}s | "
+        f"time={elapsed:.2f}s | "
+        f"text_length={len(transcript)}"
+    )
+
     if not transcript:
 
         raise AIClientError(
-            "Hugging Face returned an empty transcription.",
+            "No recognizable speech was detected "
+            "in the recording.",
             provider="huggingface",
             error_code="empty_transcription",
         )
-
-    print(
-        "HF ASR succeeded | "
-        f"model={selected_model} | "
-        f"time={elapsed:.2f}s"
-    )
 
     return {
         "success": True,
         "text": transcript,
         "provider": "huggingface",
         "model": selected_model,
+        "audio": audio_info,
     }
-
 
 # =========================================================
 # VOICE — TEXT TO SPEECH
