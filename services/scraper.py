@@ -34,6 +34,8 @@ import requests
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+import ipaddress
+from urllib.parse import quote, quote_plus, urlparse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -438,6 +440,576 @@ def fetch(
             exc,
         )
         return ""
+
+# =========================================================
+# DIRECT URL RETRIEVAL
+# =========================================================
+
+_DIRECT_URL_PATTERN = re.compile(
+    r"https?://[^\s<>\[\]\"']+",
+    re.IGNORECASE,
+)
+
+DIRECT_URL_MAX_CHARS = max(
+    1200,
+    int(
+        os.getenv(
+            "REVELAAI_DIRECT_URL_MAX_CHARS",
+            "12000",
+        )
+    ),
+)
+
+
+def extract_urls(
+    text: str,
+) -> list[str]:
+    """
+    Extract explicit HTTP/HTTPS URLs supplied by the user.
+    """
+
+    value = str(
+        text or ""
+    ).strip()
+
+    if not value:
+        return []
+
+    matches = (
+        _DIRECT_URL_PATTERN.findall(
+            value
+        )
+    )
+
+    urls: list[str] = []
+
+    for raw in matches:
+
+        url = raw.rstrip(
+            ".,;:!?)]}>"
+        ).strip()
+
+        if not url:
+            continue
+
+        parsed = urlparse(
+            url
+        )
+
+        if parsed.scheme not in {
+            "http",
+            "https",
+        }:
+            continue
+
+        if not parsed.netloc:
+            continue
+
+        if url not in urls:
+            urls.append(url)
+
+    return urls[:10]
+
+
+def _is_safe_public_url(
+    url: str,
+) -> tuple[bool, str | None]:
+    """
+    Basic SSRF protection for direct URL retrieval.
+
+    Direct user URLs may only use HTTP/HTTPS and may not
+    explicitly target loopback/private/link-local hosts.
+    """
+
+    try:
+
+        parsed = urlparse(
+            str(url or "").strip()
+        )
+
+        if parsed.scheme not in {
+            "http",
+            "https",
+        }:
+            return (
+                False,
+                "unsupported_url_scheme",
+            )
+
+        if not parsed.hostname:
+            return (
+                False,
+                "missing_hostname",
+            )
+
+        hostname = (
+            parsed.hostname
+            .strip()
+            .lower()
+        )
+
+        if (
+            parsed.username
+            or parsed.password
+        ):
+            return (
+                False,
+                "embedded_credentials_not_allowed",
+            )
+
+        # Check literal IP addresses.
+        try:
+
+            ip = ipaddress.ip_address(
+                hostname
+            )
+
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return (
+                    False,
+                    "private_or_reserved_address",
+                )
+
+        except ValueError:
+            # Normal public hostname.
+            pass
+
+        blocked_hosts = {
+            "localhost",
+            "localhost.localdomain",
+            "ip6-localhost",
+            "ip6-loopback",
+        }
+
+        if hostname in blocked_hosts:
+            return (
+                False,
+                "localhost_not_allowed",
+            )
+
+        return (
+            True,
+            None,
+        )
+
+    except Exception:
+        return (
+            False,
+            "invalid_url",
+        )
+
+
+def _extract_direct_response_content(
+    response: requests.Response,
+    url: str,
+) -> dict[str, Any]:
+    """
+    Normalize HTML, JSON, and plain-text direct URL
+    responses into one source structure.
+    """
+
+    content_type = (
+        response.headers.get(
+            "Content-Type",
+            "",
+        )
+        or ""
+    ).lower()
+
+    raw_text = (
+        response.text
+        or ""
+    ).strip()
+
+    # -----------------------------------------------------
+    # JSON
+    # -----------------------------------------------------
+
+    looks_like_json = (
+        "json" in content_type
+        or raw_text.startswith("{")
+        or raw_text.startswith("[")
+    )
+
+    if looks_like_json:
+
+        try:
+
+            payload = response.json()
+
+            if isinstance(
+                payload,
+                dict,
+            ):
+
+                data = payload
+
+                nested = payload.get(
+                    "data"
+                )
+
+                if isinstance(
+                    nested,
+                    dict,
+                ):
+                    data = nested
+
+                content = str(
+                    data.get(
+                        "content",
+                        "",
+                    )
+                    or data.get(
+                        "text",
+                        "",
+                    )
+                    or data.get(
+                        "full_text",
+                        "",
+                    )
+                    or data.get(
+                        "description",
+                        "",
+                    )
+                    or ""
+                ).strip()
+
+                title = str(
+                    data.get(
+                        "title",
+                        "",
+                    )
+                    or data.get(
+                        "name",
+                        "",
+                    )
+                    or payload.get(
+                        "type",
+                        "",
+                    )
+                    or ""
+                ).strip()
+
+                if content:
+
+                    return {
+                        "title": title,
+                        "description": "",
+                        "content": content[
+                            :DIRECT_URL_MAX_CHARS
+                        ],
+                        "url": url,
+                        "retrieved": True,
+                        "provider": "direct_url",
+                        "content_type": (
+                            content_type
+                        ),
+                    }
+
+        except Exception as exc:
+
+            LOGGER.info(
+                "Direct JSON parsing failed for %s: %s",
+                url,
+                exc,
+            )
+
+    # -----------------------------------------------------
+    # HTML
+    # -----------------------------------------------------
+
+    if (
+        "html" in content_type
+        or "<html" in raw_text[:500].lower()
+        or "<!doctype" in raw_text[:500].lower()
+    ):
+
+        page = extract_page(
+            url,
+            raw_text,
+        )
+
+        return {
+            "title": page.get(
+                "title",
+                "",
+            ),
+            "description": page.get(
+                "description",
+                "",
+            ),
+            "content": str(
+                page.get(
+                    "content",
+                    "",
+                )
+                or ""
+            )[
+                :DIRECT_URL_MAX_CHARS
+            ],
+            "url": url,
+            "retrieved": bool(
+                page.get(
+                    "content",
+                    "",
+                )
+                or page.get(
+                    "description",
+                    "",
+                )
+            ),
+            "provider": "direct_url",
+            "content_type": content_type,
+        }
+
+    # -----------------------------------------------------
+    # PLAIN TEXT / OTHER TEXT
+    # -----------------------------------------------------
+
+    clean = clean_text(
+        raw_text
+    )
+
+    return {
+        "title": "",
+        "description": "",
+        "content": clean[
+            :DIRECT_URL_MAX_CHARS
+        ],
+        "url": url,
+        "retrieved": bool(
+            clean
+        ),
+        "provider": "direct_url",
+        "content_type": content_type,
+    }
+
+
+def fetch_url_source(
+    url: str,
+    timeout: int | None = None,
+) -> dict[str, Any]:
+    """
+    Fetch a single user-provided public URL.
+
+    This supports:
+        - JSON APIs
+        - HTML pages
+        - plain text
+    """
+
+    target = str(
+        url or ""
+    ).strip()
+
+    if not target:
+
+        return {
+            "url": target,
+            "retrieved": False,
+            "provider": "direct_url",
+            "error": {
+                "code": "empty_url",
+                "message": "URL is empty.",
+            },
+        }
+
+    safe, reason = (
+        _is_safe_public_url(
+            target
+        )
+    )
+
+    if not safe:
+
+        return {
+            "url": target,
+            "retrieved": False,
+            "provider": "direct_url",
+            "error": {
+                "code": "unsafe_url",
+                "message": reason,
+            },
+        }
+
+    try:
+
+        response = _session().get(
+            target,
+            timeout=timeout or TIMEOUT,
+            allow_redirects=True,
+        )
+
+        response.raise_for_status()
+
+        result = (
+            _extract_direct_response_content(
+                response,
+                target,
+            )
+        )
+
+        result[
+            "retrieved_at"
+        ] = _iso()
+
+        result[
+            "status_code"
+        ] = response.status_code
+
+        result[
+            "final_url"
+        ] = response.url
+
+        return result
+
+    except requests.RequestException as exc:
+
+        LOGGER.info(
+            "Direct URL retrieval failed for %s: %s",
+            target,
+            exc,
+        )
+
+        return {
+            "url": target,
+            "retrieved": False,
+            "provider": "direct_url",
+            "retrieved_at": _iso(),
+            "error": {
+                "code": "direct_url_fetch_failed",
+                "message": str(exc),
+            },
+        }
+
+
+def fetch_direct_urls(
+    urls: list[str],
+    limit: int = 5,
+) -> dict[str, Any]:
+    """
+    Retrieve multiple explicit user-provided URLs.
+    """
+
+    normalized_urls = []
+
+    for url in urls:
+
+        value = str(
+            url or ""
+        ).strip()
+
+        if (
+            value
+            and value not in normalized_urls
+        ):
+
+            normalized_urls.append(
+                value
+            )
+
+        if len(
+            normalized_urls
+        ) >= limit:
+
+            break
+
+    sources: list[dict] = []
+    errors: list[dict] = []
+
+    for url in normalized_urls:
+
+        result = (
+            fetch_url_source(
+                url
+            )
+        )
+
+        if result.get(
+            "retrieved",
+            False,
+        ):
+
+            result[
+                "freshness"
+            ] = "live"
+
+            sources.append(
+                result
+            )
+
+        else:
+
+            error = result.get(
+                "error"
+            )
+
+            if isinstance(
+                error,
+                dict,
+            ):
+
+                errors.append({
+                    "url": url,
+                    **error,
+                })
+
+            else:
+
+                errors.append({
+                    "url": url,
+                    "code": (
+                        "direct_url_unavailable"
+                    ),
+                    "message": (
+                        "The URL could not be retrieved."
+                    ),
+                })
+
+    return {
+        "available": bool(
+            sources
+        ),
+
+        "runtime_available": True,
+
+        "runtime_status": "connected",
+
+        "status": (
+            "active"
+            if sources
+            else "required_but_unavailable"
+        ),
+
+        "provider": "direct_url",
+
+        "query": (
+            " ".join(
+                normalized_urls
+            )
+        ),
+
+        "realtime": True,
+
+        "freshness": "live",
+
+        "retrieved_at": _iso(),
+
+        "source_count": len(
+            sources
+        ),
+
+        "sources": sources,
+
+        "errors": errors,
+    }
 
 
 def extract_paragraphs(
