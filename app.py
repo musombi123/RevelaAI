@@ -51,6 +51,7 @@ from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from ai.image_prompt import build_image_prompt
 
 import jwt
 from dotenv import load_dotenv
@@ -1509,8 +1510,25 @@ def generate_image_response(
 
     try:
 
+        image_plan = build_image_prompt(message)
+
+        app.logger.info(
+            "IMAGE PROMPT PLANNED | "
+            "request_id=%s | domain=%s | style=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            image_plan.get("domain"),
+            image_plan.get("style"),
+        )
+
         image = generate_hf_image(
-            prompt=message,
+            prompt=image_plan["prompt"],
+            negative_prompt=image_plan.get(
+                "negative_prompt"
+            ),
             model=HF_IMAGE_MODEL_NAME,
             width=HF_IMAGE_WIDTH,
             height=HF_IMAGE_HEIGHT,
