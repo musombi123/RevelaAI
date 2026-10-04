@@ -51,7 +51,6 @@ from collections import OrderedDict
 from pathlib import Path
 from threading import Lock
 from typing import Any
-from ai.image_prompt import build_image_prompt
 
 import jwt
 from dotenv import load_dotenv
@@ -202,6 +201,8 @@ from ai.ai_client import (
 from ai.intent_router import (
     classify_intent,
 )
+
+from ai.image_prompt import build_image_prompt
 
 from ai.json_utils import (
     enforce_base_schema,
@@ -2505,8 +2506,15 @@ def ai_stream():
                     HF_IMAGE_MODEL_NAME,
                 )
 
+                image_plan = build_image_prompt(
+                    message
+                )
+
                 image = generate_hf_image(
-                    prompt=message,
+                    prompt=image_plan["prompt"],
+                    negative_prompt=image_plan.get(
+                        "negative_prompt"
+                    ),
                     model=HF_IMAGE_MODEL_NAME,
                     width=HF_IMAGE_WIDTH,
                     height=HF_IMAGE_HEIGHT,
@@ -2551,10 +2559,19 @@ def ai_stream():
                     },
                     "sources": [],
                     "meta": {
-                        "intent": "image_generation",
                         "provider": "huggingface",
                         "model": HF_IMAGE_MODEL_NAME,
                         "build_id": REVELAAI_BUILD_ID,
+                        "intent": "image_generation",
+                        "image_domain": image_plan.get(
+                            "domain"
+                        ),
+                        "image_style": image_plan.get(
+                            "style"
+                        ),
+                        "image_format": image_plan.get(
+                            "format"
+                        ),
                         "multimodal": {
                             "type": "image",
                         },
