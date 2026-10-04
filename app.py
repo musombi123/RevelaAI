@@ -36,6 +36,8 @@ Production principles:
     - Do not expose database testing endpoints.
     - Keep image/audio files temporary.
     - Image requests must never silently fall through to text AI.
+    - Conversation intent changes must never erase conversation memory.
+    - Browser-provided conversation context may rehydrate server memory.
 """
 
 from __future__ import annotations
@@ -55,11 +57,13 @@ from typing import Any
 import jwt
 from dotenv import load_dotenv
 
+
 # =========================================================
 # ENVIRONMENT
 # =========================================================
 
 load_dotenv()
+
 
 # =========================================================
 # REVELACODE AUTHENTICATION
@@ -111,9 +115,11 @@ def resolve_revelacode_user_id() -> str | None:
         return None
 
     if not JWT_SECRET:
+
         app.logger.error(
             "JWT_SECRET is not configured."
         )
+
         return None
 
     try:
@@ -202,7 +208,9 @@ from ai.intent_router import (
     classify_intent,
 )
 
-from ai.image_prompt import build_image_prompt
+from ai.image_prompt import (
+    build_image_prompt,
+)
 
 from ai.json_utils import (
     enforce_base_schema,
@@ -270,9 +278,11 @@ from whatsapp_webhook import (
 # APPLICATION CONFIGURATION
 # =========================================================
 
-BASE_DIR = Path(
-    __file__
-).resolve().parent
+BASE_DIR = (
+    Path(
+        __file__
+    ).resolve().parent
+)
 
 
 APP_NAME = (
@@ -307,15 +317,25 @@ PORT = int(
 MAX_CONTENT_LENGTH = int(
     os.getenv(
         "MAX_CONTENT_LENGTH",
-        str(25 * 1024 * 1024),
+        str(
+            25 * 1024 * 1024
+        ),
     )
 )
 
 
+# ---------------------------------------------------------
+# Conversation memory
+# ---------------------------------------------------------
+#
+# Keep the browser and backend context windows aligned.
+#
+# The frontend currently sends the last 12 messages.
+#
 MAX_HISTORY = int(
     os.getenv(
         "MAX_HISTORY",
-        "10",
+        "12",
     )
 )
 
@@ -331,7 +351,9 @@ MAX_SESSIONS = int(
 SESSION_TTL_SECONDS = int(
     os.getenv(
         "SESSION_TTL_SECONDS",
-        str(60 * 60),
+        str(
+            60 * 60
+        ),
     )
 )
 
@@ -347,7 +369,9 @@ DOCUMENT_MAX_MODEL_CHARS = int(
 VOICE_MAX_BYTES = int(
     os.getenv(
         "VOICE_MAX_BYTES",
-        str(10 * 1024 * 1024),
+        str(
+            10 * 1024 * 1024
+        ),
     )
 )
 
@@ -355,7 +379,9 @@ VOICE_MAX_BYTES = int(
 IMAGE_RETENTION_SECONDS = int(
     os.getenv(
         "IMAGE_RETENTION_SECONDS",
-        str(60 * 60),
+        str(
+            60 * 60
+        ),
     )
 )
 
@@ -363,7 +389,9 @@ IMAGE_RETENTION_SECONDS = int(
 AUDIO_RETENTION_SECONDS = int(
     os.getenv(
         "AUDIO_RETENTION_SECONDS",
-        str(60 * 60),
+        str(
+            60 * 60
+        ),
     )
 )
 
@@ -375,9 +403,10 @@ AUDIO_RETENTION_SECONDS = int(
 REVELAAI_BUILD_ID = (
     os.getenv(
         "REVELAAI_BUILD_ID",
-        "image-routing-v2",
-    ).strip()
-    or "image-routing-v2"
+        "image-routing-v2-memory-v1",
+    )
+    .strip()
+    or "image-routing-v2-memory-v1"
 )
 
 
@@ -389,7 +418,9 @@ REVELAAI_ENABLE_HF_TTS = (
     os.getenv(
         "REVELAAI_ENABLE_HF_TTS",
         "false",
-    ).strip().lower()
+    )
+    .strip()
+    .lower()
     in {
         "1",
         "true",
@@ -407,7 +438,8 @@ HF_IMAGE_MODEL_NAME = (
     os.getenv(
         "HF_IMAGE_MODEL",
         "black-forest-labs/FLUX.1-schnell",
-    ).strip()
+    )
+    .strip()
     or "black-forest-labs/FLUX.1-schnell"
 )
 
@@ -517,6 +549,7 @@ def parse_cors_origins() -> list[str]:
         origin = item.strip()
 
         if origin:
+
             origins.append(
                 origin
             )
@@ -524,7 +557,9 @@ def parse_cors_origins() -> list[str]:
     return origins
 
 
-CORS_ORIGINS = parse_cors_origins()
+CORS_ORIGINS = (
+    parse_cors_origins()
+)
 
 
 CORS(
@@ -577,10 +612,9 @@ def attach_request_id():
 
 
 @app.after_request
-def add_response_headers(response):
-    """
-    Add production response headers.
-    """
+def add_response_headers(
+    response,
+):
 
     request_id = getattr(
         g,
@@ -589,6 +623,7 @@ def add_response_headers(response):
     )
 
     if request_id:
+
         response.headers[
             "X-Request-ID"
         ] = request_id
@@ -615,7 +650,9 @@ def add_response_headers(response):
 @app.errorhandler(
     RequestEntityTooLarge
 )
-def handle_request_too_large(error):
+def handle_request_too_large(
+    error,
+):
 
     return jsonify(
         error_response(
@@ -629,7 +666,9 @@ def handle_request_too_large(error):
 
 
 @app.errorhandler(404)
-def handle_not_found(error):
+def handle_not_found(
+    error,
+):
 
     return jsonify({
         "status": "error",
@@ -646,7 +685,9 @@ def handle_not_found(error):
 
 
 @app.errorhandler(405)
-def handle_method_not_allowed(error):
+def handle_method_not_allowed(
+    error,
+):
 
     return jsonify({
         "status": "error",
@@ -663,7 +704,9 @@ def handle_method_not_allowed(error):
 
 
 @app.errorhandler(Exception)
-def handle_unexpected_error(error):
+def handle_unexpected_error(
+    error,
+):
     """
     Production catch-all.
 
@@ -706,6 +749,7 @@ SESSION_MEMORY: OrderedDict[
     dict[str, Any]
 ] = OrderedDict()
 
+
 SESSION_LOCK = Lock()
 
 
@@ -718,7 +762,9 @@ def _prune_session_memory() -> None:
 
     expired = []
 
-    for session_id, session in SESSION_MEMORY.items():
+    for session_id, session in (
+        SESSION_MEMORY.items()
+    ):
 
         updated_at = float(
             session.get(
@@ -731,6 +777,7 @@ def _prune_session_memory() -> None:
             now - updated_at
             > SESSION_TTL_SECONDS
         ):
+
             expired.append(
                 session_id
             )
@@ -774,9 +821,9 @@ def get_session_id() -> str:
 
     if header_id:
 
-        session_id = header_id[
-            :128
-        ]
+        session_id = (
+            header_id[:128]
+        )
 
     else:
 
@@ -789,15 +836,19 @@ def get_session_id() -> str:
 
         if cookie_id:
 
-            session_id = cookie_id[
-                :128
-            ]
+            session_id = (
+                cookie_id[:128]
+            )
 
         else:
 
-            session_id = uuid.uuid4().hex
+            session_id = (
+                uuid.uuid4().hex
+            )
 
-    g.revelaai_session_id = session_id
+    g.revelaai_session_id = (
+        session_id
+    )
 
     return session_id
 
@@ -813,8 +864,10 @@ def get_session(
 
         _prune_session_memory()
 
-        existing = SESSION_MEMORY.get(
-            session_id
+        existing = (
+            SESSION_MEMORY.get(
+                session_id
+            )
         )
 
         if existing is None:
@@ -874,11 +927,288 @@ def save_session(
 
 
 # =========================================================
+# CLIENT CONVERSATION CONTEXT
+# =========================================================
+
+def normalize_client_context(
+    raw_context: Any,
+) -> list[dict[str, str]]:
+    """
+    Normalize conversation context supplied by the frontend.
+
+    Supported structured input:
+
+        [
+            {"role": "user", "content": "..."},
+            {"role": "assistant", "content": "..."}
+        ]
+
+    Backward compatibility is also supported for the older
+    frontend format:
+
+        User: ...
+        Assistant: ...
+    """
+
+    # -----------------------------------------------------
+    # STRUCTURED CONTEXT
+    # -----------------------------------------------------
+
+    if isinstance(
+        raw_context,
+        list,
+    ):
+
+        normalized: list[
+            dict[str, str]
+        ] = []
+
+        for item in raw_context:
+
+            if not isinstance(
+                item,
+                dict,
+            ):
+                continue
+
+            role = str(
+                item.get(
+                    "role",
+                    "user",
+                )
+                or "user"
+            ).strip().lower()
+
+            if role not in {
+                "user",
+                "assistant",
+            }:
+
+                role = "user"
+
+            content = str(
+                item.get(
+                    "content",
+                    "",
+                )
+                or ""
+            ).strip()
+
+            if not content:
+                continue
+
+            normalized.append({
+                "role": role,
+                "content": content,
+            })
+
+        return normalized[
+            -MAX_HISTORY:
+        ]
+
+    # -----------------------------------------------------
+    # LEGACY TEXT CONTEXT
+    # -----------------------------------------------------
+
+    if isinstance(
+        raw_context,
+        str,
+    ):
+
+        context_text = (
+            raw_context.strip()
+        )
+
+        if not context_text:
+            return []
+
+        normalized: list[
+            dict[str, str]
+        ] = []
+
+        for line in (
+            context_text.splitlines()
+        ):
+
+            line = line.strip()
+
+            if not line:
+                continue
+
+            if line.startswith(
+                "User:"
+            ):
+
+                content = (
+                    line[
+                        len("User:"):
+                    ].strip()
+                )
+
+                if content:
+
+                    normalized.append({
+                        "role": "user",
+                        "content": content,
+                    })
+
+            elif line.startswith(
+                "Assistant:"
+            ):
+
+                content = (
+                    line[
+                        len("Assistant:"):
+                    ].strip()
+                )
+
+                if content:
+
+                    normalized.append({
+                        "role": "assistant",
+                        "content": content,
+                    })
+
+        return normalized[
+            -MAX_HISTORY:
+        ]
+
+    return []
+
+
+def build_server_context(
+    session: dict[str, Any],
+) -> list[dict[str, str]]:
+    """
+    Build normalized conversation context from the server
+    session.
+    """
+
+    messages = (
+        session.get(
+            "messages",
+            [],
+        )
+    )
+
+    if not isinstance(
+        messages,
+        list,
+    ):
+
+        return []
+
+    normalized: list[
+        dict[str, str]
+    ] = []
+
+    for item in messages:
+
+        if not isinstance(
+            item,
+            dict,
+        ):
+            continue
+
+        role = str(
+            item.get(
+                "role",
+                "user",
+            )
+            or "user"
+        ).strip().lower()
+
+        if role not in {
+            "user",
+            "assistant",
+        }:
+
+            role = "user"
+
+        content = str(
+            item.get(
+                "content",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if not content:
+            continue
+
+        normalized.append({
+            "role": role,
+            "content": content,
+        })
+
+    return normalized[
+        -MAX_HISTORY:
+    ]
+
+
+def resolve_conversation_context(
+    session: dict[str, Any],
+    client_context: Any = None,
+) -> tuple[
+    list[dict[str, str]],
+    str,
+]:
+    """
+    Resolve the best available conversation memory.
+
+    Priority:
+
+        1. Client/browser context
+        2. Server session context
+
+    When client context exists, it is also used to
+    rehydrate the server-side session so conversation
+    continuity survives ordinary server-session loss.
+    """
+
+    normalized_client = (
+        normalize_client_context(
+            client_context
+        )
+    )
+
+    if normalized_client:
+
+        session[
+            "messages"
+        ] = list(
+            normalized_client[
+                -MAX_HISTORY:
+            ]
+        )
+
+        return (
+            normalized_client[
+                -MAX_HISTORY:
+            ],
+            "client_context",
+        )
+
+    server_context = (
+        build_server_context(
+            session
+        )
+    )
+
+    return (
+        server_context,
+        "server_session",
+    )
+
+
+# =========================================================
 # SESSION COOKIE
 # =========================================================
 
 @app.after_request
-def set_session_cookie(response):
+def set_session_cookie(
+    response,
+):
     """
     Set a session cookie for same-origin deployments.
 
@@ -922,6 +1252,7 @@ DEFAULT_IMAGE_DIR = os.path.join(
     "revelaai_images",
 )
 
+
 DEFAULT_AUDIO_DIR = os.path.join(
     tempfile.gettempdir(),
     "revelaai_audio",
@@ -950,6 +1281,7 @@ os.makedirs(
     IMAGE_DIR,
     exist_ok=True,
 )
+
 
 os.makedirs(
     AUDIO_DIR,
@@ -982,7 +1314,9 @@ def cleanup_generated_files() -> None:
         ),
     ]
 
-    for directory, retention in directories:
+    for directory, retention in (
+        directories
+    ):
 
         try:
 
@@ -1010,6 +1344,7 @@ def cleanup_generated_files() -> None:
                     OSError,
                     ValueError,
                 ):
+
                     continue
 
         except OSError:
@@ -1047,12 +1382,14 @@ def load_features():
             not path.is_file()
             or path.suffix != ".py"
         ):
+
             continue
 
         if path.name in {
             "loader.py",
             "__init__.py",
         }:
+
             continue
 
         module_name = (
@@ -1067,9 +1404,11 @@ def load_features():
                 )
             )
 
-            for name, obj in inspect.getmembers(
-                module,
-                inspect.isclass,
+            for name, obj in (
+                inspect.getmembers(
+                    module,
+                    inspect.isclass,
+                )
             ):
 
                 if (
@@ -1316,8 +1655,10 @@ def process_uploaded_document(
                 "filename": safe_name,
                 "mime_type": (
                     file_storage.mimetype
-                    or "application/vnd.openxmlformats-officedocument."
-                       "wordprocessingml.document"
+                    or (
+                        "application/vnd.openxmlformats-officedocument."
+                        "wordprocessingml.document"
+                    )
                 ),
                 "truncated_for_model": (
                     len(content)
@@ -1467,9 +1808,12 @@ def is_image_generation_request(
     if not lowered:
         return False
 
-    for phrase in IMAGE_INTENT_PHRASES:
+    for phrase in (
+        IMAGE_INTENT_PHRASES
+    ):
 
         if phrase in lowered:
+
             return True
 
     return False
@@ -1511,7 +1855,11 @@ def generate_image_response(
 
     try:
 
-        image_plan = build_image_prompt(message)
+        image_plan = (
+            build_image_prompt(
+                message
+            )
+        )
 
         app.logger.info(
             "IMAGE PROMPT PLANNED | "
@@ -1521,12 +1869,18 @@ def generate_image_response(
                 "request_id",
                 None,
             ),
-            image_plan.get("domain"),
-            image_plan.get("style"),
+            image_plan.get(
+                "domain"
+            ),
+            image_plan.get(
+                "style"
+            ),
         )
 
         image = generate_hf_image(
-            prompt=image_plan["prompt"],
+            prompt=image_plan[
+                "prompt"
+            ],
             negative_prompt=image_plan.get(
                 "negative_prompt"
             ),
@@ -1643,6 +1997,7 @@ def generate_image_response(
         ),
         filename,
         image_url,
+        image_url,
     )
 
     response = enforce_base_schema(
@@ -1714,7 +2069,9 @@ def feature_chat():
 
     responses = {}
 
-    for name, feature in FEATURES.items():
+    for name, feature in (
+        FEATURES.items()
+    ):
 
         try:
 
@@ -1900,7 +2257,9 @@ def ai_assistant():
 
     cleanup_generated_files()
 
-    session_id = get_session_id()
+    session_id = (
+        get_session_id()
+    )
 
     user_id = (
         resolve_revelacode_user_id()
@@ -1918,6 +2277,7 @@ def ai_assistant():
 
         message = ""
         attachment_metadata = None
+        raw_client_context: Any = None
 
         uploaded = (
             request.files.get(
@@ -1929,6 +2289,18 @@ def ai_assistant():
         )
 
         if uploaded:
+
+            # -------------------------------------------------
+            # MULTIPART REQUEST
+            # -------------------------------------------------
+
+            raw_client_context = (
+                request.form.get(
+                    "context",
+                    "",
+                )
+                or ""
+            )
 
             try:
 
@@ -1959,6 +2331,10 @@ def ai_assistant():
 
         else:
 
+            # -------------------------------------------------
+            # JSON REQUEST
+            # -------------------------------------------------
+
             payload = (
                 request.get_json(
                     silent=True
@@ -1974,6 +2350,13 @@ def ai_assistant():
                 or ""
             ).strip()
 
+            raw_client_context = (
+                payload.get(
+                    "context",
+                    [],
+                )
+            )
+
         if not message:
 
             return jsonify(
@@ -1982,6 +2365,34 @@ def ai_assistant():
                     "Message or file required.",
                 )
             ), 400
+
+        # -------------------------------------------------
+        # CONVERSATION MEMORY
+        # -------------------------------------------------
+
+        (
+            previous_context,
+            memory_source,
+        ) = resolve_conversation_context(
+            session,
+            raw_client_context,
+        )
+
+        app.logger.info(
+            "CONVERSATION MEMORY | "
+            "request_id=%s | session=%s | "
+            "source=%s | messages=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            session_id,
+            memory_source,
+            len(
+                previous_context
+            ),
+        )
 
         # -------------------------------------------------
         # INTENT
@@ -1999,7 +2410,9 @@ def ai_assistant():
 
         if image_request:
 
-            intent = "image_generation"
+            intent = (
+                "image_generation"
+            )
 
         app.logger.info(
             "IMAGE ROUTING | "
@@ -2016,33 +2429,37 @@ def ai_assistant():
             message[:200],
         )
 
-        lowered = message.lower()
+        lowered = (
+            message.lower()
+        )
 
         # -------------------------------------------------
-        # TOPIC RESET
+        # CONVERSATION CONTINUITY
+        # -------------------------------------------------
+        #
+        # Intent is the CURRENT request.
+        #
+        # Intent is NOT the conversation identity.
+        #
+        # Therefore:
+        #
+        # ecosystem -> investors -> business -> image
+        #
+        # remains one conversation.
         # -------------------------------------------------
 
-        if session.get(
+        session[
             "topic"
-        ) != intent:
-
-            session[
-                "messages"
-            ] = []
-
-            session[
-                "topic"
-            ] = intent
+        ] = intent
 
         # -------------------------------------------------
         # IMAGE GENERATION
         # -------------------------------------------------
 
-        # IMPORTANT:
-        # Image requests return immediately.
-        # They NEVER enter process_message().
-        # This prevents GPT-OSS from hallucinating image
-        # markdown instead of invoking FLUX.
+        # Image requests intentionally bypass the normal
+        # text-generation pipeline.
+        #
+        # They are still saved into conversation memory.
 
         if intent == "image_generation":
 
@@ -2052,37 +2469,41 @@ def ai_assistant():
                 )
             )
 
+            # -------------------------------------------------
+            # SAVE IMAGE CONVERSATION
+            # -------------------------------------------------
+
+            session[
+                "messages"
+            ].append({
+                "role": "user",
+                "content": message,
+            })
+
+            if image_result.get(
+                "ok",
+                False,
+            ):
+
+                session[
+                    "messages"
+                ].append({
+                    "role": "assistant",
+                    "content": (
+                        "Generated an image based on the request: "
+                        f"{message}"
+                    ),
+                })
+
+            save_session(
+                session_id,
+                session,
+            )
+
             return (
                 image_result["response"],
                 image_result["status_code"],
             )
-
-        # -------------------------------------------------
-        # PREVIOUS CONVERSATION
-        # -------------------------------------------------
-
-        previous_context = [
-            {
-                "role": item.get(
-                    "role",
-                    "user",
-                ),
-                "content": item.get(
-                    "content",
-                    "",
-                ),
-            }
-            for item in list(
-                session.get(
-                    "messages",
-                    [],
-                )
-            )
-            if isinstance(
-                item,
-                dict,
-            )
-        ]
 
         # -------------------------------------------------
         # SAVE USER MESSAGE
@@ -2203,7 +2624,7 @@ def ai_assistant():
         orchestrator_data = (
             ai_result.get(
                 "orchestrator",
-                {}
+                {},
             )
         )
 
@@ -2241,7 +2662,19 @@ def ai_assistant():
                 "huggingface",
             ),
 
-            "memory": "bounded-session",
+            "memory": {
+                "enabled": True,
+                "type": "conversation",
+                "source": memory_source,
+                "context_messages": len(
+                    previous_context
+                ),
+                "session_id": session_id,
+                "server_session": (
+                    "bounded_in_memory"
+                ),
+                "browser_restore_supported": True,
+            },
 
             "intent": ai_result.get(
                 "intent",
@@ -2439,7 +2872,9 @@ def ai_stream():
             )
         ), 400
 
-    session_id = get_session_id()
+    session_id = (
+        get_session_id()
+    )
 
     user_id = (
         resolve_revelacode_user_id()
@@ -2447,6 +2882,41 @@ def ai_stream():
 
     session = get_session(
         session_id
+    )
+
+    # -----------------------------------------------------
+    # CONVERSATION MEMORY
+    # -----------------------------------------------------
+
+    raw_client_context = (
+        payload.get(
+            "context",
+            [],
+        )
+    )
+
+    (
+        previous_context,
+        memory_source,
+    ) = resolve_conversation_context(
+        session,
+        raw_client_context,
+    )
+
+    app.logger.info(
+        "STREAM CONVERSATION MEMORY | "
+        "request_id=%s | session=%s | "
+        "source=%s | messages=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        session_id,
+        memory_source,
+        len(
+            previous_context
+        ),
     )
 
     # -----------------------------------------------------
@@ -2465,7 +2935,9 @@ def ai_stream():
 
     if image_request:
 
-        intent = "image_generation"
+        intent = (
+            "image_generation"
+        )
 
     app.logger.info(
         "STREAM ROUTING | "
@@ -2479,6 +2951,10 @@ def ai_stream():
         intent,
         REVELAAI_BUILD_ID,
     )
+
+    session[
+        "topic"
+    ] = intent
 
     # -----------------------------------------------------
     # IMAGE STREAMING
@@ -2506,12 +2982,16 @@ def ai_stream():
                     HF_IMAGE_MODEL_NAME,
                 )
 
-                image_plan = build_image_prompt(
-                    message
+                image_plan = (
+                    build_image_prompt(
+                        message
+                    )
                 )
 
                 image = generate_hf_image(
-                    prompt=image_plan["prompt"],
+                    prompt=image_plan[
+                        "prompt"
+                    ],
                     negative_prompt=image_plan.get(
                         "negative_prompt"
                     ),
@@ -2522,6 +3002,7 @@ def ai_stream():
                 )
 
                 if image is None:
+
                     raise RuntimeError(
                         "Hugging Face returned no image."
                     )
@@ -2547,31 +3028,74 @@ def ai_stream():
                     + filename
                 )
 
+                # -------------------------------------------------
+                # SAVE IMAGE CONVERSATION
+                # -------------------------------------------------
+
+                session[
+                    "messages"
+                ].append({
+                    "role": "user",
+                    "content": message,
+                })
+
+                session[
+                    "messages"
+                ].append({
+                    "role": "assistant",
+                    "content": (
+                        "Generated an image based on the request: "
+                        f"{message}"
+                    ),
+                })
+
+                save_session(
+                    session_id,
+                    session,
+                )
+
                 image_payload = {
                     "success": True,
                     "mode": "image",
                     "query": message,
+
                     "data": {
                         "type": "image",
                         "urls": [
                             image_url
                         ],
                     },
+
                     "sources": [],
+
                     "meta": {
                         "provider": "huggingface",
                         "model": HF_IMAGE_MODEL_NAME,
                         "build_id": REVELAAI_BUILD_ID,
                         "intent": "image_generation",
+
+                        "memory": {
+                            "enabled": True,
+                            "type": "conversation",
+                            "source": memory_source,
+                            "context_messages": len(
+                                previous_context
+                            ),
+                            "session_id": session_id,
+                        },
+
                         "image_domain": image_plan.get(
                             "domain"
                         ),
+
                         "image_style": image_plan.get(
                             "style"
                         ),
+
                         "image_format": image_plan.get(
                             "format"
                         ),
+
                         "multimodal": {
                             "type": "image",
                         },
@@ -2631,29 +3155,6 @@ def ai_stream():
     # -----------------------------------------------------
     # NORMAL STREAMING
     # -----------------------------------------------------
-
-    previous_context = [
-        {
-            "role": item.get(
-                "role",
-                "user",
-            ),
-            "content": item.get(
-                "content",
-                "",
-            ),
-        }
-        for item in list(
-            session.get(
-                "messages",
-                [],
-            )
-        )
-        if isinstance(
-            item,
-            dict,
-        )
-    ]
 
     session[
         "messages"
@@ -2720,13 +3221,25 @@ def ai_stream():
                         intent,
                     )
                 ),
+
                 "domain": (
                     ai_result.get(
                         "domain",
                         "general",
                     )
                 ),
+
                 "build_id": REVELAAI_BUILD_ID,
+
+                "memory": {
+                    "enabled": True,
+                    "type": "conversation",
+                    "source": memory_source,
+                    "context_messages": len(
+                        previous_context
+                    ),
+                    "session_id": session_id,
+                },
             }
 
             yield (
@@ -2760,7 +3273,12 @@ def ai_stream():
 
     response = Response(
         generate(),
-        mimetype="text/event-stream",
+        mimetype="text/event-event-stream",
+    )
+
+    # Correct MIME type after construction.
+    response.mimetype = (
+        "text/event-stream"
     )
 
     response.headers[
@@ -2831,7 +3349,9 @@ def voice():
             "build_id": REVELAAI_BUILD_ID,
         }), 400
 
-    audio_bytes = uploaded.read()
+    audio_bytes = (
+        uploaded.read()
+    )
 
     if not audio_bytes:
 
@@ -2922,7 +3442,9 @@ def voice():
     # NORMAL REVELAAI PIPELINE
     # -----------------------------------------------------
 
-    session_id = get_session_id()
+    session_id = (
+        get_session_id()
+    )
 
     user_id = (
         resolve_revelacode_user_id()
@@ -2932,28 +3454,29 @@ def voice():
         session_id
     )
 
-    previous_context = [
-        {
-            "role": item.get(
-                "role",
-                "user",
-            ),
-            "content": item.get(
-                "content",
-                "",
-            ),
-        }
-        for item in list(
-            session.get(
-                "messages",
-                [],
-            )
+    # -----------------------------------------------------
+    # VOICE CONVERSATION MEMORY
+    # -----------------------------------------------------
+
+    previous_context = (
+        build_server_context(
+            session
         )
-        if isinstance(
-            item,
-            dict,
-        )
-    ]
+    )
+
+    app.logger.info(
+        "VOICE CONVERSATION MEMORY | "
+        "request_id=%s | session=%s | messages=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        session_id,
+        len(
+            previous_context
+        ),
+    )
 
     intent = classify_intent(
         heard
@@ -2965,7 +3488,9 @@ def voice():
         heard
     ):
 
-        intent = "image_generation"
+        intent = (
+            "image_generation"
+        )
 
         app.logger.info(
             "VOICE IMAGE ROUTING | "
@@ -2977,6 +3502,10 @@ def voice():
             ),
             REVELAAI_BUILD_ID,
         )
+
+    session[
+        "topic"
+    ] = intent
 
     # -----------------------------------------------------
     # VOICE IMAGE REQUEST
@@ -3001,9 +3530,6 @@ def voice():
                     image_result["response"],
                     image_result["status_code"],
                 )
-
-            # Use the generated image URL as the spoken
-            # response metadata. TTS remains optional.
 
             image_url = (
                 image_result.get(
@@ -3040,6 +3566,7 @@ def voice():
                 ),
                 "image_url": image_url,
                 "audio_url": None,
+
                 "voice": {
                     "input": transcription,
                     "output": {
@@ -3049,12 +3576,23 @@ def voice():
                         ),
                     },
                 },
+
                 "meta": {
                     "intent": "image_generation",
                     "domain": "image",
                     "provider": "huggingface",
                     "model": HF_IMAGE_MODEL_NAME,
                     "build_id": REVELAAI_BUILD_ID,
+
+                    "memory": {
+                        "enabled": True,
+                        "type": "conversation",
+                        "source": "server_session",
+                        "context_messages": len(
+                            previous_context
+                        ),
+                        "session_id": session_id,
+                    },
                 },
             })
 
@@ -3187,6 +3725,7 @@ def voice():
             "heard": heard,
             "response": response_text,
             "audio_url": None,
+
             "voice": {
                 "input": transcription,
                 "output": {
@@ -3194,6 +3733,7 @@ def voice():
                     "reason": "tts_disabled",
                 },
             },
+
             "meta": {
                 "intent": ai_result.get(
                     "intent",
@@ -3204,6 +3744,16 @@ def voice():
                     "general",
                 ),
                 "build_id": REVELAAI_BUILD_ID,
+
+                "memory": {
+                    "enabled": True,
+                    "type": "conversation",
+                    "source": "server_session",
+                    "context_messages": len(
+                        previous_context
+                    ),
+                    "session_id": session_id,
+                },
             },
         })
 
@@ -3233,6 +3783,7 @@ def voice():
             "heard": heard,
             "response": response_text,
             "audio_url": None,
+
             "voice": {
                 "input": transcription,
                 "output": {
@@ -3240,6 +3791,7 @@ def voice():
                     "reason": "tts_provider_failed",
                 },
             },
+
             "meta": {
                 "intent": ai_result.get(
                     "intent",
@@ -3250,6 +3802,16 @@ def voice():
                     "general",
                 ),
                 "build_id": REVELAAI_BUILD_ID,
+
+                "memory": {
+                    "enabled": True,
+                    "type": "conversation",
+                    "source": "server_session",
+                    "context_messages": len(
+                        previous_context
+                    ),
+                    "session_id": session_id,
+                },
             },
         })
 
@@ -3260,6 +3822,7 @@ def voice():
             "heard": heard,
             "response": response_text,
             "audio_url": None,
+
             "voice": {
                 "input": transcription,
                 "output": {
@@ -3267,6 +3830,7 @@ def voice():
                     "reason": "empty_tts_response",
                 },
             },
+
             "meta": {
                 "intent": ai_result.get(
                     "intent",
@@ -3277,6 +3841,16 @@ def voice():
                     "general",
                 ),
                 "build_id": REVELAAI_BUILD_ID,
+
+                "memory": {
+                    "enabled": True,
+                    "type": "conversation",
+                    "source": "server_session",
+                    "context_messages": len(
+                        previous_context
+                    ),
+                    "session_id": session_id,
+                },
             },
         })
 
@@ -3284,7 +3858,8 @@ def voice():
         os.getenv(
             "HF_TTS_MIME_TYPE",
             "audio/wav",
-        ).strip()
+        )
+        .strip()
         or "audio/wav"
     )
 
@@ -3334,6 +3909,7 @@ def voice():
             "heard": heard,
             "response": response_text,
             "audio_url": None,
+
             "voice": {
                 "input": transcription,
                 "output": {
@@ -3341,6 +3917,7 @@ def voice():
                     "reason": "audio_save_failed",
                 },
             },
+
             "meta": {
                 "intent": ai_result.get(
                     "intent",
@@ -3351,6 +3928,16 @@ def voice():
                     "general",
                 ),
                 "build_id": REVELAAI_BUILD_ID,
+
+                "memory": {
+                    "enabled": True,
+                    "type": "conversation",
+                    "source": "server_session",
+                    "context_messages": len(
+                        previous_context
+                    ),
+                    "session_id": session_id,
+                },
             },
         })
 
@@ -3398,6 +3985,16 @@ def voice():
                 "general",
             ),
             "build_id": REVELAAI_BUILD_ID,
+
+            "memory": {
+                "enabled": True,
+                "type": "conversation",
+                "source": "server_session",
+                "context_messages": len(
+                    previous_context
+                ),
+                "session_id": session_id,
+            },
         },
     })
 
@@ -3539,6 +4136,7 @@ def health():
         "build": {
             "id": REVELAAI_BUILD_ID,
             "image_routing": "explicit",
+            "conversation_memory": "client-context-plus-session",
         },
 
         "providers": {
@@ -3591,6 +4189,9 @@ def health():
             ),
             "max_sessions": MAX_SESSIONS,
             "ttl_seconds": SESSION_TTL_SECONDS,
+            "max_history_messages": MAX_HISTORY,
+            "server_storage": "in_memory",
+            "browser_context_supported": True,
         },
     })
 
