@@ -1962,4 +1962,7 @@ __all__ = [
     "normalize_query",
     "is_realtime_query",
     "is_news_query",
+    "extract_urls",
+    "fetch_url_source",
+    "fetch_direct_urls",
 ]
