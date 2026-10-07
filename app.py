@@ -213,7 +213,7 @@ from ai.intent_router import (
     classify_intent,
 )
 
-from ai.image_planner import (
+from ai.image_prompt import (
     build_image_prompt,
 )
 
