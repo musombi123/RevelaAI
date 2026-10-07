@@ -9,6 +9,7 @@ Production-side provider client for:
     - Speech recognition
     - Text-to-speech
 
+
 Architecture
 ------------
 
@@ -18,40 +19,39 @@ Architecture
                        |
                     AI Client
                        |
-          +------------+-------------+
-          |            |             |
-          v            v             v
-      OpenRouter      MVI         Hugging Face
-       Text AI      Optional      Images/Voice
+          +------------+----------------+
+          |            |                |
+          v            v                v
+        Gemini         MVI          Hugging Face
+        Text AI      Optional        Images/Voice
           |
           +--> Primary:
-          |      DeepSeek V4.1 Flash
+          |      Gemini 3.8 Flash
           |
-          +--> Model fallback:
-                 GLM 5.3 Flash
+          +--> Fallback:
+                 Gemini 3.5 Flash-Lite
 
 
 TEXT
 ----
 
-Primary text provider:
-    OpenRouter
+Primary provider:
+    Gemini API
 
 Primary model:
-    deepseek/deepseek-v4.1-flash
+    gemini-3.8-flash
 
 Fallback model:
-    z-ai/glm-5.3-flash
+    gemini-3.5-flash-lite
 
-MVI is NOT the default text provider.
+MVI is intentionally NOT part of the default text path.
 
 MVI remains available through:
     ask_mvi()
 
-and can optionally be inserted into the provider order
-through:
+It may be explicitly enabled through:
 
-    REVELAAI_TEXT_PROVIDERS=openrouter,mvi,huggingface
+    REVELAAI_TEXT_PROVIDERS=gemini,mvi
 
 
 HUGGING FACE
@@ -71,20 +71,16 @@ Never expose HF_TOKEN to the frontend.
 IMPORTANT
 ---------
 
-The previous hard-coded models:
+The old hard-coded models are NOT used:
 
     openai/gpt-oss-120b:cheapest
     openai/gpt-oss-20b:cheapest
 
-are NOT used anymore.
-
-OpenRouter is used through its OpenAI-compatible HTTP API.
-
-Secrets are never logged.
 
 Existing public APIs are preserved:
 
     ask_hf()
+    ask_gemini()
     ask_mvi()
     generate_image()
     generate_hf_image()
@@ -99,6 +95,7 @@ import os
 import time
 import wave
 from typing import Any
+from urllib.parse import quote
 
 import requests
 from dotenv import load_dotenv
@@ -125,93 +122,55 @@ REQUEST_USER_AGENT = (
 
 
 # =========================================================
-# OPENROUTER CONFIGURATION
+# GEMINI CONFIGURATION
 # =========================================================
 #
-# OpenRouter is the PRIMARY text provider.
+# Gemini is now the PRIMARY text provider.
 #
-# Current model strategy:
+# Current strategy:
 #
-#     primary  -> DeepSeek V4.1 Flash
-#     fallback -> GLM 5.3 Flash
+#     Primary:
+#         gemini-3.8-flash
 #
-# Both are configurable in Render without changing code.
+#     Fallback:
+#         gemini-3.5-flash-lite
+#
+# The values are configurable through Render environment
+# variables without changing this file.
 #
 
-OPENROUTER_API_KEY = (
+GEMINI_API_KEY = (
     os.getenv(
-        "OPENROUTER_API_KEY",
+        "GEMINI_API_KEY",
         "",
     ).strip()
 )
 
-OPENROUTER_API_URL = (
+GEMINI_API_BASE_URL = (
     os.getenv(
-        "OPENROUTER_API_URL",
-        "https://openrouter.ai/api/v1/chat/completions",
+        "GEMINI_API_BASE_URL",
+        "https://generativelanguage.googleapis.com/v1beta/models",
+    ).strip()
+    or "https://generativelanguage.googleapis.com/v1beta/models"
+)
+
+GEMINI_MODEL = (
+    os.getenv(
+        "GEMINI_MODEL",
+        "gemini-3.8-flash",
     ).strip()
 )
 
-OPENROUTER_MODEL = (
+GEMINI_FALLBACK_MODEL = (
     os.getenv(
-        "OPENROUTER_MODEL",
-        "deepseek/deepseek-v4.1-flash",
+        "GEMINI_FALLBACK_MODEL",
+        "gemini-3.5-flash-lite",
     ).strip()
 )
 
-OPENROUTER_FALLBACK_MODEL = (
+GEMINI_ENABLED = (
     os.getenv(
-        "OPENROUTER_FALLBACK_MODEL",
-        "z-ai/glm-5.3-flash",
-    ).strip()
-)
-
-OPENROUTER_TIMEOUT = float(
-    os.getenv(
-        "OPENROUTER_TIMEOUT",
-        "120",
-    )
-)
-
-OPENROUTER_MAX_TOKENS = int(
-    os.getenv(
-        "OPENROUTER_MAX_TOKENS",
-        "4096",
-    )
-)
-
-OPENROUTER_TEMPERATURE = float(
-    os.getenv(
-        "OPENROUTER_TEMPERATURE",
-        "0.7",
-    )
-)
-
-OPENROUTER_REFERER = (
-    os.getenv(
-        "OPENROUTER_REFERER",
-        "https://revelacode-frontend.onrender.com",
-    ).strip()
-)
-
-OPENROUTER_TITLE = (
-    os.getenv(
-        "OPENROUTER_TITLE",
-        "RevelaAI",
-    ).strip()
-    or "RevelaAI"
-)
-
-OPENROUTER_CATEGORIES = (
-    os.getenv(
-        "OPENROUTER_CATEGORIES",
-        "cloud-agent,coding",
-    ).strip()
-)
-
-OPENROUTER_ENABLED = (
-    os.getenv(
-        "OPENROUTER_ENABLED",
+        "GEMINI_ENABLED",
         "true",
     ).strip().lower()
     not in {
@@ -222,17 +181,43 @@ OPENROUTER_ENABLED = (
     }
 )
 
+GEMINI_CONNECT_TIMEOUT = float(
+    os.getenv(
+        "GEMINI_CONNECT_TIMEOUT",
+        "10",
+    )
+)
+
+GEMINI_READ_TIMEOUT = float(
+    os.getenv(
+        "GEMINI_READ_TIMEOUT",
+        "120",
+    )
+)
+
+GEMINI_MAX_OUTPUT_TOKENS = int(
+    os.getenv(
+        "GEMINI_MAX_OUTPUT_TOKENS",
+        "4096",
+    )
+)
+
+GEMINI_TEMPERATURE = float(
+    os.getenv(
+        "GEMINI_TEMPERATURE",
+        "0.7",
+    )
+)
+
 
 # =========================================================
 # MVI AI ENGINE
 # =========================================================
 #
-# MVI is now OPTIONAL.
+# MVI is optional.
 #
-# It is intentionally NOT the default text provider.
-#
-# Use ask_mvi() for direct access, or explicitly add MVI
-# to REVELAAI_TEXT_PROVIDERS.
+# It is kept as a separate proprietary provider and is NOT
+# used unless explicitly included in the provider order.
 #
 
 MVI_API_URL = (
@@ -288,10 +273,11 @@ HF_API_URL = (
     ).strip()
 )
 
+
 # Optional HF text model.
 #
-# We do NOT assign a default model here because the HF
-# account may not have text inference credits configured.
+# No default is supplied because HF text generation may be
+# unavailable when inference credits are exhausted.
 #
 
 HF_MODEL = (
@@ -315,33 +301,35 @@ HF_FALLBACK_MODEL = (
 #
 # Default:
 #
-#     openrouter
+#     gemini
 #
-# Optional examples:
+# Optional:
 #
-#     openrouter,mvi
+#     gemini,mvi
 #
-#     openrouter,huggingface
+#     gemini,huggingface
 #
-#     openrouter,mvi,huggingface
+#     gemini,mvi,huggingface
 #
-# OpenRouter itself already supports model-level fallback
-# from OPENROUTER_MODEL to OPENROUTER_FALLBACK_MODEL.
+# Gemini itself performs model-level fallback:
+#
+#     Gemini 3.8 Flash
+#         ->
+#     Gemini 3.5 Flash-Lite
 #
 
 TEXT_PROVIDER_ORDER = [
     item.strip().lower()
     for item in os.getenv(
         "REVELAAI_TEXT_PROVIDERS",
-        "openrouter",
+        "gemini",
     ).split(",")
     if item.strip()
 ]
 
 if not TEXT_PROVIDER_ORDER:
-
     TEXT_PROVIDER_ORDER = [
-        "openrouter",
+        "gemini",
     ]
 
 
@@ -390,46 +378,16 @@ HF_IMAGE_TEXT_PROVIDER = (
 # =========================================================
 
 IMAGE_SIZE_PRESETS: dict[str, tuple[int, int]] = {
-    "square": (
-        1024,
-        1024,
-    ),
-    "portrait": (
-        832,
-        1216,
-    ),
-    "landscape": (
-        1216,
-        832,
-    ),
-    "wide": (
-        1536,
-        864,
-    ),
-    "story": (
-        864,
-        1536,
-    ),
-    "banner": (
-        1536,
-        512,
-    ),
-    "social_portrait": (
-        1088,
-        1360,
-    ),
-    "social_landscape": (
-        1360,
-        768,
-    ),
-    "presentation": (
-        1280,
-        720,
-    ),
-    "phone": (
-        768,
-        1365,
-    ),
+    "square": (1024, 1024),
+    "portrait": (832, 1216),
+    "landscape": (1216, 832),
+    "wide": (1536, 864),
+    "story": (864, 1536),
+    "banner": (1536, 512),
+    "social_portrait": (1088, 1360),
+    "social_landscape": (1360, 768),
+    "presentation": (1280, 720),
+    "phone": (768, 1365),
 }
 
 
@@ -498,7 +456,7 @@ HF_TTS_MIME_TYPE = (
 
 
 # =========================================================
-# TIMEOUTS
+# HUGGING FACE TIMEOUTS
 # =========================================================
 
 HF_CONNECT_TIMEOUT = float(
@@ -524,7 +482,7 @@ HF_IMAGE_TIMEOUT = float(
 
 
 # =========================================================
-# TEXT GENERATION PARAMETERS
+# HUGGING FACE TEXT PARAMETERS
 # =========================================================
 
 HF_MAX_TOKENS = int(
@@ -560,7 +518,6 @@ class AIClientError(Exception):
         status_code: int | None = None,
         error_code: str | None = None,
     ) -> None:
-
         super().__init__(message)
 
         self.provider = provider
@@ -569,35 +526,35 @@ class AIClientError(Exception):
 
 
 # =========================================================
-# PROVIDER STATUS HELPERS
+# PROVIDER STATUS
 # =========================================================
 
 
 def _provider_enabled(
     provider: str,
 ) -> bool:
-    """
-    Determine whether a provider is configured.
-    """
-
-    provider = str(
-        provider or ""
-    ).strip().lower()
+    provider = (
+        str(
+            provider or ""
+        )
+        .strip()
+        .lower()
+    )
 
     if provider in {
-        "openrouter",
-        "or",
+        "gemini",
+        "google",
+        "google-ai",
+        "googleai",
     }:
-
         return bool(
-            OPENROUTER_ENABLED
-            and OPENROUTER_API_KEY
-            and OPENROUTER_API_URL
-            and OPENROUTER_MODEL
+            GEMINI_ENABLED
+            and GEMINI_API_KEY
+            and GEMINI_API_BASE_URL
+            and GEMINI_MODEL
         )
 
     if provider == "mvi":
-
         return bool(
             MVI_ENABLED
             and MVI_API_URL
@@ -607,7 +564,6 @@ def _provider_enabled(
         "huggingface",
         "hf",
     }:
-
         return bool(
             HF_TOKEN
             and HF_MODEL
@@ -618,84 +574,107 @@ def _provider_enabled(
 
 def get_text_provider_status() -> dict[str, Any]:
     """
-    Return safe diagnostic information about text providers.
+    Return safe text-provider diagnostics.
 
     Secrets are never returned.
     """
-
-    providers: dict[str, Any] = {}
-
-    providers["openrouter"] = {
-        "enabled": bool(
-            OPENROUTER_ENABLED
-            and OPENROUTER_API_KEY
-            and OPENROUTER_API_URL
-            and OPENROUTER_MODEL
-        ),
-        "configured": bool(
-            OPENROUTER_API_KEY
-            and OPENROUTER_API_URL
-            and OPENROUTER_MODEL
-        ),
-        "api_key_configured": bool(
-            OPENROUTER_API_KEY
-        ),
-        "primary_model": OPENROUTER_MODEL,
-        "fallback_model": OPENROUTER_FALLBACK_MODEL,
-    }
-
-    providers["mvi"] = {
-        "enabled": bool(
-            MVI_ENABLED
-            and MVI_API_URL
-        ),
-        "configured": bool(
-            MVI_API_URL
-        ),
-        "url_configured": bool(
-            MVI_API_URL
-        ),
-    }
-
-    providers["huggingface"] = {
-        "enabled": bool(
-            HF_TOKEN
-            and HF_MODEL
-        ),
-        "configured": bool(
-            HF_TOKEN
-            and HF_MODEL
-        ),
-        "token_configured": bool(
-            HF_TOKEN
-        ),
-        "model_configured": bool(
-            HF_MODEL
-        ),
-        "fallback_model_configured": bool(
-            HF_FALLBACK_MODEL
-        ),
-    }
 
     return {
         "provider_order": list(
             TEXT_PROVIDER_ORDER
         ),
-        "providers": providers,
+        "providers": {
+            "gemini": {
+                "enabled": bool(
+                    GEMINI_ENABLED
+                    and GEMINI_API_KEY
+                    and GEMINI_API_BASE_URL
+                    and GEMINI_MODEL
+                ),
+                "configured": bool(
+                    GEMINI_API_KEY
+                    and GEMINI_API_BASE_URL
+                    and GEMINI_MODEL
+                ),
+                "api_key_configured": bool(
+                    GEMINI_API_KEY
+                ),
+                "primary_model": GEMINI_MODEL,
+                "fallback_model": GEMINI_FALLBACK_MODEL,
+            },
+            "mvi": {
+                "enabled": bool(
+                    MVI_ENABLED
+                    and MVI_API_URL
+                ),
+                "configured": bool(
+                    MVI_API_URL
+                ),
+                "url_configured": bool(
+                    MVI_API_URL
+                ),
+            },
+            "huggingface": {
+                "enabled": bool(
+                    HF_TOKEN
+                    and HF_MODEL
+                ),
+                "configured": bool(
+                    HF_TOKEN
+                    and HF_MODEL
+                ),
+                "token_configured": bool(
+                    HF_TOKEN
+                ),
+                "model_configured": bool(
+                    HF_MODEL
+                ),
+                "fallback_model_configured": bool(
+                    HF_FALLBACK_MODEL
+                ),
+            },
+        },
     }
 
 
 # =========================================================
-# HUGGING FACE CONFIGURATION CHECK
+# GEMINI HEADERS
+# =========================================================
+
+
+def get_gemini_headers() -> dict[str, str]:
+    """
+    Build Gemini HTTP headers.
+
+    Gemini API authentication is provided through the
+    x-goog-api-key header.
+
+    The secret is never logged.
+    """
+
+    if not GEMINI_API_KEY:
+        raise AIClientError(
+            "GEMINI_API_KEY is not configured.",
+            provider="gemini",
+            error_code="gemini_api_key_missing",
+        )
+
+    return {
+        "x-goog-api-key": GEMINI_API_KEY,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": REQUEST_USER_AGENT,
+    }
+
+
+# =========================================================
+# HF CONFIGURATION
 # =========================================================
 
 
 def hf_configured() -> bool:
     """
     Return whether Hugging Face credentials are configured.
-
-    This does not guarantee that the account has inference
-    credits.
     """
 
     return bool(
@@ -703,70 +682,12 @@ def hf_configured() -> bool:
     )
 
 
-# =========================================================
-# OPENROUTER HEADERS
-# =========================================================
-
-
-def get_openrouter_headers() -> dict[str, str]:
-    """
-    Build OpenRouter authorization headers.
-
-    Secrets are intentionally never logged.
-    """
-
-    if not OPENROUTER_API_KEY:
-
-        raise AIClientError(
-            "OPENROUTER_API_KEY is not configured.",
-            provider="openrouter",
-            error_code="openrouter_api_key_missing",
-        )
-
-    headers = {
-        "Authorization": (
-            f"Bearer {OPENROUTER_API_KEY}"
-        ),
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": REQUEST_USER_AGENT,
-    }
-
-    if OPENROUTER_REFERER:
-
-        headers[
-            "HTTP-Referer"
-        ] = OPENROUTER_REFERER
-
-    if OPENROUTER_TITLE:
-
-        headers[
-            "X-OpenRouter-Title"
-        ] = OPENROUTER_TITLE
-
-    if OPENROUTER_CATEGORIES:
-
-        headers[
-            "X-OpenRouter-Categories"
-        ] = OPENROUTER_CATEGORIES
-
-    return headers
-
-
-# =========================================================
-# HUGGING FACE HEADERS
-# =========================================================
-
-
 def get_hf_headers() -> dict[str, str]:
     """
     Build Hugging Face authorization headers.
-
-    The token is intentionally never logged.
     """
 
     if not HF_TOKEN:
-
         raise AIClientError(
             "HF_TOKEN is not configured.",
             provider="huggingface",
@@ -791,16 +712,13 @@ def get_hf_headers() -> dict[str, str]:
 def _normalize_message_content(
     value: Any,
 ) -> str:
-
     if value is None:
-
         return ""
 
     if isinstance(
         value,
         str,
     ):
-
         return value
 
     return str(
@@ -820,13 +738,17 @@ def build_messages(
     context: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """
-    Build OpenAI-compatible chat messages.
+    Build OpenAI-compatible messages.
+
+    This function is preserved because existing RevelaAI
+    components may use it directly.
     """
 
-    messages: list[dict[str, str]] = []
+    messages: list[
+        dict[str, str]
+    ] = []
 
     if system_prompt.strip():
-
         messages.append(
             {
                 "role": "system",
@@ -838,14 +760,12 @@ def build_messages(
         context,
         list,
     ):
-
         for item in context:
 
             if not isinstance(
                 item,
                 dict,
             ):
-
                 continue
 
             role = str(
@@ -859,9 +779,12 @@ def build_messages(
                 "system",
                 "user",
                 "assistant",
+                "model",
             }:
-
                 role = "user"
+
+            if role == "model":
+                role = "assistant"
 
             content = (
                 item.get(
@@ -880,7 +803,6 @@ def build_messages(
             )
 
             if not content:
-
                 continue
 
             messages.append(
@@ -905,6 +827,777 @@ def build_messages(
 
 
 # =========================================================
+# GEMINI CONTENT CONVERSION
+# =========================================================
+
+
+def _messages_to_gemini_contents(
+    messages: list[dict[str, str]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """
+    Convert OpenAI-style messages into Gemini generateContent
+    request format.
+
+    Gemini uses:
+
+        role=user
+        role=model
+
+    System messages are returned separately as the Gemini
+    systemInstruction.
+    """
+
+    system_parts: list[str] = []
+    contents: list[
+        dict[str, Any]
+    ] = []
+
+    for message in messages:
+
+        if not isinstance(
+            message,
+            dict,
+        ):
+            continue
+
+        role = str(
+            message.get(
+                "role",
+                "user",
+            )
+        ).strip().lower()
+
+        content = (
+            _normalize_message_content(
+                message.get(
+                    "content",
+                    "",
+                )
+            )
+        ).strip()
+
+        if not content:
+            continue
+
+        if role == "system":
+            system_parts.append(
+                content
+            )
+            continue
+
+        gemini_role = (
+            "model"
+            if role in {
+                "assistant",
+                "model",
+            }
+            else "user"
+        )
+
+        contents.append(
+            {
+                "role": gemini_role,
+                "parts": [
+                    {
+                        "text": content,
+                    }
+                ],
+            }
+        )
+
+    system_instruction = "\n\n".join(
+        system_parts
+    ).strip()
+
+    return (
+        system_instruction,
+        contents,
+    )
+
+
+# =========================================================
+# GEMINI RESPONSE EXTRACTION
+# =========================================================
+
+
+def _extract_gemini_response(
+    data: Any,
+) -> str:
+    """
+    Extract text from Gemini generateContent response.
+    """
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+        raise AIClientError(
+            "Gemini returned an invalid response.",
+            provider="gemini",
+            error_code="gemini_invalid_response",
+        )
+
+    candidates = data.get(
+        "candidates"
+    )
+
+    if not isinstance(
+        candidates,
+        list,
+    ) or not candidates:
+
+        prompt_feedback = data.get(
+            "promptFeedback"
+        )
+
+        if prompt_feedback:
+            raise AIClientError(
+                (
+                    "Gemini returned no candidates."
+                ),
+                provider="gemini",
+                error_code="gemini_no_candidates",
+            )
+
+        raise AIClientError(
+            "Gemini returned no candidates.",
+            provider="gemini",
+            error_code="gemini_empty_response",
+        )
+
+    first = candidates[0]
+
+    if not isinstance(
+        first,
+        dict,
+    ):
+        raise AIClientError(
+            "Gemini returned an invalid candidate.",
+            provider="gemini",
+            error_code="gemini_invalid_candidate",
+        )
+
+    content = first.get(
+        "content"
+    )
+
+    if not isinstance(
+        content,
+        dict,
+    ):
+        raise AIClientError(
+            "Gemini returned no response content.",
+            provider="gemini",
+            error_code="gemini_missing_content",
+        )
+
+    parts = content.get(
+        "parts"
+    )
+
+    if not isinstance(
+        parts,
+        list,
+    ):
+        raise AIClientError(
+            "Gemini returned no response parts.",
+            provider="gemini",
+            error_code="gemini_missing_parts",
+        )
+
+    text_parts: list[str] = []
+
+    for part in parts:
+
+        if not isinstance(
+            part,
+            dict,
+        ):
+            continue
+
+        value = part.get(
+            "text"
+        )
+
+        if value:
+            text_parts.append(
+                str(value)
+            )
+
+    result = "".join(
+        text_parts
+    ).strip()
+
+    if not result:
+        raise AIClientError(
+            "Gemini returned an empty response.",
+            provider="gemini",
+            error_code="gemini_empty_text",
+        )
+
+    return result
+
+
+# =========================================================
+# GEMINI ERROR EXTRACTION
+# =========================================================
+
+
+def _extract_gemini_error(
+    response: requests.Response,
+) -> tuple[str, str]:
+
+    try:
+        data = response.json()
+
+    except ValueError:
+        return (
+            (
+                "Gemini returned "
+                "an invalid error response."
+            ),
+            "gemini_invalid_error_response",
+        )
+
+    if isinstance(
+        data,
+        dict,
+    ):
+
+        error = data.get(
+            "error"
+        )
+
+        if isinstance(
+            error,
+            dict,
+        ):
+
+            message = (
+                error.get(
+                    "message"
+                )
+                or error.get(
+                    "status"
+                )
+                or "Gemini request failed."
+            )
+
+            code = (
+                error.get(
+                    "status"
+                )
+                or error.get(
+                    "code"
+                )
+                or "gemini_provider_error"
+            )
+
+            return (
+                str(
+                    message
+                ),
+                str(
+                    code
+                ),
+            )
+
+        if error:
+            return (
+                str(error),
+                "gemini_provider_error",
+            )
+
+        message = data.get(
+            "message"
+        )
+
+        if message:
+            return (
+                str(message),
+                "gemini_provider_error",
+            )
+
+    return (
+        "Gemini request failed.",
+        "gemini_provider_error",
+    )
+
+
+# =========================================================
+# GEMINI REQUEST
+# =========================================================
+
+
+def _request_gemini(
+    *,
+    model: str,
+    messages: list[dict[str, str]],
+) -> dict[str, Any]:
+    """
+    Execute one Gemini generateContent request.
+    """
+
+    if not GEMINI_ENABLED:
+        raise AIClientError(
+            "Gemini provider is disabled.",
+            provider="gemini",
+            error_code="gemini_disabled",
+        )
+
+    if not GEMINI_API_KEY:
+        raise AIClientError(
+            "GEMINI_API_KEY is not configured.",
+            provider="gemini",
+            error_code="gemini_api_key_missing",
+        )
+
+    if not model:
+        raise AIClientError(
+            "No Gemini model is configured.",
+            provider="gemini",
+            error_code="gemini_model_missing",
+        )
+
+    if not GEMINI_API_BASE_URL:
+        raise AIClientError(
+            "GEMINI_API_BASE_URL is not configured.",
+            provider="gemini",
+            error_code="gemini_url_missing",
+        )
+
+    system_instruction, contents = (
+        _messages_to_gemini_contents(
+            messages
+        )
+    )
+
+    if not contents:
+        raise AIClientError(
+            "Gemini request contains no user content.",
+            provider="gemini",
+            error_code="gemini_empty_contents",
+        )
+
+    payload: dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": GEMINI_TEMPERATURE,
+            "maxOutputTokens": (
+                GEMINI_MAX_OUTPUT_TOKENS
+            ),
+            "candidateCount": 1,
+        },
+    }
+
+    if system_instruction:
+        payload[
+            "systemInstruction"
+        ] = {
+            "parts": [
+                {
+                    "text": system_instruction,
+                }
+            ]
+        }
+
+    encoded_model = quote(
+        model,
+        safe=""
+    )
+
+    url = (
+        f"{GEMINI_API_BASE_URL.rstrip('/')}"
+        f"/{encoded_model}:generateContent"
+    )
+
+    headers = get_gemini_headers()
+
+    started = time.time()
+
+    try:
+
+        response = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=(
+                GEMINI_CONNECT_TIMEOUT,
+                GEMINI_READ_TIMEOUT,
+            ),
+        )
+
+    except requests.Timeout as exc:
+
+        raise AIClientError(
+            "Gemini request timed out.",
+            provider="gemini",
+            error_code="gemini_timeout",
+        ) from exc
+
+    except requests.ConnectionError as exc:
+
+        raise AIClientError(
+            "Could not connect to Gemini.",
+            provider="gemini",
+            error_code="gemini_connection_error",
+        ) from exc
+
+    except requests.RequestException as exc:
+
+        raise AIClientError(
+            "Gemini request failed.",
+            provider="gemini",
+            error_code="gemini_request_error",
+        ) from exc
+
+    elapsed = (
+        time.time() - started
+    )
+
+    print(
+        "GEMINI response | "
+        f"model={model} | "
+        f"status={response.status_code} | "
+        f"time={elapsed:.2f}s"
+    )
+
+    if not response.ok:
+
+        message, error_code = (
+            _extract_gemini_error(
+                response
+            )
+        )
+
+        raise AIClientError(
+            message,
+            provider="gemini",
+            status_code=(
+                response.status_code
+            ),
+            error_code=error_code,
+        )
+
+    try:
+
+        data = response.json()
+
+    except ValueError as exc:
+
+        raise AIClientError(
+            "Gemini returned invalid JSON.",
+            provider="gemini",
+            status_code=(
+                response.status_code
+            ),
+            error_code="gemini_invalid_json",
+        ) from exc
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        raise AIClientError(
+            "Gemini returned an invalid response.",
+            provider="gemini",
+            status_code=(
+                response.status_code
+            ),
+            error_code="gemini_invalid_response",
+        )
+
+    return data
+
+
+# =========================================================
+# GEMINI TEXT PROVIDER
+# =========================================================
+
+
+def _ask_gemini_text(
+    *,
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Main Gemini text provider.
+
+    Primary:
+        GEMINI_MODEL
+
+    Fallback:
+        GEMINI_FALLBACK_MODEL
+    """
+
+    if not GEMINI_ENABLED:
+        raise AIClientError(
+            "Gemini provider is disabled.",
+            provider="gemini",
+            error_code="gemini_disabled",
+        )
+
+    if not GEMINI_API_KEY:
+        raise AIClientError(
+            "GEMINI_API_KEY is not configured.",
+            provider="gemini",
+            error_code="gemini_api_key_missing",
+        )
+
+    if not GEMINI_MODEL:
+        raise AIClientError(
+            "GEMINI_MODEL is not configured.",
+            provider="gemini",
+            error_code="gemini_model_missing",
+        )
+
+    messages = build_messages(
+        text=str(text),
+        system_prompt=str(
+            system_prompt or ""
+        ),
+        context=context,
+    )
+
+    candidates: list[str] = []
+
+    for candidate in (
+        GEMINI_MODEL,
+        GEMINI_FALLBACK_MODEL,
+    ):
+
+        candidate = str(
+            candidate or ""
+        ).strip()
+
+        if (
+            candidate
+            and candidate not in candidates
+        ):
+            candidates.append(
+                candidate
+            )
+
+    if not candidates:
+        raise AIClientError(
+            "No Gemini text model is configured.",
+            provider="gemini",
+            error_code="gemini_models_missing",
+        )
+
+    attempted_models: list[str] = []
+
+    last_error: AIClientError | None = (
+        None
+    )
+
+    for index, model in enumerate(
+        candidates
+    ):
+
+        attempted_models.append(
+            model
+        )
+
+        try:
+
+            data = _request_gemini(
+                model=model,
+                messages=messages,
+            )
+
+            response_text = (
+                _extract_gemini_response(
+                    data
+                )
+            )
+
+            usage = data.get(
+                "usageMetadata",
+                {},
+            )
+
+            finish_reason = None
+
+            model_candidates = (
+                data.get(
+                    "candidates"
+                )
+            )
+
+            if (
+                isinstance(
+                    model_candidates,
+                    list,
+                )
+                and model_candidates
+                and isinstance(
+                    model_candidates[0],
+                    dict,
+                )
+            ):
+                finish_reason = (
+                    model_candidates[0].get(
+                        "finishReason"
+                    )
+                )
+
+            return {
+                "success": True,
+                "response": response_text,
+                "provider": "gemini",
+                "model": model,
+                "fallback_used": (
+                    index > 0
+                ),
+                "attempted_models": (
+                    attempted_models
+                ),
+                "session_id": session_id,
+                "usage": usage,
+                "finish_reason": (
+                    finish_reason
+                ),
+            }
+
+        except AIClientError as exc:
+
+            last_error = exc
+
+            # -------------------------------------------------
+            # Authentication/configuration/billing issues.
+            #
+            # Trying another model will not repair a broken
+            # API key or disabled account.
+            # -------------------------------------------------
+
+            if exc.status_code in {
+                401,
+                403,
+            }:
+
+                print(
+                    "GEMINI provider authentication "
+                    "or permission failure | "
+                    f"model={model} | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code}"
+                )
+
+                break
+
+            # -------------------------------------------------
+            # Rate limits, temporary provider problems and
+            # model availability errors can use fallback.
+            # -------------------------------------------------
+
+            if exc.status_code in {
+                400,
+                404,
+                408,
+                409,
+                429,
+                500,
+                502,
+                503,
+                504,
+            }:
+
+                print(
+                    "GEMINI model failed; trying fallback "
+                    "when available | "
+                    f"model={model} | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code}"
+                )
+
+                continue
+
+            print(
+                "GEMINI model failed | "
+                f"model={model} | "
+                f"status={exc.status_code} | "
+                f"error_code={exc.error_code}"
+            )
+
+            continue
+
+    if last_error is None:
+
+        last_error = AIClientError(
+            "Gemini text generation failed.",
+            provider="gemini",
+            error_code="gemini_text_failed",
+        )
+
+    raise last_error
+
+
+# =========================================================
+# PUBLIC GEMINI CLIENT
+# =========================================================
+
+
+def ask_gemini(
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Direct public Gemini text client.
+    """
+
+    if not str(
+        text or ""
+    ).strip():
+
+        return {
+            "success": False,
+            "response": "",
+            "error": "message is required",
+            "error_code": "empty_message",
+            "provider": "gemini",
+            "session_id": session_id,
+        }
+
+    try:
+
+        return _ask_gemini_text(
+            text=str(
+                text
+            ),
+            system_prompt=str(
+                system_prompt or ""
+            ),
+            session_id=session_id,
+            context=context,
+        )
+
+    except AIClientError as exc:
+
+        return {
+            "success": False,
+            "response": "",
+            "error": str(
+                exc
+            ),
+            "error_code": (
+                exc.error_code
+                or "gemini_error"
+            ),
+            "provider": "gemini",
+            "status_code": (
+                exc.status_code
+            ),
+            "session_id": session_id,
+        }
+
+
+# =========================================================
 # MVI RESPONSE EXTRACTION
 # =========================================================
 
@@ -912,27 +1605,20 @@ def build_messages(
 def _extract_mvi_response(
     data: Any,
 ) -> str:
-    """
-    Extract text from several common FastAPI/AI response
-    shapes.
-    """
 
     if data is None:
-
         return ""
 
     if isinstance(
         data,
         str,
     ):
-
         return data.strip()
 
     if not isinstance(
         data,
         dict,
     ):
-
         return str(
             data
         ).strip()
@@ -960,52 +1646,40 @@ def _extract_mvi_response(
 
             return value.strip()
 
-    nested = data.get(
-        "result"
-    )
-
-    if isinstance(
-        nested,
-        dict,
+    for key in (
+        "result",
+        "data",
     ):
 
-        result_text = (
-            _extract_mvi_response(
-                nested
-            )
+        nested = data.get(
+            key
         )
 
-        if result_text:
+        if isinstance(
+            nested,
+            dict,
+        ):
 
-            return result_text
-
-    nested = data.get(
-        "data"
-    )
-
-    if isinstance(
-        nested,
-        dict,
-    ):
-
-        result_text = (
-            _extract_mvi_response(
-                nested
+            result_text = (
+                _extract_mvi_response(
+                    nested
+                )
             )
-        )
 
-        if result_text:
-
-            return result_text
+            if result_text:
+                return result_text
 
     choices = data.get(
         "choices"
     )
 
-    if isinstance(
-        choices,
-        list,
-    ) and choices:
+    if (
+        isinstance(
+            choices,
+            list,
+        )
+        and choices
+    ):
 
         first = choices[0]
 
@@ -1028,7 +1702,6 @@ def _extract_mvi_response(
                 )
 
                 if content:
-
                     return str(
                         content
                     ).strip()
@@ -1038,7 +1711,6 @@ def _extract_mvi_response(
             )
 
             if generated:
-
                 return str(
                     generated
                 ).strip()
@@ -1047,7 +1719,7 @@ def _extract_mvi_response(
 
 
 # =========================================================
-# MVI CHAT REQUEST
+# MVI REQUEST
 # =========================================================
 
 
@@ -1058,9 +1730,6 @@ def _request_mvi(
     context: list[dict[str, Any]] | None = None,
     session_id: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Request text generation from MVI AI Engine.
-    """
 
     if not MVI_ENABLED:
 
@@ -1161,9 +1830,7 @@ def _request_mvi(
 
         try:
 
-            error_data = (
-                response.json()
-            )
+            error_data = response.json()
 
         except ValueError:
 
@@ -1294,16 +1961,14 @@ def _get_inference_client(
     }
 
     if provider:
-
-        options["provider"] = (
-            provider
-        )
+        options[
+            "provider"
+        ] = provider
 
     if timeout:
-
-        options["timeout"] = (
-            timeout
-        )
+        options[
+            "timeout"
+        ] = timeout
 
     return InferenceClient(
         **options
@@ -1364,18 +2029,9 @@ def _provider_for(
 ) -> str:
 
     if (
-        has_text
-        and HF_IMAGE_TEXT_MODEL
-        and model == HF_IMAGE_TEXT_MODEL
-    ):
-
-        return HF_IMAGE_TEXT_PROVIDER
-
-    if (
         HF_IMAGE_TEXT_MODEL
         and model == HF_IMAGE_TEXT_MODEL
     ):
-
         return HF_IMAGE_TEXT_PROVIDER
 
     return HF_IMAGE_PROVIDER
@@ -1415,16 +2071,17 @@ def _is_parameter_error(
                 ValueError,
             ),
         )
-        or _status_code(exc)
-        in (
+        or _status_code(
+            exc
+        ) in {
             400,
             422,
-        )
+        }
     )
 
 
 # =========================================================
-# IMAGE DIMENSION RESOLUTION
+# IMAGE DIMENSIONS
 # =========================================================
 
 
@@ -1441,13 +2098,11 @@ def resolve_image_dimensions(
     ):
 
         if width is None:
-
             width = (
                 HF_IMAGE_DEFAULT_WIDTH
             )
 
         if height is None:
-
             height = (
                 HF_IMAGE_DEFAULT_HEIGHT
             )
@@ -1544,7 +2199,7 @@ def resolve_image_dimensions(
 
 
 # =========================================================
-# ONE IMAGE GENERATION ATTEMPT
+# ONE IMAGE ATTEMPT
 # =========================================================
 
 
@@ -1646,7 +2301,6 @@ def _text_to_image_once(
         if not _is_parameter_error(
             exc
         ):
-
             raise
 
         print(
@@ -1692,9 +2346,7 @@ def generate_hf_image(
         raise AIClientError(
             "Image prompt is required.",
             provider="huggingface",
-            error_code=(
-                "empty_image_prompt"
-            ),
+            error_code="empty_image_prompt",
         )
 
     explicit_model = str(
@@ -1725,9 +2377,7 @@ def generate_hf_image(
         raise AIClientError(
             "No Hugging Face image model is configured.",
             provider="huggingface",
-            error_code=(
-                "image_model_missing"
-            ),
+            error_code="image_model_missing",
         )
 
     width, height = (
@@ -1752,8 +2402,7 @@ def generate_hf_image(
 
         if (
             candidate
-            and candidate
-            not in candidates
+            and candidate not in candidates
         ):
 
             candidates.append(
@@ -1832,9 +2481,7 @@ def generate_hf_image(
     raise AIClientError(
         "Hugging Face image generation failed.",
         provider="huggingface",
-        error_code=(
-            "image_generation_failed"
-        ),
+        error_code="image_generation_failed",
     ) from last_error
 
 
@@ -1847,7 +2494,6 @@ def generate_image(
     prompt: str,
     **kwargs: Any,
 ):
-
     return generate_hf_image(
         prompt=prompt,
         **kwargs,
@@ -1855,7 +2501,7 @@ def generate_image(
 
 
 # =========================================================
-# VOICE — WAV VALIDATION
+# WAV VALIDATION
 # =========================================================
 
 
@@ -1982,9 +2628,7 @@ def _inspect_wav_audio(
         raise AIClientError(
             "Voice sample rate is too low.",
             provider="huggingface",
-            error_code=(
-                "unsupported_sample_rate"
-            ),
+            error_code="unsupported_sample_rate",
         )
 
     if duration < 0.25:
@@ -2011,7 +2655,7 @@ def _inspect_wav_audio(
 
 
 # =========================================================
-# VOICE — SPEECH TO TEXT
+# SPEECH TO TEXT
 # =========================================================
 
 
@@ -2033,9 +2677,7 @@ def transcribe_hf_audio(
         raise AIClientError(
             "HF_TOKEN is not configured.",
             provider="huggingface",
-            error_code=(
-                "hf_token_missing"
-            ),
+            error_code="hf_token_missing",
         )
 
     selected_model = (
@@ -2051,9 +2693,7 @@ def transcribe_hf_audio(
         raise AIClientError(
             "No Hugging Face ASR model is configured.",
             provider="huggingface",
-            error_code=(
-                "asr_model_missing"
-            ),
+            error_code="asr_model_missing",
         )
 
     audio_info = (
@@ -2073,9 +2713,7 @@ def transcribe_hf_audio(
         raise AIClientError(
             "huggingface_hub is not installed.",
             provider="huggingface",
-            error_code=(
-                "huggingface_hub_missing"
-            ),
+            error_code="huggingface_hub_missing",
         ) from exc
 
     client = InferenceClient(
@@ -2109,10 +2747,7 @@ def transcribe_hf_audio(
         )
 
         raise AIClientError(
-            (
-                "Hugging Face speech "
-                "recognition failed."
-            ),
+            "Hugging Face speech recognition failed.",
             provider="huggingface",
             error_code="asr_failed",
         ) from exc
@@ -2158,9 +2793,7 @@ def transcribe_hf_audio(
                 "was detected in the recording."
             ),
             provider="huggingface",
-            error_code=(
-                "empty_transcription"
-            ),
+            error_code="empty_transcription",
         )
 
     return {
@@ -2173,7 +2806,7 @@ def transcribe_hf_audio(
 
 
 # =========================================================
-# VOICE — TEXT TO SPEECH
+# TEXT TO SPEECH
 # =========================================================
 
 
@@ -2193,9 +2826,7 @@ def generate_hf_speech(
         raise AIClientError(
             "Speech text is required.",
             provider="huggingface",
-            error_code=(
-                "empty_speech_text"
-            ),
+            error_code="empty_speech_text",
         )
 
     if not HF_TOKEN:
@@ -2203,9 +2834,7 @@ def generate_hf_speech(
         raise AIClientError(
             "HF_TOKEN is not configured.",
             provider="huggingface",
-            error_code=(
-                "hf_token_missing"
-            ),
+            error_code="hf_token_missing",
         )
 
     selected_model = (
@@ -2221,9 +2850,7 @@ def generate_hf_speech(
         raise AIClientError(
             "No Hugging Face TTS model is configured.",
             provider="huggingface",
-            error_code=(
-                "tts_model_missing"
-            ),
+            error_code="tts_model_missing",
         )
 
     client = _get_inference_client(
@@ -2278,10 +2905,7 @@ def generate_hf_speech(
         )
 
         raise AIClientError(
-            (
-                "Hugging Face text-to-speech "
-                "failed."
-            ),
+            "Hugging Face text-to-speech failed.",
             provider="huggingface",
             error_code="tts_failed",
         ) from exc
@@ -2291,9 +2915,7 @@ def generate_hf_speech(
         raise AIClientError(
             "Hugging Face returned empty audio.",
             provider="huggingface",
-            error_code=(
-                "empty_audio_response"
-            ),
+            error_code="empty_audio_response",
         )
 
     if not isinstance(
@@ -2310,14 +2932,9 @@ def generate_hf_speech(
         except Exception as exc:
 
             raise AIClientError(
-                (
-                    "Hugging Face returned "
-                    "invalid audio data."
-                ),
+                "Hugging Face returned invalid audio data.",
                 provider="huggingface",
-                error_code=(
-                    "invalid_audio_response"
-                ),
+                error_code="invalid_audio_response",
             ) from exc
 
     print(
@@ -2331,27 +2948,401 @@ def generate_hf_speech(
 
 
 # =========================================================
-# OPENROUTER RESPONSE EXTRACTION
+# MAIN REVELAAI TEXT CLIENT
 # =========================================================
 
 
-def _extract_openrouter_response(
-    data: Any,
-) -> str:
+def ask_hf(
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+) -> dict:
     """
-    Extract assistant text from an OpenAI-compatible response.
+    Backward-compatible main text-generation entry point.
+
+    IMPORTANT:
+
+        The function is still called ask_hf() because the
+        existing RevelaAI application may import it.
+
+        It no longer means "Hugging Face only".
+
+    Default provider:
+
+        Gemini
+
+    Default model:
+
+        gemini-3.8-flash
+
+    Fallback:
+
+        gemini-3.5-flash-lite
     """
 
-    if not isinstance(
-        data,
-        dict,
-    ):
+    if not str(
+        text or ""
+    ).strip():
 
-        raise AIClientError(
-            "OpenRouter returned an invalid response.",
-            provider="openrouter",
-            error_code="invalid_response",
+        return {
+            "success": False,
+            "response": "",
+            "error": "message is required",
+            "error_code": "empty_message",
+            "provider": "revelaai",
+            "session_id": session_id,
+        }
+
+    provider_errors: list[
+        dict[str, Any]
+    ] = []
+
+    for provider in TEXT_PROVIDER_ORDER:
+
+        provider = (
+            str(
+                provider or ""
+            )
+            .strip()
+            .lower()
         )
+
+        # =====================================================
+        # GEMINI
+        # =====================================================
+
+        if provider in {
+            "gemini",
+            "google",
+            "google-ai",
+            "googleai",
+        }:
+
+            if not _provider_enabled(
+                "gemini"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "gemini",
+                        "error": (
+                            "Gemini text provider "
+                            "is not configured."
+                        ),
+                        "error_code": (
+                            "gemini_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _ask_gemini_text(
+                    text=str(
+                        text
+                    ),
+                    system_prompt=str(
+                        system_prompt
+                        or ""
+                    ),
+                    session_id=(
+                        session_id
+                    ),
+                    context=context,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=gemini | "
+                    f"model={result.get('model')} | "
+                    f"fallback={result.get('fallback_used')} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=gemini | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "gemini",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "gemini_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =====================================================
+        # MVI
+        # =====================================================
+
+        if provider in {
+            "mvi",
+            "mvi-ai",
+            "mvi_ai",
+        }:
+
+            if not _provider_enabled(
+                "mvi"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "mvi",
+                        "error": (
+                            "MVI provider "
+                            "is not configured."
+                        ),
+                        "error_code": (
+                            "mvi_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _request_mvi(
+                    text=str(
+                        text
+                    ),
+                    system_prompt=str(
+                        system_prompt
+                        or ""
+                    ),
+                    context=context,
+                    session_id=(
+                        session_id
+                    ),
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=mvi | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=mvi | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "mvi",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "mvi_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =====================================================
+        # HUGGING FACE
+        # =====================================================
+
+        if provider in {
+            "huggingface",
+            "hf",
+        }:
+
+            if not _provider_enabled(
+                "huggingface"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "huggingface",
+                        "error": (
+                            "Hugging Face text "
+                            "provider is not configured."
+                        ),
+                        "error_code": (
+                            "hf_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _ask_hf_text(
+                    text=str(
+                        text
+                    ),
+                    system_prompt=str(
+                        system_prompt
+                        or ""
+                    ),
+                    session_id=(
+                        session_id
+                    ),
+                    context=context,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=huggingface | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=huggingface | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "huggingface",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "hf_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =====================================================
+        # UNKNOWN PROVIDER
+        # =====================================================
+
+        print(
+            "TEXT PROVIDER UNKNOWN | "
+            f"provider={provider}"
+        )
+
+        provider_errors.append(
+            {
+                "provider": provider,
+                "error": (
+                    "Unknown text provider."
+                ),
+                "error_code": (
+                    "unknown_text_provider"
+                ),
+            }
+        )
+
+    # =========================================================
+    # TOTAL FAILURE
+    # =========================================================
+
+    if provider_errors:
+
+        last = provider_errors[-1]
+
+        return {
+            "success": False,
+            "response": "",
+            "error": (
+                last.get(
+                    "error"
+                )
+                or "No text provider is available."
+            ),
+            "error_code": (
+                last.get(
+                    "error_code"
+                )
+                or "text_generation_failed"
+            ),
+            "provider": (
+                last.get(
+                    "provider"
+                )
+                or "revelaai"
+            ),
+            "providers_attempted": [
+                item.get(
+                    "provider"
+                )
+                for item in provider_errors
+            ],
+            "provider_errors": (
+                provider_errors
+            ),
+            "session_id": session_id,
+        }
+
+    return {
+        "success": False,
+        "response": "",
+        "error": (
+            "No text provider is available."
+        ),
+        "error_code": (
+            "no_text_provider"
+        ),
+        "provider": "revelaai",
+        "session_id": session_id,
+    }
+
+
+# =========================================================
+# HF TEXT PROVIDER
+# =========================================================
+
+
+def _extract_hf_response(
+    data: dict,
+) -> str:
 
     choices = data.get(
         "choices"
@@ -2366,11 +3357,9 @@ def _extract_openrouter_response(
     ):
 
         raise AIClientError(
-            "OpenRouter returned no choices.",
-            provider="openrouter",
-            error_code=(
-                "empty_model_response"
-            ),
+            "Hugging Face returned no choices.",
+            provider="huggingface",
+            error_code="empty_model_response",
         )
 
     first_choice = choices[0]
@@ -2381,14 +3370,9 @@ def _extract_openrouter_response(
     ):
 
         raise AIClientError(
-            (
-                "OpenRouter returned "
-                "an invalid choice."
-            ),
-            provider="openrouter",
-            error_code=(
-                "invalid_model_response"
-            ),
+            "Hugging Face returned an invalid choice.",
+            provider="huggingface",
+            error_code="invalid_model_response",
         )
 
     message = first_choice.get(
@@ -2401,14 +3385,9 @@ def _extract_openrouter_response(
     ):
 
         raise AIClientError(
-            (
-                "OpenRouter returned "
-                "no assistant message."
-            ),
-            provider="openrouter",
-            error_code=(
-                "missing_assistant_message"
-            ),
+            "Hugging Face returned no assistant message.",
+            provider="huggingface",
+            error_code="missing_assistant_message",
         )
 
     content = message.get(
@@ -2416,7 +3395,6 @@ def _extract_openrouter_response(
     )
 
     if content is None:
-
         content = ""
 
     if isinstance(
@@ -2438,7 +3416,6 @@ def _extract_openrouter_response(
                 )
 
                 if part_text:
-
                     parts.append(
                         str(
                             part_text
@@ -2462,25 +3439,15 @@ def _extract_openrouter_response(
     if not content:
 
         raise AIClientError(
-            (
-                "OpenRouter returned "
-                "an empty response."
-            ),
-            provider="openrouter",
-            error_code=(
-                "empty_response"
-            ),
+            "Hugging Face returned an empty response.",
+            provider="huggingface",
+            error_code="empty_response",
         )
 
     return content
 
 
-# =========================================================
-# GENERIC PROVIDER ERROR EXTRACTION
-# =========================================================
-
-
-def _extract_openrouter_error(
+def _extract_provider_error(
     response: requests.Response,
 ) -> tuple[str, str]:
 
@@ -2492,7 +3459,7 @@ def _extract_openrouter_error(
 
         return (
             (
-                "OpenRouter returned "
+                "Hugging Face returned "
                 "an invalid error response."
             ),
             "invalid_error_response",
@@ -2519,7 +3486,7 @@ def _extract_openrouter_error(
                 or error.get(
                     "type"
                 )
-                or "OpenRouter request failed."
+                or "Hugging Face request failed."
             )
 
             code = (
@@ -2564,371 +3531,9 @@ def _extract_openrouter_error(
             )
 
     return (
-        "OpenRouter request failed.",
+        "Hugging Face request failed.",
         "provider_error",
     )
-
-
-# =========================================================
-# OPENROUTER CHAT REQUEST
-# =========================================================
-
-
-def _request_openrouter(
-    *,
-    model: str,
-    messages: list[dict[str, str]],
-    session_id: str | None = None,
-) -> dict[str, Any]:
-    """
-    Perform one OpenRouter chat request.
-    """
-
-    if not OPENROUTER_ENABLED:
-
-        raise AIClientError(
-            "OpenRouter provider is disabled.",
-            provider="openrouter",
-            error_code="openrouter_disabled",
-        )
-
-    if not OPENROUTER_API_KEY:
-
-        raise AIClientError(
-            "OPENROUTER_API_KEY is not configured.",
-            provider="openrouter",
-            error_code="openrouter_api_key_missing",
-        )
-
-    if not model:
-
-        raise AIClientError(
-            "No OpenRouter model is configured.",
-            provider="openrouter",
-            error_code="openrouter_model_missing",
-        )
-
-    if not OPENROUTER_API_URL:
-
-        raise AIClientError(
-            "OPENROUTER_API_URL is not configured.",
-            provider="openrouter",
-            error_code="openrouter_url_missing",
-        )
-
-    payload: dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "temperature": OPENROUTER_TEMPERATURE,
-        "max_tokens": OPENROUTER_MAX_TOKENS,
-        "stream": False,
-    }
-
-    if session_id:
-
-        payload[
-            "session_id"
-        ] = str(
-            session_id
-        )
-
-    headers = (
-        get_openrouter_headers()
-    )
-
-    started = time.time()
-
-    try:
-
-        response = requests.post(
-            OPENROUTER_API_URL,
-            headers=headers,
-            json=payload,
-            timeout=OPENROUTER_TIMEOUT,
-        )
-
-    except requests.Timeout as exc:
-
-        raise AIClientError(
-            "OpenRouter request timed out.",
-            provider="openrouter",
-            error_code="openrouter_timeout",
-        ) from exc
-
-    except requests.ConnectionError as exc:
-
-        raise AIClientError(
-            "Could not connect to OpenRouter.",
-            provider="openrouter",
-            error_code=(
-                "openrouter_connection_error"
-            ),
-        ) from exc
-
-    except requests.RequestException as exc:
-
-        raise AIClientError(
-            "OpenRouter request failed.",
-            provider="openrouter",
-            error_code=(
-                "openrouter_request_error"
-            ),
-        ) from exc
-
-    print(
-        "OPENROUTER response | "
-        f"model={model} | "
-        f"status={response.status_code} | "
-        f"time={time.time() - started:.2f}s"
-    )
-
-    if not response.ok:
-
-        message, error_code = (
-            _extract_openrouter_error(
-                response
-            )
-        )
-
-        raise AIClientError(
-            message,
-            provider="openrouter",
-            status_code=(
-                response.status_code
-            ),
-            error_code=error_code,
-        )
-
-    try:
-
-        data = response.json()
-
-    except ValueError as exc:
-
-        raise AIClientError(
-            "OpenRouter returned invalid JSON.",
-            provider="openrouter",
-            status_code=(
-                response.status_code
-            ),
-            error_code="openrouter_invalid_json",
-        ) from exc
-
-    return data
-
-
-# =========================================================
-# OPENROUTER TEXT PROVIDER
-# =========================================================
-
-
-def _ask_openrouter_text(
-    *,
-    text: str,
-    system_prompt: str = "",
-    session_id: str | None = None,
-    context: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """
-    OpenRouter text provider.
-
-    Primary model:
-        OPENROUTER_MODEL
-
-    Fallback model:
-        OPENROUTER_FALLBACK_MODEL
-    """
-
-    if not OPENROUTER_ENABLED:
-
-        raise AIClientError(
-            "OpenRouter provider is disabled.",
-            provider="openrouter",
-            error_code="openrouter_disabled",
-        )
-
-    if not OPENROUTER_API_KEY:
-
-        raise AIClientError(
-            "OPENROUTER_API_KEY is not configured.",
-            provider="openrouter",
-            error_code="openrouter_api_key_missing",
-        )
-
-    if not OPENROUTER_MODEL:
-
-        raise AIClientError(
-            "OPENROUTER_MODEL is not configured.",
-            provider="openrouter",
-            error_code="openrouter_model_missing",
-        )
-
-    messages = build_messages(
-        text=str(text),
-        system_prompt=str(
-            system_prompt or ""
-        ),
-        context=context,
-    )
-
-    candidates: list[str] = []
-
-    for candidate in (
-        OPENROUTER_MODEL,
-        OPENROUTER_FALLBACK_MODEL,
-    ):
-
-        candidate = str(
-            candidate or ""
-        ).strip()
-
-        if (
-            candidate
-            and candidate
-            not in candidates
-        ):
-
-            candidates.append(
-                candidate
-            )
-
-    if not candidates:
-
-        raise AIClientError(
-            "No OpenRouter text model is configured.",
-            provider="openrouter",
-            error_code="openrouter_text_models_missing",
-        )
-
-    attempted_models: list[str] = []
-
-    last_error: AIClientError | None = None
-
-    for index, model in enumerate(
-        candidates
-    ):
-
-        attempted_models.append(
-            model
-        )
-
-        try:
-
-            data = _request_openrouter(
-                model=model,
-                messages=messages,
-                session_id=session_id,
-            )
-
-            response_text = (
-                _extract_openrouter_response(
-                    data
-                )
-            )
-
-            response_model = (
-                data.get(
-                    "model"
-                )
-                or model
-            )
-
-            return {
-                "success": True,
-                "response": response_text,
-                "provider": "openrouter",
-                "model": response_model,
-                "requested_model": model,
-                "fallback_used": (
-                    index > 0
-                ),
-                "attempted_models": attempted_models,
-                "session_id": session_id,
-                "usage": data.get(
-                    "usage",
-                    {},
-                ),
-                "id": data.get(
-                    "id"
-                ),
-                "finish_reason": (
-                    (
-                        data.get(
-                            "choices"
-                        )[0].get(
-                            "finish_reason"
-                        )
-                    )
-                    if isinstance(
-                        data.get(
-                            "choices"
-                        ),
-                        list,
-                    )
-                    and data.get(
-                        "choices"
-                    )
-                    and isinstance(
-                        data.get(
-                            "choices"
-                        )[0],
-                        dict,
-                    )
-                    else None
-                ),
-            }
-
-        except AIClientError as exc:
-
-            last_error = exc
-
-            # -------------------------------------------------
-            # Authentication / billing failures.
-            #
-            # Changing models will not fix a broken API key or
-            # an account without usable balance.
-            # -------------------------------------------------
-
-            if exc.status_code in {
-                401,
-                402,
-                403,
-            }:
-
-                print(
-                    "OPENROUTER text provider unavailable | "
-                    f"model={model} | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code}"
-                )
-
-                break
-
-            print(
-                "OPENROUTER text model failed | "
-                f"model={model} | "
-                f"status={exc.status_code} | "
-                f"error_code={exc.error_code}"
-            )
-
-            # 429, 5xx and model-specific errors will continue
-            # to the fallback model.
-            continue
-
-    if last_error is None:
-
-        last_error = AIClientError(
-            "OpenRouter text generation failed.",
-            provider="openrouter",
-            error_code="openrouter_text_failed",
-        )
-
-    raise last_error
-
-
-# =========================================================
-# HF CHAT REQUEST
-# =========================================================
 
 
 def _request_hf(
@@ -2983,9 +3588,7 @@ def _request_hf(
         raise AIClientError(
             "Could not connect to Hugging Face.",
             provider="huggingface",
-            error_code=(
-                "hf_connection_error"
-            ),
+            error_code="hf_connection_error",
         ) from exc
 
     except requests.RequestException as exc:
@@ -2993,9 +3596,7 @@ def _request_hf(
         raise AIClientError(
             "Hugging Face request failed.",
             provider="huggingface",
-            error_code=(
-                "hf_request_error"
-            ),
+            error_code="hf_request_error",
         ) from exc
 
     print(
@@ -3048,17 +3649,10 @@ def _request_hf(
                 "an invalid response."
             ),
             provider="huggingface",
-            error_code=(
-                "invalid_response"
-            ),
+            error_code="invalid_response",
         )
 
     return data
-
-
-# =========================================================
-# HF TEXT PROVIDER
-# =========================================================
 
 
 def _ask_hf_text(
@@ -3068,11 +3662,6 @@ def _ask_hf_text(
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """
-    Hugging Face text provider.
-
-    Only active when HF_MODEL is explicitly configured.
-    """
 
     if not HF_TOKEN:
 
@@ -3111,15 +3700,16 @@ def _ask_hf_text(
 
         if (
             candidate
-            and candidate
-            not in candidates
+            and candidate not in candidates
         ):
 
             candidates.append(
                 candidate
             )
 
-    last_error: AIClientError | None = None
+    last_error: AIClientError | None = (
+        None
+    )
 
     for index, model in enumerate(
         candidates
@@ -3163,20 +3753,9 @@ def _ask_hf_text(
                 403,
             }:
 
-                print(
-                    "HF text provider unavailable | "
-                    f"model={model} | "
-                    f"status={exc.status_code}"
-                )
-
                 break
 
-            print(
-                "HF text model failed | "
-                f"model={model} | "
-                f"status={exc.status_code} | "
-                f"error_code={exc.error_code}"
-            )
+            continue
 
     if last_error is None:
 
@@ -3190,390 +3769,6 @@ def _ask_hf_text(
 
 
 # =========================================================
-# MAIN TEXT CLIENT
-# =========================================================
-
-
-def ask_hf(
-    text: str,
-    system_prompt: str = "",
-    session_id: str | None = None,
-    context: list[dict[str, Any]] | None = None,
-) -> dict:
-    """
-    Main RevelaAI text-generation entry point.
-
-    The function name remains ask_hf() for backward
-    compatibility with the existing RevelaAI codebase.
-
-    By default:
-
-        OpenRouter
-            |
-            +--> DeepSeek V4.1 Flash
-            |
-            +--> GLM 5.3 Flash
-
-    Optional provider order:
-
-        openrouter,mvi
-        openrouter,huggingface
-        openrouter,mvi,huggingface
-    """
-
-    if not str(
-        text or ""
-    ).strip():
-
-        return {
-            "success": False,
-            "response": "",
-            "error": "message is required",
-            "error_code": (
-                "empty_message"
-            ),
-            "provider": "revelaai",
-        }
-
-    provider_errors: list[
-        dict[str, Any]
-    ] = []
-
-    for provider in TEXT_PROVIDER_ORDER:
-
-        provider = str(
-            provider or ""
-        ).strip().lower()
-
-        # =================================================
-        # OPENROUTER
-        # =================================================
-
-        if provider in {
-            "openrouter",
-            "or",
-        }:
-
-            if not _provider_enabled(
-                "openrouter"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "openrouter",
-                        "error": (
-                            "OpenRouter text provider "
-                            "is not configured."
-                        ),
-                        "error_code": (
-                            "openrouter_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = (
-                    _ask_openrouter_text(
-                        text=str(
-                            text
-                        ),
-                        system_prompt=(
-                            str(
-                                system_prompt
-                                or ""
-                            )
-                        ),
-                        session_id=(
-                            session_id
-                        ),
-                        context=context,
-                    )
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=openrouter | "
-                    f"model={result.get('model')} | "
-                    f"fallback={result.get('fallback_used')} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=openrouter | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "openrouter",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "openrouter_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
-
-        # =================================================
-        # MVI
-        # =================================================
-
-        if provider in {
-            "mvi",
-            "mvi-ai",
-            "mvi_ai",
-        }:
-
-            if not _provider_enabled(
-                "mvi"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": (
-                            "MVI provider is not configured."
-                        ),
-                        "error_code": (
-                            "mvi_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _request_mvi(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=(
-                        str(
-                            system_prompt
-                            or ""
-                        )
-                    ),
-                    context=context,
-                    session_id=session_id,
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=mvi | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=mvi | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "mvi_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
-
-        # =================================================
-        # HUGGING FACE
-        # =================================================
-
-        if provider in {
-            "huggingface",
-            "hf",
-        }:
-
-            if not _provider_enabled(
-                "huggingface"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "huggingface",
-                        "error": (
-                            "Hugging Face text provider "
-                            "is not configured."
-                        ),
-                        "error_code": (
-                            "hf_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _ask_hf_text(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=(
-                        str(
-                            system_prompt
-                            or ""
-                        )
-                    ),
-                    session_id=(
-                        session_id
-                    ),
-                    context=context,
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=huggingface | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=huggingface | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "huggingface",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "hf_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
-
-        # =================================================
-        # UNKNOWN PROVIDER
-        # =================================================
-
-        print(
-            "TEXT PROVIDER UNKNOWN | "
-            f"provider={provider}"
-        )
-
-        provider_errors.append(
-            {
-                "provider": provider,
-                "error": (
-                    "Unknown text provider."
-                ),
-                "error_code": (
-                    "unknown_text_provider"
-                ),
-            }
-        )
-
-    # =====================================================
-    # TOTAL FAILURE
-    # =====================================================
-
-    if provider_errors:
-
-        last = provider_errors[-1]
-
-        return {
-            "success": False,
-            "response": "",
-            "error": (
-                last.get(
-                    "error"
-                )
-                or "No text provider is available."
-            ),
-            "error_code": (
-                last.get(
-                    "error_code"
-                )
-                or "text_generation_failed"
-            ),
-            "provider": (
-                last.get(
-                    "provider"
-                )
-                or "revelaai"
-            ),
-            "providers_attempted": [
-                item.get(
-                    "provider"
-                )
-                for item in provider_errors
-            ],
-            "provider_errors": provider_errors,
-            "session_id": session_id,
-        }
-
-    return {
-        "success": False,
-        "response": "",
-        "error": (
-            "No text provider is available."
-        ),
-        "error_code": (
-            "no_text_provider"
-        ),
-        "provider": "revelaai",
-        "session_id": session_id,
-    }
-
-
-# =========================================================
 # DIRECT MVI CLIENT
 # =========================================================
 
@@ -3583,13 +3778,7 @@ def ask_mvi(
     system_prompt: str = "",
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
-):
-    """
-    Public direct MVI client.
-
-    MVI is deliberately kept separate from the primary
-    external-model path.
-    """
+) -> dict[str, Any]:
 
     if not str(
         text or ""
@@ -3599,9 +3788,7 @@ def ask_mvi(
             "success": False,
             "response": "",
             "error": "message is required",
-            "error_code": (
-                "empty_message"
-            ),
+            "error_code": "empty_message",
             "provider": "mvi",
         }
 
@@ -3612,8 +3799,7 @@ def ask_mvi(
                 text
             ),
             system_prompt=str(
-                system_prompt
-                or ""
+                system_prompt or ""
             ),
             context=context,
             session_id=session_id,
@@ -3646,12 +3832,12 @@ def ask_mvi(
 __all__ = [
     "AIClientError",
 
-    # OpenRouter
-    "OPENROUTER_API_KEY",
-    "OPENROUTER_API_URL",
-    "OPENROUTER_MODEL",
-    "OPENROUTER_FALLBACK_MODEL",
-    "OPENROUTER_ENABLED",
+    # Gemini
+    "GEMINI_API_KEY",
+    "GEMINI_API_BASE_URL",
+    "GEMINI_MODEL",
+    "GEMINI_FALLBACK_MODEL",
+    "GEMINI_ENABLED",
 
     # Hugging Face
     "HF_TOKEN",
@@ -3663,17 +3849,24 @@ __all__ = [
     "MVI_API_URL",
     "MVI_ENABLED",
 
-    # Text routing
+    # Provider routing
     "TEXT_PROVIDER_ORDER",
 
     # Diagnostics
     "hf_configured",
     "get_text_provider_status",
-    "get_openrouter_headers",
+
+    # Headers
+    "get_gemini_headers",
     "get_hf_headers",
 
     # Messages
     "build_messages",
+
+    # Text
+    "ask_gemini",
+    "ask_hf",
+    "ask_mvi",
 
     # Images
     "IMAGE_SIZE_PRESETS",
@@ -3684,8 +3877,5 @@ __all__ = [
     # Voice
     "transcribe_hf_audio",
     "generate_hf_speech",
-
-    # Text
-    "ask_hf",
-    "ask_mvi",
 ]
+
