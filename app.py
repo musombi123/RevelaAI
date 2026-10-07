@@ -8,26 +8,31 @@ Architecture:
           v
       RevelaAI API
           |
-    +-----+--------------------+
-    |                          |
-    v                          v
- Orchestrator              AI Client
-    |                          |
-    |                          +--> Gemini
-    |                          |      +--> Gemini 3.8 Flash
-    |                          |      +--> Gemini fallback
-    |                          |
-    |                          +--> Hugging Face / FLUX
-    |                          +--> Hugging Face / Whisper
-    |                          +--> Hugging Face / TTS
-    |                          |
-    |                          +--> MVI (optional)
+    +-----+------------------------+
+    |                              |
+    v                              v
+ Request / Capability Router     AI Service
+    |                              |
+    |                              +--> Orchestrator
+    |                              +--> RevelaCode Gateway
+    |                              +--> Online Research
+    |                              +--> Ecosystem Intelligence
+    |                              +--> Gemini
     |
-    +--> RevelaCode Backend gateway
-    +--> Online research
-    +--> Biashara intelligence
-    +--> Shamba intelligence
-    +--> PDF processing
+    +--> Image Engine
+    |      +--> image_planner
+    |      +--> SVG Designer
+    |      +--> Hugging Face / FLUX
+    |
+    +--> Voice
+    |      +--> Hugging Face / Whisper
+    |      +--> Hugging Face / TTS
+    |
+    +--> Documents
+           +--> PDF
+           +--> DOCX
+           +--> TXT / MD / JSON / CSV / source files
+
 
 Production principles:
 
@@ -44,10 +49,12 @@ Production principles:
     - Conversation intent changes must never erase conversation memory.
     - Browser-provided conversation context may rehydrate server memory.
     - Image model/provider routing is owned by ai.ai_client.py.
-    - Image planning is owned by ai.image_planner.py.
+    - Image planning is owned by ai.image_prompt.py.
     - Structured designs are rendered through ai.svg_designer.py.
     - Gemini is the primary text provider.
     - MVI is optional and is never silently used as a text downgrade.
+    - process_message() may return executable actions.
+    - Executable actions are handled by this application layer.
 """
 
 from __future__ import annotations
@@ -85,8 +92,7 @@ JWT_SECRET = (
     os.getenv(
         "JWT_SECRET",
         "",
-    )
-    .strip()
+    ).strip()
 )
 
 JWT_ALGORITHM = "HS256"
@@ -97,10 +103,10 @@ def resolve_revelacode_user_id() -> str | None:
     Resolve the authenticated RevelaCode user from the
     Authorization Bearer JWT.
 
-    The JWT is only used to establish identity.
+    The JWT establishes identity only.
 
-    Actual platform data is retrieved through the
-    RevelaCode AI Gateway.
+    Actual platform data must come through the approved
+    RevelaCode AI gateway/provider layers.
     """
 
     authorization = (
@@ -236,6 +242,7 @@ from ai.json_utils import (
 )
 
 from services.ai_service import (
+    detect_capability,
     process_message,
 )
 
@@ -306,8 +313,7 @@ APP_NAME = (
     os.getenv(
         "APP_NAME",
         "RevelaAI",
-    )
-    .strip()
+    ).strip()
     or "RevelaAI"
 )
 
@@ -316,9 +322,7 @@ ENVIRONMENT = (
     os.getenv(
         "ENVIRONMENT",
         "production",
-    )
-    .strip()
-    .lower()
+    ).strip().lower()
     or "production"
 )
 
@@ -416,10 +420,9 @@ AUDIO_RETENTION_SECONDS = int(
 REVELAAI_BUILD_ID = (
     os.getenv(
         "REVELAAI_BUILD_ID",
-        "canva-image-v1-memory-v1-gemini-text-v1",
-    )
-    .strip()
-    or "canva-image-v1-memory-v1-gemini-text-v1"
+        "canva-image-v1-memory-v1-gemini-text-v2",
+    ).strip()
+    or "canva-image-v1-memory-v1-gemini-text-v2"
 )
 
 
@@ -431,9 +434,7 @@ REVELAAI_ENABLE_HF_TTS = (
     os.getenv(
         "REVELAAI_ENABLE_HF_TTS",
         "false",
-    )
-    .strip()
-    .lower()
+    ).strip().lower()
     in {
         "1",
         "true",
@@ -451,8 +452,7 @@ REVELAAI_IMAGE_ENGINE_VERSION = (
     os.getenv(
         "REVELAAI_IMAGE_ENGINE_VERSION",
         "canva-studio-v1",
-    )
-    .strip()
+    ).strip()
     or "canva-studio-v1"
 )
 
@@ -468,8 +468,7 @@ def configured_image_model() -> str:
         os.getenv(
             "HF_IMAGE_MODEL",
             "black-forest-labs/FLUX.1-dev",
-        )
-        .strip()
+        ).strip()
         or "black-forest-labs/FLUX.1-dev"
     )
 
@@ -482,7 +481,7 @@ def get_revelaai_text_status() -> dict[str, Any]:
     """
     Return safe text-provider diagnostics.
 
-    Credentials are never returned.
+    Never returns API keys or secrets.
     """
 
     try:
@@ -518,7 +517,7 @@ def get_revelaai_text_status() -> dict[str, Any]:
 
 def get_active_text_provider() -> str:
     """
-    Resolve the first configured/enabled text provider.
+    Return the first enabled text provider.
     """
 
     status = (
@@ -543,12 +542,14 @@ def get_active_text_provider() -> str:
         provider_order,
         list,
     ):
+
         provider_order = []
 
     if not isinstance(
         providers,
         dict,
     ):
+
         providers = {}
 
     for provider in provider_order:
@@ -566,12 +567,14 @@ def get_active_text_provider() -> str:
             info,
             dict,
         ):
+
             continue
 
         if info.get(
             "enabled",
             False,
         ):
+
             return provider_name
 
     return "none"
@@ -579,8 +582,7 @@ def get_active_text_provider() -> str:
 
 def get_active_text_model() -> str | None:
     """
-    Resolve the primary configured model for the active
-    provider without exposing credentials.
+    Resolve the primary model of the active text provider.
     """
 
     status = (
@@ -602,6 +604,7 @@ def get_active_text_model() -> str | None:
         providers,
         dict,
     ):
+
         return None
 
     info = providers.get(
@@ -613,6 +616,7 @@ def get_active_text_model() -> str | None:
         info,
         dict,
     ):
+
         return None
 
     primary_model = (
@@ -622,6 +626,7 @@ def get_active_text_model() -> str | None:
     )
 
     if primary_model:
+
         return str(
             primary_model
         )
@@ -633,6 +638,7 @@ def get_active_text_model() -> str | None:
     )
 
     if model:
+
         return str(
             model
         )
@@ -648,9 +654,7 @@ LOG_LEVEL = (
     os.getenv(
         "LOG_LEVEL",
         "INFO",
-    )
-    .strip()
-    .upper()
+    ).strip().upper()
 )
 
 logging.basicConfig(
@@ -694,7 +698,7 @@ app.wsgi_app = ProxyFix(
 
 def parse_cors_origins() -> list[str]:
     """
-    Read trusted frontend origins from the environment.
+    Read trusted frontend origins.
     """
 
     raw = (
@@ -710,7 +714,7 @@ def parse_cors_origins() -> list[str]:
         or ""
     )
 
-    origins = []
+    origins: list[str] = []
 
     for item in raw.split(","):
 
@@ -761,9 +765,6 @@ CORS(
 
 @app.before_request
 def attach_request_id():
-    """
-    Give every request a correlation ID.
-    """
 
     incoming = (
         request.headers.get(
@@ -875,11 +876,6 @@ def handle_method_not_allowed(
 def handle_unexpected_error(
     error,
 ):
-    """
-    Production catch-all.
-
-    Complete exception details are logged server-side.
-    """
 
     app.logger.exception(
         "Unhandled request error | request_id=%s",
@@ -916,7 +912,6 @@ SESSION_MEMORY: OrderedDict[
     dict[str, Any]
 ] = OrderedDict()
 
-
 SESSION_LOCK = Lock()
 
 
@@ -924,7 +919,7 @@ def _prune_session_memory() -> None:
 
     now = time.time()
 
-    expired = []
+    expired: list[str] = []
 
     for session_id, session in (
         SESSION_MEMORY.items()
@@ -1098,6 +1093,7 @@ def normalize_client_context(
                 item,
                 dict,
             ):
+
                 continue
 
             role = str(
@@ -1124,6 +1120,7 @@ def normalize_client_context(
             ).strip()
 
             if not content:
+
                 continue
 
             normalized.append({
@@ -1145,6 +1142,7 @@ def normalize_client_context(
         )
 
         if not context_text:
+
             return []
 
         normalized: list[
@@ -1158,6 +1156,7 @@ def normalize_client_context(
             line = line.strip()
 
             if not line:
+
                 continue
 
             if line.startswith(
@@ -1229,6 +1228,7 @@ def build_server_context(
             item,
             dict,
         ):
+
             continue
 
         role = str(
@@ -1255,6 +1255,7 @@ def build_server_context(
         ).strip()
 
         if not content:
+
             continue
 
         normalized.append({
@@ -1418,6 +1419,7 @@ def cleanup_generated_files() -> None:
             ).iterdir():
 
                 if not path.is_file():
+
                     continue
 
                 try:
@@ -1749,7 +1751,7 @@ def process_uploaded_document(
         )
 
     # -----------------------------------------------------
-    # TEXT
+    # TEXT / SOURCE FILES
     # -----------------------------------------------------
 
     if extension in {
@@ -1832,95 +1834,44 @@ def process_uploaded_document(
 
 
 # =========================================================
-# IMAGE INTENT
+# IMAGE / VISUAL DETECTION
 # =========================================================
-
-IMAGE_INTENT_PHRASES = {
-    "generate image",
-    "generate an image",
-    "create image",
-    "create an image",
-    "make an image",
-    "make me an image",
-    "draw",
-    "draw an image",
-    "generate a picture",
-    "create a picture",
-    "make a picture",
-    "image generation",
-    "generate an illustration",
-    "create an illustration",
-    "make an illustration",
-    "generate artwork",
-    "create artwork",
-    "make artwork",
-    "generate a photo",
-    "create a photo",
-    "make a photo",
-    "generate art",
-    "create art",
-    "make art",
-    "create a logo",
-    "make a logo",
-    "design a logo",
-    "generate a logo",
-    "create a poster",
-    "make a poster",
-    "design a poster",
-    "generate a poster",
-    "create a banner",
-    "make a banner",
-    "design a banner",
-    "generate a banner",
-    "create a flyer",
-    "make a flyer",
-    "design a flyer",
-    "generate a flyer",
-    "create a graphic",
-    "make a graphic",
-    "design a graphic",
-    "generate a graphic",
-}
-
-IMAGE_DESIGN_RE = re.compile(
-    r"\b(?:create|make|design|generate|draw|produce)"
-    r"\s+(?:me\s+)?(?:a|an)?\s*"
-    r"(?:logo|poster|banner|flyer|illustration|graphic|artwork|"
-    r"social post|social media design|thumbnail|invitation|certificate|"
-    r"infographic|diagram|cover)\b",
-    re.I,
-)
-
+#
+# Capability detection is centralized in services.ai_service.
+#
+# This wrapper intentionally delegates to the same authority.
+#
+# That eliminates drift between:
+#
+#     app.py
+#     services.ai_service.py
+#
+# Example:
+#
+#     generate a random image with writing hello kenya
+#
+# must be classified as:
+#
+#     image_generation
+#
 
 def is_image_generation_request(
     message: str,
 ) -> bool:
 
-    lowered = (
-        str(
-            message or ""
+    return (
+        detect_capability(
+            str(
+                message or ""
+            ),
+            intent="general",
         )
-        .strip()
-        .lower()
-    )
-
-    if not lowered:
-        return False
-
-    if IMAGE_DESIGN_RE.search(
-        lowered
-    ):
-
-        return True
-
-    return any(
-        phrase in lowered
-        for phrase in IMAGE_INTENT_PHRASES
+        == "image_generation"
     )
 
 
 # =========================================================
-# IMAGE REQUEST OPTIONS
+# IMAGE OPTIONS
 # =========================================================
 
 def _optional_int(
@@ -1929,6 +1880,7 @@ def _optional_int(
 ) -> int | None:
 
     if value is None:
+
         return None
 
     if isinstance(
@@ -1939,11 +1891,14 @@ def _optional_int(
         value = value.strip()
 
         if not value:
+
             return None
 
     try:
 
-        return int(value)
+        return int(
+            value
+        )
 
     except (
         TypeError,
@@ -2010,16 +1965,19 @@ def parse_image_options(
     )
 
     if width is not None:
+
         options[
             "width"
         ] = width
 
     if height is not None:
+
         options[
             "height"
         ] = height
 
     if seed is not None:
+
         options[
             "seed"
         ] = seed
@@ -2028,7 +1986,7 @@ def parse_image_options(
 
 
 # =========================================================
-# IMAGE ASSET GENERATION
+# IMAGE ASSET SAVERS
 # =========================================================
 
 def _save_svg_asset(
@@ -2086,11 +2044,29 @@ def _save_raster_asset(
     )
 
 
+# =========================================================
+# IMAGE ASSET GENERATION
+# =========================================================
+
 def generate_image_asset(
     message: str,
     *,
     image_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """
+    Generate one image/design asset.
+
+    Planner determines:
+        - prompt
+        - kind
+        - engine
+        - layout
+        - style
+        - dimensions
+        - text awareness
+
+    ai.ai_client.py owns provider/model routing.
+    """
 
     options = (
         image_options
@@ -2104,6 +2080,15 @@ def generate_image_asset(
     image_plan = build_image_prompt(
         message
     )
+
+    if not isinstance(
+        image_plan,
+        dict,
+    ):
+
+        raise RuntimeError(
+            "Image planner returned an invalid plan."
+        )
 
     requested_aspect_ratio = (
         options.get(
@@ -2182,6 +2167,10 @@ def generate_image_asset(
         height,
     )
 
+    # =====================================================
+    # STRUCTURED SVG
+    # =====================================================
+
     if image_plan.get(
         "engine"
     ) == "svg":
@@ -2193,6 +2182,12 @@ def generate_image_asset(
             ),
         )
 
+        if not svg:
+
+            raise RuntimeError(
+                "SVG designer returned empty output."
+            )
+
         filename, filepath = (
             _save_svg_asset(
                 svg
@@ -2200,6 +2195,10 @@ def generate_image_asset(
         )
 
         asset_type = "svg"
+
+    # =====================================================
+    # RASTER IMAGE
+    # =====================================================
 
     else:
 
@@ -2454,6 +2453,183 @@ def generate_image_response(
 
 
 # =========================================================
+# SAVE IMAGE CONVERSATION
+# =========================================================
+
+def save_image_conversation(
+    session_id: str,
+    session: dict[str, Any],
+    message: str,
+    *,
+    success: bool,
+) -> None:
+    """
+    Save the user image request and an internal assistant
+    conversation marker.
+
+    The actual image URL is returned through the response
+    contract instead of storing large data in session memory.
+    """
+
+    session[
+        "messages"
+    ].append({
+        "role": "user",
+        "content": message,
+    })
+
+    if success:
+
+        session[
+            "messages"
+        ].append({
+            "role": "assistant",
+            "content": (
+                "Generated a design based on the request: "
+                f"{message}"
+            ),
+        })
+
+    save_session(
+        session_id,
+        session,
+    )
+
+
+# =========================================================
+# EXECUTABLE ACTION HANDLER
+# =========================================================
+
+def execute_ai_action(
+    ai_result: dict[str, Any],
+    *,
+    message: str,
+    image_options: dict[str, Any] | None = None,
+    session_id: str,
+    session: dict[str, Any],
+):
+    """
+    Execute an action returned by services.ai_service.
+
+    Currently supported:
+
+        image_generation
+
+    This is a defensive execution layer.
+
+    The normal /ai route already catches image intent before
+    process_message(), but this handler ensures that if an
+    action reaches the route from another capability classifier,
+    it still executes instead of being interpreted as text.
+    """
+
+    if not isinstance(
+        ai_result,
+        dict,
+    ):
+
+        return None
+
+    if not ai_result.get(
+        "action_required",
+        False,
+    ):
+
+        return None
+
+    action = (
+        ai_result.get(
+            "action",
+            {},
+        )
+    )
+
+    if not isinstance(
+        action,
+        dict,
+    ):
+
+        return (
+            jsonify(
+                error_response(
+                    "INVALID_AI_ACTION",
+                    "RevelaAI returned an invalid action.",
+                )
+            ),
+            502,
+        )
+
+    action_type = str(
+        action.get(
+            "type",
+            "",
+        )
+        or ""
+    ).strip().lower()
+
+    app.logger.info(
+        "EXECUTABLE AI ACTION | "
+        "request_id=%s | type=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        action_type,
+    )
+
+    if action_type == "image_generation":
+
+        result = (
+            generate_image_response(
+                message,
+                image_options=image_options,
+            )
+        )
+
+        save_image_conversation(
+            session_id,
+            session,
+            message,
+            success=bool(
+                result.get(
+                    "ok",
+                    False,
+                )
+            ),
+        )
+
+        return (
+            result["response"],
+            result["status_code"],
+        )
+
+    app.logger.warning(
+        "Unsupported executable AI action | "
+        "request_id=%s | type=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        action_type,
+    )
+
+    return (
+        jsonify(
+            error_response(
+                "UNSUPPORTED_AI_ACTION",
+                (
+                    "RevelaAI recognized an unsupported "
+                    "executable action."
+                ),
+            )
+        ),
+        501,
+    )
+
+
+# =========================================================
 # DYNAMIC FEATURE CHAT
 # =========================================================
 
@@ -2486,6 +2662,30 @@ def feature_chat():
                 "Message required.",
             )
         ), 400
+
+    # -----------------------------------------------------
+    # Prevent visual requests from being fed into arbitrary
+    # dynamic text features.
+    # -----------------------------------------------------
+
+    if is_image_generation_request(
+        user_input
+    ):
+
+        return jsonify({
+            "status": "success",
+            "mode": "image_generation",
+            "message": (
+                "Use the /ai endpoint for image-generation "
+                "requests."
+            ),
+            "request_id": getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            "build_id": REVELAAI_BUILD_ID,
+        })
 
     responses = {}
 
@@ -2550,8 +2750,15 @@ def root():
         "app": APP_NAME,
         "environment": ENVIRONMENT,
         "build_id": REVELAAI_BUILD_ID,
-        "text_provider": get_active_text_provider(),
-        "text_model": get_active_text_model(),
+        "text_provider": (
+            get_active_text_provider()
+        ),
+        "text_model": (
+            get_active_text_model()
+        ),
+        "image_engine": (
+            REVELAAI_IMAGE_ENGINE_VERSION
+        ),
         "message": (
             "RevelaAI is live."
         ),
@@ -2618,6 +2825,36 @@ def capabilities():
         get_active_text_model()
     )
 
+    gemini_info = {}
+
+    providers = (
+        text_status.get(
+            "providers",
+            {},
+        )
+    )
+
+    if isinstance(
+        providers,
+        dict,
+    ):
+
+        possible_gemini_info = (
+            providers.get(
+                "gemini",
+                {},
+            )
+        )
+
+        if isinstance(
+            possible_gemini_info,
+            dict,
+        ):
+
+            gemini_info = (
+                possible_gemini_info
+            )
+
     return jsonify({
         "status": "success",
         "service": "revelaai",
@@ -2639,31 +2876,8 @@ def capabilities():
                 ),
                 "model": active_text_model,
                 "fallback_available": bool(
-                    isinstance(
-                        text_status.get(
-                            "providers",
-                            {}
-                        ),
-                        dict,
-                    )
-                    and isinstance(
-                        text_status.get(
-                            "providers",
-                            {},
-                        ).get(
-                            "gemini",
-                            {}
-                        ),
-                        dict,
-                    )
-                    and text_status.get(
-                        "providers",
-                        {},
-                    ).get(
-                        "gemini",
-                        {},
-                    ).get(
-                        "fallback_model",
+                    gemini_info.get(
+                        "fallback_model"
                     )
                 ),
                 "providers": text_status,
@@ -2675,15 +2889,17 @@ def capabilities():
 
             "image_generation": {
                 "enabled": bool(
-                    hf_configured()
-                    or configured_image_model()
+                    configured_image_model()
+                    or REVELAAI_IMAGE_ENGINE_VERSION
                 ),
                 "provider": "huggingface",
                 "routing": {
-                    "primary": "ai_client",
+                    "primary": "ai-client",
+                    "planner": "image_prompt",
                     "text_aware": True,
                     "fallback": True,
                     "provider_aware": True,
+                    "server_execution": True,
                 },
                 "engines": {
                     "raster": "huggingface",
@@ -2955,17 +3171,20 @@ def ai_assistant():
         )
 
         # -------------------------------------------------
-        # INTENT
+        # INTENT + CAPABILITY
         # -------------------------------------------------
 
         intent = classify_intent(
             message
         )
 
+        capability = detect_capability(
+            message,
+            intent=intent,
+        )
+
         image_request = (
-            is_image_generation_request(
-                message
-            )
+            capability == "image_generation"
         )
 
         if image_request:
@@ -2975,14 +3194,15 @@ def ai_assistant():
             )
 
         app.logger.info(
-            "IMAGE ROUTING | "
-            "request_id=%s | detected=%s | intent=%s | "
-            "build=%s | message=%s",
+            "REQUEST ROUTING | "
+            "request_id=%s | capability=%s | image=%s | "
+            "intent=%s | build=%s | message=%s",
             getattr(
                 g,
                 "request_id",
                 None,
             ),
+            capability,
             image_request,
             intent,
             REVELAAI_BUILD_ID,
@@ -2998,10 +3218,18 @@ def ai_assistant():
         ] = intent
 
         # -------------------------------------------------
-        # IMAGE GENERATION
+        # DIRECT IMAGE EXECUTION
         # -------------------------------------------------
+        #
+        # This path executes the image capability BEFORE the
+        # text model sees the message.
+        #
+        # This is the primary protection against responses like:
+        #
+        #   "I can help generate an image, but..."
+        #
 
-        if intent == "image_generation":
+        if image_request:
 
             image_result = (
                 generate_image_response(
@@ -3010,31 +3238,16 @@ def ai_assistant():
                 )
             )
 
-            session[
-                "messages"
-            ].append({
-                "role": "user",
-                "content": message,
-            })
-
-            if image_result.get(
-                "ok",
-                False,
-            ):
-
-                session[
-                    "messages"
-                ].append({
-                    "role": "assistant",
-                    "content": (
-                        "Generated a design based on the request: "
-                        f"{message}"
-                    ),
-                })
-
-            save_session(
+            save_image_conversation(
                 session_id,
                 session,
+                message,
+                success=bool(
+                    image_result.get(
+                        "ok",
+                        False,
+                    )
+                ),
             )
 
             return (
@@ -3088,23 +3301,8 @@ def ai_assistant():
             )
 
         # -------------------------------------------------
-        # CENTRAL REVELAAI PIPELINE
+        # CENTRAL PIPELINE
         # -------------------------------------------------
-        #
-        # IMPORTANT:
-        #
-        # process_message() remains the central gateway.
-        # It receives:
-        #
-        #   message
-        #   conversation context
-        #   intent
-        #   session_id
-        #   authenticated user_id
-        #
-        # The provider swap therefore does not remove
-        # RevelaCode ecosystem intelligence.
-        #
 
         ai_result = process_message(
             message=message,
@@ -3113,6 +3311,26 @@ def ai_assistant():
             session_id=session_id,
             user_id=user_id,
         )
+
+        # -------------------------------------------------
+        # DEFENSIVE EXECUTABLE ACTION HANDLING
+        # -------------------------------------------------
+
+        action_result = execute_ai_action(
+            ai_result,
+            message=message,
+            image_options=image_options,
+            session_id=session_id,
+            session=session,
+        )
+
+        if action_result is not None:
+
+            return action_result
+
+        # -------------------------------------------------
+        # RESPONSE
+        # -------------------------------------------------
 
         assistant_text = (
             ai_result.get(
@@ -3167,6 +3385,15 @@ def ai_assistant():
             }
         )
 
+        if not isinstance(
+            data,
+            dict,
+        ):
+
+            data = {
+                "content": assistant_text
+            }
+
         if expert_payload:
 
             data[
@@ -3180,29 +3407,40 @@ def ai_assistant():
             )
         )
 
+        if not isinstance(
+            orchestrator_data,
+            dict,
+        ):
+
+            orchestrator_data = {}
+
         online_data = (
             orchestrator_data.get(
                 "online",
                 {},
             )
-            if isinstance(
-                orchestrator_data,
-                dict,
-            )
-            else {}
         )
+
+        if not isinstance(
+            online_data,
+            dict,
+        ):
+
+            online_data = {}
 
         sources = (
             online_data.get(
                 "sources",
                 [],
             )
-            if isinstance(
-                online_data,
-                dict,
-            )
-            else []
         )
+
+        if not isinstance(
+            sources,
+            list,
+        ):
+
+            sources = []
 
         meta = {
             "ai_model": ai_result.get(
@@ -3260,11 +3498,6 @@ def ai_assistant():
                     "biashara",
                     {},
                 )
-                if isinstance(
-                    orchestrator_data,
-                    dict,
-                )
-                else {}
             ),
 
             "agriculture": (
@@ -3272,11 +3505,6 @@ def ai_assistant():
                     "agriculture",
                     {},
                 )
-                if isinstance(
-                    orchestrator_data,
-                    dict,
-                )
-                else {}
             ),
 
             "ecosystem": (
@@ -3284,25 +3512,13 @@ def ai_assistant():
                     "ecosystem",
                     {},
                 )
-                if isinstance(
-                    orchestrator_data,
-                    dict,
-                )
-                else {}
             ),
 
             "multimodal": (
                 attachment_metadata
-                or (
-                    orchestrator_data.get(
-                        "multimodal",
-                        {},
-                    )
-                    if isinstance(
-                        orchestrator_data,
-                        dict,
-                    )
-                    else {}
+                or orchestrator_data.get(
+                    "multimodal",
+                    {},
                 )
             ),
 
@@ -3413,7 +3629,9 @@ def serve_generated_image(
             "status": "error",
             "error": {
                 "code": "UNSUPPORTED_IMAGE_FORMAT",
-                "message": "Unsupported generated image format.",
+                "message": (
+                    "Unsupported generated image format."
+                ),
             },
             "build_id": REVELAAI_BUILD_ID,
         }), 415
@@ -3527,10 +3745,13 @@ def ai_stream():
         message
     )
 
+    capability = detect_capability(
+        message,
+        intent=intent,
+    )
+
     image_request = (
-        is_image_generation_request(
-            message
-        )
+        capability == "image_generation"
     )
 
     if image_request:
@@ -3541,13 +3762,15 @@ def ai_stream():
 
     app.logger.info(
         "STREAM ROUTING | "
-        "request_id=%s | image=%s | intent=%s | build=%s | "
+        "request_id=%s | capability=%s | image=%s | "
+        "intent=%s | build=%s | "
         "text_provider=%s | text_model=%s",
         getattr(
             g,
             "request_id",
             None,
         ),
+        capability,
         image_request,
         intent,
         REVELAAI_BUILD_ID,
@@ -3559,11 +3782,11 @@ def ai_stream():
         "topic"
     ] = intent
 
-    # -----------------------------------------------------
+    # =====================================================
     # IMAGE STREAMING
-    # -----------------------------------------------------
+    # =====================================================
 
-    if intent == "image_generation":
+    if image_request:
 
         @stream_with_context
         def generate_image_stream():
@@ -3624,6 +3847,7 @@ def ai_stream():
                             ] == "png"
                             else "huggingface-svg"
                         ),
+
                         "model": (
                             configured_image_model()
                             if asset[
@@ -3631,13 +3855,17 @@ def ai_stream():
                             ] == "png"
                             else None
                         ),
+
                         "build_id": REVELAAI_BUILD_ID,
+
                         "intent": "image_generation",
+
                         "image_engine": asset[
                             "image_plan"
                         ].get(
                             "engine"
                         ),
+
                         "engine_version": (
                             REVELAAI_IMAGE_ENGINE_VERSION
                         ),
@@ -3767,9 +3995,9 @@ def ai_stream():
 
         return response
 
-    # -----------------------------------------------------
+    # =====================================================
     # NORMAL STREAMING
-    # -----------------------------------------------------
+    # =====================================================
 
     session[
         "messages"
@@ -3802,13 +4030,167 @@ def ai_stream():
                 user_id=user_id,
             )
 
+            # -------------------------------------------------
+            # Defensive action handling
+            # -------------------------------------------------
+
+            if ai_result.get(
+                "action_required",
+                False,
+            ):
+
+                action = (
+                    ai_result.get(
+                        "action",
+                        {},
+                    )
+                )
+
+                action_type = str(
+                    action.get(
+                        "type",
+                        "",
+                    )
+                    or ""
+                ).strip().lower()
+
+                if action_type == "image_generation":
+
+                    asset = generate_image_asset(
+                        message,
+                        image_options=image_options,
+                    )
+
+                    session[
+                        "messages"
+                    ].append({
+                        "role": "assistant",
+                        "content": (
+                            "Generated a design based on the request: "
+                            f"{message}"
+                        ),
+                    })
+
+                    save_session(
+                        session_id,
+                        session,
+                    )
+
+                    image_payload = {
+                        "success": True,
+                        "mode": "image",
+                        "query": message,
+
+                        "data": {
+                            "type": "image",
+                            "format": asset[
+                                "asset_type"
+                            ],
+                            "urls": [
+                                asset[
+                                    "image_url"
+                                ],
+                            ],
+                        },
+
+                        "sources": [],
+
+                        "meta": {
+                            "provider": (
+                                "huggingface"
+                                if asset[
+                                    "asset_type"
+                                ] == "png"
+                                else "huggingface-svg"
+                            ),
+
+                            "model": (
+                                configured_image_model()
+                                if asset[
+                                    "asset_type"
+                                ] == "png"
+                                else None
+                            ),
+
+                            "build_id": REVELAAI_BUILD_ID,
+
+                            "intent": "image_generation",
+
+                            "image_engine": asset[
+                                "image_plan"
+                            ].get(
+                                "engine"
+                            ),
+
+                            "engine_version": (
+                                REVELAAI_IMAGE_ENGINE_VERSION
+                            ),
+
+                            "design": asset[
+                                "image_plan"
+                            ],
+
+                            "image": {
+                                "width": asset[
+                                    "width"
+                                ],
+                                "height": asset[
+                                    "height"
+                                ],
+                                "aspect_ratio": asset[
+                                    "aspect_ratio"
+                                ],
+                                "seed": asset[
+                                    "seed"
+                                ],
+                            },
+                        },
+                    }
+
+                    yield (
+                        "event: image\n"
+                        "data: "
+                        f"{json.dumps(image_payload)}\n\n"
+                    )
+
+                    yield (
+                        "event: done\n"
+                        "data: [DONE]\n\n"
+                    )
+
+                    return
+
+                yield (
+                    "event: error\n"
+                    "data: "
+                    + json.dumps({
+                        "success": False,
+                        "code": (
+                            "UNSUPPORTED_AI_ACTION"
+                        ),
+                        "message": (
+                            "RevelaAI recognized an unsupported "
+                            "action."
+                        ),
+                    })
+                    + "\n\n"
+                )
+
+                return
+
             response_text = (
                 ai_result.get(
                     "response",
                     "",
                 )
-                or "No response generated."
-            )
+                or ""
+            ).strip()
+
+            if not response_text:
+
+                response_text = (
+                    "No response generated."
+                )
 
             session[
                 "messages"
@@ -3856,6 +4238,13 @@ def ai_stream():
                     )
                 ),
 
+                "capability": (
+                    ai_result.get(
+                        "capability",
+                        "text",
+                    )
+                ),
+
                 "build_id": REVELAAI_BUILD_ID,
 
                 "memory": {
@@ -3895,7 +4284,16 @@ def ai_stream():
 
             yield (
                 "event: error\n"
-                "data: RevelaAI could not complete the request.\n\n"
+                "data: "
+                + json.dumps({
+                    "success": False,
+                    "code": "STREAM_REQUEST_FAILED",
+                    "message": (
+                        "RevelaAI could not complete "
+                        "the request."
+                    ),
+                })
+                + "\n\n"
             )
 
     response = Response(
@@ -3919,7 +4317,7 @@ def ai_stream():
 
 
 # =========================================================
-# VOICE
+# VOICE HELPERS
 # =========================================================
 
 def audio_extension_for_mime(
@@ -3946,6 +4344,10 @@ def audio_extension_for_mime(
     )
 
 
+# =========================================================
+# VOICE ENDPOINT
+# =========================================================
+
 @app.route(
     "/voice",
     methods=["POST"],
@@ -3966,7 +4368,9 @@ def voice():
             "status": "error",
             "error": {
                 "code": "AUDIO_REQUIRED",
-                "message": "No audio file was provided.",
+                "message": (
+                    "No audio file was provided."
+                ),
             },
             "build_id": REVELAAI_BUILD_ID,
         }), 400
@@ -3981,7 +4385,9 @@ def voice():
             "status": "error",
             "error": {
                 "code": "EMPTY_AUDIO",
-                "message": "Uploaded audio is empty.",
+                "message": (
+                    "Uploaded audio is empty."
+                ),
             },
             "build_id": REVELAAI_BUILD_ID,
         }), 400
@@ -4060,6 +4466,10 @@ def voice():
             "build_id": REVELAAI_BUILD_ID,
         }), 400
 
+    # -----------------------------------------------------
+    # SESSION / USER
+    # -----------------------------------------------------
+
     session_id = (
         get_session_id()
     )
@@ -4092,13 +4502,20 @@ def voice():
         ),
     )
 
+    # -----------------------------------------------------
+    # INTENT + CAPABILITY
+    # -----------------------------------------------------
+
     intent = classify_intent(
         heard
     )
 
-    if is_image_generation_request(
-        heard
-    ):
+    capability = detect_capability(
+        heard,
+        intent=intent,
+    )
+
+    if capability == "image_generation":
 
         intent = (
             "image_generation"
@@ -4123,7 +4540,7 @@ def voice():
     # VOICE IMAGE REQUEST
     # -----------------------------------------------------
 
-    if intent == "image_generation":
+    if capability == "image_generation":
 
         try:
 
@@ -4139,8 +4556,12 @@ def voice():
             ):
 
                 return (
-                    image_result["response"],
-                    image_result["status_code"],
+                    image_result[
+                        "response"
+                    ],
+                    image_result[
+                        "status_code"
+                    ],
                 )
 
             image_url = (
@@ -4156,25 +4577,11 @@ def voice():
                 )
             )
 
-            session[
-                "messages"
-            ].append({
-                "role": "user",
-                "content": heard,
-            })
-
-            session[
-                "messages"
-            ].append({
-                "role": "assistant",
-                "content": (
-                    "Image generated successfully."
-                ),
-            })
-
-            save_session(
+            save_image_conversation(
                 session_id,
                 session,
+                heard,
+                success=True,
             )
 
             return jsonify({
@@ -4247,7 +4654,9 @@ def voice():
             return jsonify({
                 "status": "error",
                 "error": {
-                    "code": "VOICE_IMAGE_GENERATION_FAILED",
+                    "code": (
+                        "VOICE_IMAGE_GENERATION_FAILED"
+                    ),
                     "message": (
                         "Image generation is "
                         "temporarily unavailable."
@@ -4274,7 +4683,7 @@ def voice():
     ][-MAX_HISTORY:]
 
     # -----------------------------------------------------
-    # AI
+    # NORMAL AI PIPELINE
     # -----------------------------------------------------
 
     try:
@@ -4312,6 +4721,94 @@ def voice():
             "build_id": REVELAAI_BUILD_ID,
         }), 502
 
+    # -----------------------------------------------------
+    # DEFENSIVE ACTION HANDLING
+    # -----------------------------------------------------
+
+    if ai_result.get(
+        "action_required",
+        False,
+    ):
+
+        action = (
+            ai_result.get(
+                "action",
+                {},
+            )
+        )
+
+        action_type = str(
+            action.get(
+                "type",
+                "",
+            )
+            or ""
+        ).strip().lower()
+
+        if action_type == "image_generation":
+
+            try:
+
+                image_result = (
+                    generate_image_response(
+                        heard
+                    )
+                )
+
+                if image_result.get(
+                    "ok",
+                    False,
+                ):
+
+                    save_image_conversation(
+                        session_id,
+                        session,
+                        heard,
+                        success=True,
+                    )
+
+                return (
+                    image_result["response"],
+                    image_result["status_code"],
+                )
+
+            except Exception as exc:
+
+                app.logger.exception(
+                    "Voice executable image action failed | "
+                    "request_id=%s | error=%s",
+                    getattr(
+                        g,
+                        "request_id",
+                        None,
+                    ),
+                    exc,
+                )
+
+                return jsonify({
+                    "status": "error",
+                    "error": {
+                        "code": (
+                            "VOICE_IMAGE_GENERATION_FAILED"
+                        ),
+                        "message": (
+                            "Image generation failed."
+                        ),
+                    },
+                    "build_id": REVELAAI_BUILD_ID,
+                }), 502
+
+        return jsonify({
+            "status": "error",
+            "error": {
+                "code": "UNSUPPORTED_AI_ACTION",
+                "message": (
+                    "RevelaAI recognized an unsupported action."
+                ),
+            },
+            "build_id": REVELAAI_BUILD_ID,
+        }), 501
+
     response_text = str(
         ai_result.get(
             "response",
@@ -4346,7 +4843,7 @@ def voice():
     )
 
     # -----------------------------------------------------
-    # TEXT TO SPEECH
+    # TTS
     # -----------------------------------------------------
 
     if not REVELAAI_ENABLE_HF_TTS:
@@ -4513,8 +5010,7 @@ def voice():
         os.getenv(
             "HF_TTS_MIME_TYPE",
             "audio/wav",
-        )
-        .strip()
+        ).strip()
         or "audio/wav"
     )
 
@@ -4643,18 +5139,22 @@ def voice():
                 "intent",
                 intent,
             ),
+
             "domain": ai_result.get(
                 "domain",
                 "general",
             ),
+
             "provider": ai_result.get(
                 "provider",
                 get_active_text_provider(),
             ),
+
             "model": ai_result.get(
                 "model",
                 get_active_text_model(),
             ),
+
             "build_id": REVELAAI_BUILD_ID,
 
             "memory": {
@@ -4694,7 +5194,9 @@ def serve_audio(
             "status": "error",
             "error": {
                 "code": "INVALID_FILENAME",
-                "message": "Invalid audio filename.",
+                "message": (
+                    "Invalid audio filename."
+                ),
             },
             "build_id": REVELAAI_BUILD_ID,
         }), 400
@@ -4817,12 +5319,21 @@ def health():
 
         "build": {
             "id": REVELAAI_BUILD_ID,
-            "image_routing": "ai-client-managed",
+
+            "image_routing": (
+                "ai-client-managed"
+            ),
+
             "image_engine": (
                 REVELAAI_IMAGE_ENGINE_VERSION
             ),
+
             "conversation_memory": (
                 "client-context-plus-session"
+            ),
+
+            "capability_routing": (
+                "server-authoritative"
             ),
         },
 
@@ -4836,11 +5347,16 @@ def health():
                 "provider": (
                     active_text_provider
                 ),
+
                 "configured": (
                     active_text_provider
                     != "none"
                 ),
-                "model": active_text_model,
+
+                "model": (
+                    active_text_model
+                ),
+
                 "status": text_status,
             },
 
@@ -4850,16 +5366,27 @@ def health():
 
             "image": {
                 "provider": "huggingface",
-                "configured": hf_configured(),
+
+                "configured": (
+                    hf_configured()
+                    and bool(
+                        configured_image_model()
+                    )
+                ),
+
                 "primary_model": (
                     configured_image_model()
                 ),
+
                 "routing": {
                     "owner": "ai_client",
+                    "planner": "image_prompt",
                     "text_aware": True,
                     "fallback": True,
                     "provider_aware": True,
+                    "server_execution": True,
                 },
+
                 "structured_svg": True,
             },
 
@@ -4869,15 +5396,21 @@ def health():
 
             "voice": {
                 "provider": "huggingface",
-                "configured": hf_configured(),
+
+                "configured": (
+                    hf_configured()
+                ),
+
                 "asr_model": os.getenv(
                     "HF_ASR_MODEL",
                     "openai/whisper-large-v3",
                 ),
+
                 "tts_model": os.getenv(
                     "HF_TTS_MODEL",
                     "hexgrad/Kokoro-82M",
                 ),
+
                 "tts_enabled": (
                     REVELAAI_ENABLE_HF_TTS
                 ),
@@ -4945,7 +5478,7 @@ def ready():
     checks: dict[str, Any] = {}
 
     # -----------------------------------------------------
-    # TEXT
+    # TEXT IS THE CORE REQUIRED SERVICE
     # -----------------------------------------------------
 
     checks[
@@ -4963,6 +5496,8 @@ def ready():
 
     # -----------------------------------------------------
     # HUGGING FACE MULTIMODAL
+    #
+    # Optional for core text readiness.
     # -----------------------------------------------------
 
     checks[
@@ -5025,17 +5560,31 @@ def ready():
             "pdf_processor"
         ] = False
 
-    ready_status = all(
+    # -----------------------------------------------------
+    # CORE READINESS
+    #
+    # Gemini text must be available.
+    # Optional multimodal services do not prevent core text
+    # readiness.
+    # -----------------------------------------------------
+
+    core_ready = (
         bool(
-            value
+            checks[
+                "text_provider"
+            ]
         )
-        for value in checks.values()
+        and bool(
+            checks[
+                "text_model"
+            ]
+        )
     )
 
     return jsonify({
         "status": (
             "ready"
-            if ready_status
+            if core_ready
             else "degraded"
         ),
 
@@ -5049,9 +5598,15 @@ def ready():
         },
 
         "checks": checks,
+
+        "core": {
+            "ready": core_ready,
+            "text_required": True,
+            "huggingface_multimodal_optional": True,
+        },
     }), (
         200
-        if ready_status
+        if core_ready
         else 503
     )
 
