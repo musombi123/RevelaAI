@@ -38,14 +38,19 @@ Production principles:
     - Image requests must never silently fall through to text AI.
     - Conversation intent changes must never erase conversation memory.
     - Browser-provided conversation context may rehydrate server memory.
+    - Image model/provider routing is owned by ai.ai_client.py.
+    - Image planning is owned by ai.image_planner.py.
+    - Structured designs are rendered through ai.svg_designer.py.
 """
 
 from __future__ import annotations
 
 import importlib
 import inspect
+import json
 import logging
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -208,8 +213,12 @@ from ai.intent_router import (
     classify_intent,
 )
 
-from ai.image_prompt import (
+from ai.image_planner import (
     build_image_prompt,
+)
+
+from ai.svg_designer import (
+    generate_svg,
 )
 
 from ai.json_utils import (
@@ -403,10 +412,10 @@ AUDIO_RETENTION_SECONDS = int(
 REVELAAI_BUILD_ID = (
     os.getenv(
         "REVELAAI_BUILD_ID",
-        "image-routing-v2-memory-v1",
+        "canva-image-v1-memory-v1",
     )
     .strip()
-    or "image-routing-v2-memory-v1"
+    or "canva-image-v1-memory-v1"
 )
 
 
@@ -431,41 +440,37 @@ REVELAAI_ENABLE_HF_TTS = (
 
 
 # =========================================================
-# IMAGE CONFIGURATION
+# IMAGE ENGINE CONFIGURATION
 # =========================================================
+#
+# The image model/provider/dimensions/inference parameters
+# are owned by ai.ai_client.py.
+#
+# This application layer only exposes the engine identity and
+# does not duplicate model routing defaults.
+#
 
-HF_IMAGE_MODEL_NAME = (
+REVELAAI_IMAGE_ENGINE_VERSION = (
     os.getenv(
-        "HF_IMAGE_MODEL",
-        "black-forest-labs/FLUX.1-schnell",
+        "REVELAAI_IMAGE_ENGINE_VERSION",
+        "canva-studio-v1",
     )
     .strip()
-    or "black-forest-labs/FLUX.1-schnell"
+    or "canva-studio-v1"
 )
 
 
-HF_IMAGE_WIDTH = int(
-    os.getenv(
-        "HF_IMAGE_DEFAULT_WIDTH",
-        "1024",
+# Read-only reporting helper. Generation itself remains owned
+# by ai.ai_client.py.
+def configured_image_model() -> str:
+    return (
+        os.getenv(
+            "HF_IMAGE_MODEL",
+            "black-forest-labs/FLUX.1-dev",
+        )
+        .strip()
+        or "black-forest-labs/FLUX.1-dev"
     )
-)
-
-
-HF_IMAGE_HEIGHT = int(
-    os.getenv(
-        "HF_IMAGE_DEFAULT_HEIGHT",
-        "1024",
-    )
-)
-
-
-HF_IMAGE_STEPS = int(
-    os.getenv(
-        "HF_IMAGE_DEFAULT_STEPS",
-        "4",
-    )
-)
 
 
 # =========================================================
@@ -1782,7 +1787,38 @@ IMAGE_INTENT_PHRASES = {
     "make a photo",
     "generate art",
     "create art",
+    "make art",
+    "create a logo",
+    "make a logo",
+    "design a logo",
+    "generate a logo",
+    "create a poster",
+    "make a poster",
+    "design a poster",
+    "generate a poster",
+    "create a banner",
+    "make a banner",
+    "design a banner",
+    "generate a banner",
+    "create a flyer",
+    "make a flyer",
+    "design a flyer",
+    "generate a flyer",
+    "create a graphic",
+    "make a graphic",
+    "design a graphic",
+    "generate a graphic",
 }
+
+
+IMAGE_DESIGN_RE = re.compile(
+    r"\b(?:create|make|design|generate|draw|produce)"
+    r"\s+(?:me\s+)?(?:a|an)?\s*"
+    r"(?:logo|poster|banner|flyer|illustration|graphic|artwork|"
+    r"social post|social media design|thumbnail|invitation|certificate|"
+    r"infographic|diagram|cover)\b",
+    re.I,
+)
 
 
 def is_image_generation_request(
@@ -1790,11 +1826,10 @@ def is_image_generation_request(
 ) -> bool:
     """
     Determine whether the user's request explicitly asks
-    for image generation.
+    for image/design generation.
 
-    This function intentionally runs before the general
-    intent router so GPT-OSS cannot accidentally treat an
-    image-generation request as a normal text question.
+    Runs before the general intent router so GPT-OSS cannot
+    accidentally treat a visual request as a normal question.
     """
 
     lowered = (
@@ -1808,137 +1843,199 @@ def is_image_generation_request(
     if not lowered:
         return False
 
-    for phrase in (
-        IMAGE_INTENT_PHRASES
+    if IMAGE_DESIGN_RE.search(
+        lowered
     ):
 
-        if phrase in lowered:
+        return True
 
-            return True
-
-    return False
-
-
-# =========================================================
-# IMAGE RESPONSE HELPER
-# =========================================================
-
-def generate_image_response(
-    message: str,
-) -> dict[str, Any]:
-    """
-    Generate an image and return the canonical RevelaAI
-    image response.
-
-    The response format is intentionally stable for the
-    frontend:
-
-        mode=image
-
-        data={
-            type=image,
-            urls=[...]
-        }
-    """
-
-    app.logger.info(
-        "IMAGE GENERATION BRANCH | "
-        "request_id=%s | model=%s | build=%s",
-        getattr(
-            g,
-            "request_id",
-            None,
-        ),
-        HF_IMAGE_MODEL_NAME,
-        REVELAAI_BUILD_ID,
+    return any(
+        phrase in lowered
+        for phrase in IMAGE_INTENT_PHRASES
     )
+
+
+# =========================================================
+# IMAGE REQUEST OPTIONS
+# =========================================================
+
+def _optional_int(
+    value: Any,
+    label: str,
+) -> int | None:
+    """Parse an optional integer, allowing blank form values."""
+
+    if value is None:
+        return None
+
+    if isinstance(
+        value,
+        str,
+    ):
+
+        value = value.strip()
+
+        if not value:
+            return None
 
     try:
 
-        image_plan = (
-            build_image_prompt(
-                message
-            )
-        )
+        return int(value)
 
-        app.logger.info(
-            "IMAGE PROMPT PLANNED | "
-            "request_id=%s | domain=%s | style=%s",
-            getattr(
-                g,
-                "request_id",
-                None,
-            ),
-            image_plan.get(
-                "domain"
-            ),
-            image_plan.get(
-                "style"
-            ),
-        )
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
 
-        image = generate_hf_image(
-            prompt=image_plan[
-                "prompt"
-            ],
-            negative_prompt=image_plan.get(
-                "negative_prompt"
-            ),
-            model=HF_IMAGE_MODEL_NAME,
-            width=HF_IMAGE_WIDTH,
-            height=HF_IMAGE_HEIGHT,
-            num_inference_steps=HF_IMAGE_STEPS,
-        )
+        raise ValueError(
+            f"Image {label} must be an integer."
+        ) from exc
 
-    except Exception as exc:
 
-        app.logger.exception(
-            "Image generation failed | "
-            "request_id=%s | model=%s | error=%s",
-            getattr(
-                g,
-                "request_id",
-                None,
-            ),
-            HF_IMAGE_MODEL_NAME,
-            exc,
-        )
+def parse_image_options(
+    source: Any,
+) -> dict[str, Any]:
+    """
+    Read optional Canva-style image controls.
 
-        return {
-            "ok": False,
-            "response": jsonify(
-                error_response(
-                    "IMAGE_GENERATION_FAILED",
-                    (
-                        "Hugging Face image generation "
-                        "is temporarily unavailable."
-                    ),
-                )
-            ),
-            "status_code": 502,
+    Supported:
+        aspect_ratio
+        width
+        height
+        seed
+
+    Examples:
+
+        {
+            "aspect_ratio": "square"
         }
 
-    if image is None:
+        {
+            "aspect_ratio": "story",
+            "seed": 42
+        }
 
-        app.logger.error(
-            "Image provider returned None | request_id=%s",
-            getattr(
-                g,
-                "request_id",
-                None,
-            ),
+        {
+            "width": 1280,
+            "height": 720
+        }
+    """
+
+    if not isinstance(
+        source,
+        dict,
+    ):
+
+        return {}
+
+    options: dict[str, Any] = {}
+
+    # -----------------------------------------------------
+    # Aspect ratio
+    # -----------------------------------------------------
+
+    aspect_ratio = (
+        source.get(
+            "aspect_ratio"
+        )
+        or source.get(
+            "image_aspect_ratio"
+        )
+        or ""
+    )
+
+    aspect_ratio = str(
+        aspect_ratio
+    ).strip().lower()
+
+    if aspect_ratio:
+
+        options[
+            "aspect_ratio"
+        ] = aspect_ratio
+
+    # -----------------------------------------------------
+    # Width / height / seed
+    # -----------------------------------------------------
+
+    width = _optional_int(
+        source.get(
+            "width"
+        ),
+        "width",
+    )
+
+    height = _optional_int(
+        source.get(
+            "height"
+        ),
+        "height",
+    )
+
+    seed = _optional_int(
+        source.get(
+            "seed"
+        ),
+        "seed",
+    )
+
+    if width is not None:
+        options[
+            "width"
+        ] = width
+
+    if height is not None:
+        options[
+            "height"
+        ] = height
+
+    if seed is not None:
+        options[
+            "seed"
+        ] = seed
+
+    return options
+
+
+# =========================================================
+# IMAGE ASSET GENERATION
+# =========================================================
+
+def _save_svg_asset(
+    svg: str,
+) -> tuple[str, str]:
+    """Save validated SVG and return filename/path."""
+
+    filename = (
+        "revelaai_"
+        f"{uuid.uuid4().hex}.svg"
+    )
+
+    filepath = os.path.join(
+        IMAGE_DIR,
+        filename,
+    )
+
+    with open(
+        filepath,
+        "w",
+        encoding="utf-8",
+    ) as handle:
+
+        handle.write(
+            svg
         )
 
-        return {
-            "ok": False,
-            "response": jsonify(
-                error_response(
-                    "IMAGE_GENERATION_EMPTY",
-                    "Hugging Face returned no image.",
-                )
-            ),
-            "status_code": 502,
-        }
+    return (
+        filename,
+        filepath,
+    )
+
+
+def _save_raster_asset(
+    image: Any,
+) -> tuple[str, str]:
+    """Save a PIL-compatible image and return filename/path."""
 
     filename = (
         "revelaai_"
@@ -1950,17 +2047,279 @@ def generate_image_response(
         filename,
     )
 
-    try:
+    image.save(
+        filepath,
+        format="PNG",
+    )
 
-        image.save(
+    return (
+        filename,
+        filepath,
+    )
+
+
+def generate_image_asset(
+    message: str,
+    *,
+    image_options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Generate and persist one visual asset.
+
+    Returns:
+        {
+            filename,
             filepath,
-            format="PNG",
+            image_url,
+            asset_type,
+            image_plan,
+        }
+
+    Raises:
+        ValueError / RuntimeError / provider exceptions
+        which are handled by the calling route.
+    """
+
+    options = (
+        image_options
+        if isinstance(
+            image_options,
+            dict,
+        )
+        else {}
+    )
+
+    # -----------------------------------------------------
+    # Plan
+    # -----------------------------------------------------
+
+    image_plan = build_image_prompt(
+        message
+    )
+
+    # -----------------------------------------------------
+    # Overrides
+    # -----------------------------------------------------
+
+    requested_aspect_ratio = (
+        options.get(
+            "aspect_ratio"
+        )
+    )
+
+    requested_width = (
+        options.get(
+            "width"
+        )
+    )
+
+    requested_height = (
+        options.get(
+            "height"
+        )
+    )
+
+    requested_seed = (
+        options.get(
+            "seed"
+        )
+    )
+
+    aspect_ratio = (
+        requested_aspect_ratio
+        or image_plan.get(
+            "aspect_ratio"
+        )
+    )
+
+    width = (
+        requested_width
+        if requested_width is not None
+        else image_plan.get(
+            "width"
+        )
+    )
+
+    height = (
+        requested_height
+        if requested_height is not None
+        else image_plan.get(
+            "height"
+        )
+    )
+
+    # -----------------------------------------------------
+    # Log
+    # -----------------------------------------------------
+
+    app.logger.info(
+        "IMAGE PROMPT PLANNED | "
+        "request_id=%s | kind=%s | engine=%s | "
+        "style=%s | layout=%s | text=%s | "
+        "aspect=%s | size=%sx%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        image_plan.get(
+            "kind"
+        ),
+        image_plan.get(
+            "engine"
+        ),
+        image_plan.get(
+            "style"
+        ),
+        image_plan.get(
+            "layout"
+        ),
+        image_plan.get(
+            "has_text"
+        ),
+        aspect_ratio,
+        width,
+        height,
+    )
+
+    # =====================================================
+    # STRUCTURED SVG
+    # =====================================================
+
+    if image_plan.get(
+        "engine"
+    ) == "svg":
+
+        svg = generate_svg(
+            image_plan,
+            text=image_plan.get(
+                "text"
+            ),
         )
 
-    except Exception as exc:
+        filename, filepath = (
+            _save_svg_asset(
+                svg
+            )
+        )
+
+        asset_type = "svg"
+
+    # =====================================================
+    # RASTER IMAGE
+    # =====================================================
+
+    else:
+
+        image = generate_hf_image(
+            prompt=image_plan[
+                "prompt"
+            ],
+            negative_prompt=image_plan.get(
+                "negative_prompt"
+            ),
+            has_text=bool(
+                image_plan.get(
+                    "has_text"
+                )
+            ),
+            aspect_ratio=aspect_ratio,
+            width=width,
+            height=height,
+            seed=requested_seed,
+        )
+
+        if image is None:
+
+            raise RuntimeError(
+                "Hugging Face returned no image."
+            )
+
+        filename, filepath = (
+            _save_raster_asset(
+                image
+            )
+        )
+
+        asset_type = "png"
+
+    # -----------------------------------------------------
+    # Public URL
+    # -----------------------------------------------------
+
+    image_url = (
+        request.host_url.rstrip("/")
+        + "/ai/images/"
+        + filename
+    )
+
+    app.logger.info(
+        "IMAGE GENERATED SUCCESSFULLY | "
+        "request_id=%s | file=%s | "
+        "asset_type=%s | kind=%s | aspect=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        filename,
+        asset_type,
+        image_plan.get(
+            "kind"
+        ),
+        aspect_ratio,
+    )
+
+    return {
+        "filename": filename,
+        "filepath": filepath,
+        "image_url": image_url,
+        "asset_type": asset_type,
+        "image_plan": image_plan,
+        "aspect_ratio": aspect_ratio,
+        "width": width,
+        "height": height,
+        "seed": requested_seed,
+    }
+
+
+# =========================================================
+# IMAGE RESPONSE HELPER
+# =========================================================
+
+def generate_image_response(
+    message: str,
+    *,
+    image_options: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Generate a Canva-style image asset and return the
+    canonical RevelaAI JSON response.
+    """
+
+    app.logger.info(
+        "IMAGE GENERATION BRANCH | "
+        "request_id=%s | build=%s | engine_version=%s",
+        getattr(
+            g,
+            "request_id",
+            None,
+        ),
+        REVELAAI_BUILD_ID,
+        REVELAAI_IMAGE_ENGINE_VERSION,
+    )
+
+    try:
+
+        asset = generate_image_asset(
+            message,
+            image_options=image_options,
+        )
+
+    except ValueError as exc:
 
         app.logger.exception(
-            "Generated image could not be saved | "
+            "Image planning/validation failed | "
             "request_id=%s | error=%s",
             getattr(
                 g,
@@ -1974,49 +2333,114 @@ def generate_image_response(
             "ok": False,
             "response": jsonify(
                 error_response(
-                    "IMAGE_SAVE_FAILED",
-                    "Generated image could not be stored.",
+                    "IMAGE_REQUEST_INVALID",
+                    str(exc),
                 )
             ),
-            "status_code": 500,
+            "status_code": 400,
         }
 
-    image_url = (
-        request.host_url.rstrip("/")
-        + "/ai/images/"
-        + filename
-    )
+    except Exception as exc:
 
-    app.logger.info(
-        "IMAGE GENERATED SUCCESSFULLY | "
-        "request_id=%s | file=%s | url=%s",
-        getattr(
-            g,
-            "request_id",
-            None,
-        ),
-        filename,
-        image_url,
-        image_url,
-    )
+        app.logger.exception(
+            "Image generation failed | "
+            "request_id=%s | error=%s",
+            getattr(
+                g,
+                "request_id",
+                None,
+            ),
+            exc,
+        )
+
+        return {
+            "ok": False,
+            "response": jsonify(
+                error_response(
+                    "IMAGE_GENERATION_FAILED",
+                    (
+                        "RevelaAI could not generate "
+                        "the requested design."
+                    ),
+                )
+            ),
+            "status_code": 502,
+        }
 
     response = enforce_base_schema(
         query=message,
         mode="image",
         data={
             "type": "image",
+            "format": asset[
+                "asset_type"
+            ],
             "urls": [
-                image_url
+                asset[
+                    "image_url"
+                ],
             ],
         },
         sources=[],
         meta={
-            "provider": "huggingface",
-            "model": HF_IMAGE_MODEL_NAME,
+            "provider": (
+                "huggingface"
+                if asset[
+                    "asset_type"
+                ] == "png"
+                else "huggingface-svg"
+            ),
+            "model": (
+                configured_image_model()
+                if asset[
+                    "asset_type"
+                ] == "png"
+                else None
+            ),
             "build_id": REVELAAI_BUILD_ID,
+            "image_engine": asset[
+                "image_plan"
+            ].get(
+                "engine"
+            ),
+            "engine_version": (
+                REVELAAI_IMAGE_ENGINE_VERSION
+            ),
             "intent": "image_generation",
+            "design": asset[
+                "image_plan"
+            ],
+            "image": {
+                "width": asset[
+                    "width"
+                ],
+                "height": asset[
+                    "height"
+                ],
+                "aspect_ratio": asset[
+                    "aspect_ratio"
+                ],
+                "seed": asset[
+                    "seed"
+                ],
+                "text_aware": bool(
+                    asset[
+                        "image_plan"
+                    ].get(
+                        "has_text"
+                    )
+                ),
+            },
             "multimodal": {
                 "type": "image",
+                "format": asset[
+                    "asset_type"
+                ],
+                "editable": (
+                    asset[
+                        "asset_type"
+                    ] == "svg"
+                ),
             },
         },
     )
@@ -2027,9 +2451,21 @@ def generate_image_response(
             response
         ),
         "status_code": 200,
-        "filename": filename,
-        "filepath": filepath,
-        "image_url": image_url,
+        "filename": asset[
+            "filename"
+        ],
+        "filepath": asset[
+            "filepath"
+        ],
+        "image_url": asset[
+            "image_url"
+        ],
+        "asset_type": asset[
+            "asset_type"
+        ],
+        "image_plan": asset[
+            "image_plan"
+        ],
     }
 
 
@@ -2202,11 +2638,35 @@ def capabilities():
             "image_generation": {
                 "enabled": bool(
                     hf_configured()
-                    and HF_IMAGE_MODEL_NAME
                 ),
                 "provider": "huggingface",
-                "model": HF_IMAGE_MODEL_NAME,
-                "routing": "explicit",
+                "routing": {
+                    "primary": "ai_client",
+                    "text_aware": True,
+                    "fallback": True,
+                    "provider_aware": True,
+                },
+                "engines": {
+                    "raster": "huggingface",
+                    "structured_vector": "svg",
+                },
+                "formats": [
+                    "square",
+                    "portrait",
+                    "landscape",
+                    "wide",
+                    "story",
+                    "banner",
+                    "social_portrait",
+                    "presentation",
+                    "phone",
+                ],
+                "canva_style": {
+                    "enabled": True,
+                    "planner": "image_planner",
+                    "structured_svg": True,
+                    "editable_assets": True,
+                },
             },
 
             "online_research": {
@@ -2278,6 +2738,7 @@ def ai_assistant():
         message = ""
         attachment_metadata = None
         raw_client_context: Any = None
+        image_options: dict[str, Any] = {}
 
         uploaded = (
             request.files.get(
@@ -2301,6 +2762,32 @@ def ai_assistant():
                 )
                 or ""
             )
+
+            try:
+
+                image_options = parse_image_options({
+                    "aspect_ratio": request.form.get(
+                        "aspect_ratio"
+                    ),
+                    "width": request.form.get(
+                        "width"
+                    ),
+                    "height": request.form.get(
+                        "height"
+                    ),
+                    "seed": request.form.get(
+                        "seed"
+                    ),
+                })
+
+            except ValueError as exc:
+
+                return jsonify(
+                    error_response(
+                        "INVALID_IMAGE_OPTIONS",
+                        str(exc),
+                    )
+                ), 400
 
             try:
 
@@ -2356,6 +2843,21 @@ def ai_assistant():
                     [],
                 )
             )
+
+            try:
+
+                image_options = parse_image_options(
+                    payload
+                )
+
+            except ValueError as exc:
+
+                return jsonify(
+                    error_response(
+                        "INVALID_IMAGE_OPTIONS",
+                        str(exc),
+                    )
+                ), 400
 
         if not message:
 
@@ -2438,14 +2940,7 @@ def ai_assistant():
         # -------------------------------------------------
         #
         # Intent is the CURRENT request.
-        #
         # Intent is NOT the conversation identity.
-        #
-        # Therefore:
-        #
-        # ecosystem -> investors -> business -> image
-        #
-        # remains one conversation.
         # -------------------------------------------------
 
         session[
@@ -2456,16 +2951,12 @@ def ai_assistant():
         # IMAGE GENERATION
         # -------------------------------------------------
 
-        # Image requests intentionally bypass the normal
-        # text-generation pipeline.
-        #
-        # They are still saved into conversation memory.
-
         if intent == "image_generation":
 
             image_result = (
                 generate_image_response(
-                    message
+                    message,
+                    image_options=image_options,
                 )
             )
 
@@ -2490,7 +2981,7 @@ def ai_assistant():
                 ].append({
                     "role": "assistant",
                     "content": (
-                        "Generated an image based on the request: "
+                        "Generated a design based on the request: "
                         f"{message}"
                     ),
                 })
@@ -2825,9 +3316,38 @@ def serve_generated_image(
             "build_id": REVELAAI_BUILD_ID,
         }), 404
 
+    extension = (
+        Path(
+            safe_filename
+        ).suffix.lower()
+    )
+
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+    }
+
+    mime_type = mime_map.get(
+        extension
+    )
+
+    if mime_type is None:
+
+        return jsonify({
+            "status": "error",
+            "error": {
+                "code": "UNSUPPORTED_IMAGE_FORMAT",
+                "message": "Unsupported generated image format.",
+            },
+            "build_id": REVELAAI_BUILD_ID,
+        }), 415
+
     response = send_file(
         filepath,
-        mimetype="image/png",
+        mimetype=mime_type,
         max_age=300,
     )
 
@@ -2869,6 +3389,21 @@ def ai_stream():
             error_response(
                 "EMPTY_MESSAGE",
                 "Message required.",
+            )
+        ), 400
+
+    try:
+
+        image_options = parse_image_options(
+            payload
+        )
+
+    except ValueError as exc:
+
+        return jsonify(
+            error_response(
+                "INVALID_IMAGE_OPTIONS",
+                str(exc),
             )
         ), 400
 
@@ -2962,70 +3497,14 @@ def ai_stream():
 
     if intent == "image_generation":
 
-        image_host_url = (
-            request.host_url.rstrip("/")
-        )
-
         @stream_with_context
         def generate_image_stream():
 
             try:
 
-                app.logger.info(
-                    "STREAM IMAGE GENERATION BRANCH | "
-                    "request_id=%s | model=%s",
-                    getattr(
-                        g,
-                        "request_id",
-                        None,
-                    ),
-                    HF_IMAGE_MODEL_NAME,
-                )
-
-                image_plan = (
-                    build_image_prompt(
-                        message
-                    )
-                )
-
-                image = generate_hf_image(
-                    prompt=image_plan[
-                        "prompt"
-                    ],
-                    negative_prompt=image_plan.get(
-                        "negative_prompt"
-                    ),
-                    model=HF_IMAGE_MODEL_NAME,
-                    width=HF_IMAGE_WIDTH,
-                    height=HF_IMAGE_HEIGHT,
-                    num_inference_steps=HF_IMAGE_STEPS,
-                )
-
-                if image is None:
-
-                    raise RuntimeError(
-                        "Hugging Face returned no image."
-                    )
-
-                filename = (
-                    "revelaai_"
-                    f"{uuid.uuid4().hex}.png"
-                )
-
-                filepath = os.path.join(
-                    IMAGE_DIR,
-                    filename,
-                )
-
-                image.save(
-                    filepath,
-                    format="PNG",
-                )
-
-                image_url = (
-                    image_host_url
-                    + "/ai/images/"
-                    + filename
+                asset = generate_image_asset(
+                    message,
+                    image_options=image_options,
                 )
 
                 # -------------------------------------------------
@@ -3044,7 +3523,7 @@ def ai_stream():
                 ].append({
                     "role": "assistant",
                     "content": (
-                        "Generated an image based on the request: "
+                        "Generated a design based on the request: "
                         f"{message}"
                     ),
                 })
@@ -3061,18 +3540,43 @@ def ai_stream():
 
                     "data": {
                         "type": "image",
+                        "format": asset[
+                            "asset_type"
+                        ],
                         "urls": [
-                            image_url
+                            asset[
+                                "image_url"
+                            ],
                         ],
                     },
 
                     "sources": [],
 
                     "meta": {
-                        "provider": "huggingface",
-                        "model": HF_IMAGE_MODEL_NAME,
+                        "provider": (
+                            "huggingface"
+                            if asset[
+                                "asset_type"
+                            ] == "png"
+                            else "huggingface-svg"
+                        ),
+                        "model": (
+                            configured_image_model()
+                            if asset[
+                                "asset_type"
+                            ] == "png"
+                            else None
+                        ),
                         "build_id": REVELAAI_BUILD_ID,
                         "intent": "image_generation",
+                        "image_engine": asset[
+                            "image_plan"
+                        ].get(
+                            "engine"
+                        ),
+                        "engine_version": (
+                            REVELAAI_IMAGE_ENGINE_VERSION
+                        ),
 
                         "memory": {
                             "enabled": True,
@@ -3084,25 +3588,38 @@ def ai_stream():
                             "session_id": session_id,
                         },
 
-                        "image_domain": image_plan.get(
-                            "domain"
-                        ),
+                        "design": asset[
+                            "image_plan"
+                        ],
 
-                        "image_style": image_plan.get(
-                            "style"
-                        ),
-
-                        "image_format": image_plan.get(
-                            "format"
-                        ),
+                        "image": {
+                            "width": asset[
+                                "width"
+                            ],
+                            "height": asset[
+                                "height"
+                            ],
+                            "aspect_ratio": asset[
+                                "aspect_ratio"
+                            ],
+                            "seed": asset[
+                                "seed"
+                            ],
+                        },
 
                         "multimodal": {
                             "type": "image",
+                            "format": asset[
+                                "asset_type"
+                            ],
+                            "editable": (
+                                asset[
+                                    "asset_type"
+                                ] == "svg"
+                            ),
                         },
                     },
                 }
-
-                import json
 
                 yield (
                     "event: image\n"
@@ -3113,6 +3630,31 @@ def ai_stream():
                 yield (
                     "event: done\n"
                     "data: [DONE]\n\n"
+                )
+
+            except ValueError as exc:
+
+                app.logger.exception(
+                    "AI stream image request invalid | "
+                    "request_id=%s | error=%s",
+                    getattr(
+                        g,
+                        "request_id",
+                        None,
+                    ),
+                    exc,
+                )
+
+                error_payload = {
+                    "success": False,
+                    "code": "IMAGE_REQUEST_INVALID",
+                    "message": str(exc),
+                }
+
+                yield (
+                    "event: error\n"
+                    "data: "
+                    f"{json.dumps(error_payload)}\n\n"
                 )
 
             except Exception as exc:
@@ -3128,9 +3670,18 @@ def ai_stream():
                     exc,
                 )
 
+                error_payload = {
+                    "success": False,
+                    "code": "IMAGE_GENERATION_FAILED",
+                    "message": (
+                        "Image generation failed."
+                    ),
+                }
+
                 yield (
                     "event: error\n"
-                    "data: Image generation failed.\n\n"
+                    "data: "
+                    f"{json.dumps(error_payload)}\n\n"
                 )
 
         response = Response(
@@ -3212,8 +3763,6 @@ def ai_stream():
                 f"data: {response_text}\n\n"
             )
 
-            import json
-
             metadata = {
                 "intent": (
                     ai_result.get(
@@ -3273,12 +3822,7 @@ def ai_stream():
 
     response = Response(
         generate(),
-        mimetype="text/event-event-stream",
-    )
-
-    # Correct MIME type after construction.
-    response.mimetype = (
-        "text/event-stream"
+        mimetype="text/event-stream",
     )
 
     response.headers[
@@ -3482,7 +4026,8 @@ def voice():
         heard
     )
 
-    # Image requests through voice must also route to FLUX.
+    # Image requests through voice must also route to the
+    # image planner and visual engine.
 
     if is_image_generation_request(
         heard
@@ -3537,6 +4082,13 @@ def voice():
                 )
             )
 
+            image_asset_type = (
+                image_result.get(
+                    "asset_type",
+                    "png",
+                )
+            )
+
             session[
                 "messages"
             ].append({
@@ -3565,6 +4117,7 @@ def voice():
                     "Image generated successfully."
                 ),
                 "image_url": image_url,
+                "asset_type": image_asset_type,
                 "audio_url": None,
 
                 "voice": {
@@ -3580,9 +4133,25 @@ def voice():
                 "meta": {
                     "intent": "image_generation",
                     "domain": "image",
-                    "provider": "huggingface",
-                    "model": HF_IMAGE_MODEL_NAME,
+                    "provider": (
+                        "huggingface"
+                        if image_asset_type == "png"
+                        else "huggingface-svg"
+                    ),
+                    "model": (
+                        configured_image_model()
+                        if image_asset_type == "png"
+                        else None
+                    ),
                     "build_id": REVELAAI_BUILD_ID,
+                    "image_engine": (
+                        image_result.get(
+                            "image_plan",
+                            {},
+                        ).get(
+                            "engine"
+                        )
+                    ),
 
                     "memory": {
                         "enabled": True,
@@ -3713,10 +4282,6 @@ def voice():
     # -----------------------------------------------------
     # TEXT TO SPEECH
     # -----------------------------------------------------
-
-    # HF TTS is disabled by default because provider credits
-    # may be exhausted. This prevents every voice request
-    # from making a guaranteed-failing TTS call.
 
     if not REVELAAI_ENABLE_HF_TTS:
 
@@ -4135,7 +4700,8 @@ def health():
 
         "build": {
             "id": REVELAAI_BUILD_ID,
-            "image_routing": "explicit",
+            "image_routing": "ai-client-managed",
+            "image_engine": REVELAAI_IMAGE_ENGINE_VERSION,
             "conversation_memory": "client-context-plus-session",
         },
 
@@ -4152,8 +4718,14 @@ def health():
             "image": {
                 "provider": "huggingface",
                 "configured": hf_configured(),
-                "model": HF_IMAGE_MODEL_NAME,
-                "routing": "explicit",
+                "primary_model": configured_image_model(),
+                "routing": {
+                    "owner": "ai_client",
+                    "text_aware": True,
+                    "fallback": True,
+                    "provider_aware": True,
+                },
+                "structured_svg": True,
             },
 
             "voice": {
@@ -4215,7 +4787,7 @@ def ready():
     checks[
         "image_model"
     ] = bool(
-        HF_IMAGE_MODEL_NAME
+        configured_image_model()
     )
 
     try:
