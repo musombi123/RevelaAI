@@ -1,24 +1,66 @@
 """
 RevelaAI AI Client
+==================
 
-Server-side provider client for:
-- Text generation via Hugging Face Inference Providers
-- Image generation via Hugging Face Inference Providers
-- Speech recognition via Hugging Face Inference Providers
-- Text-to-speech via Hugging Face Inference Providers
+Production-side provider client for:
 
-Canva-style image-generation foundation:
-- Stable model/provider routing
-- Text-aware image routing
-- Aspect-ratio presets
-- Safe dimension validation
-- Model fallback
-- Seed support
-- Backward compatibility
+    - Text generation
+    - Image generation
+    - Speech recognition
+    - Text-to-speech
 
-IMPORTANT:
+Architecture
+------------
+
+                    RevelaAI
+                       |
+                  Orchestrator
+                       |
+                    AI Client
+                       |
+          +------------+-------------+
+          |            |             |
+          v            v             v
+        MVI AI       HuggingFace   Local/Deterministic
+        Engine        Providers       Fallbacks
+          |
+          +--> Text intelligence
+
+Hugging Face remains available for:
+
+    - Text
+    - Images
+    - ASR
+    - TTS
+
+IMPORTANT
+---------
+
 HF_TOKEN must remain server-side.
-It must NEVER be exposed to the frontend.
+
+Never expose HF_TOKEN to the frontend.
+
+Text providers are intentionally configurable.
+
+The previous hard-coded models:
+
+    openai/gpt-oss-120b:cheapest
+    openai/gpt-oss-20b:cheapest
+
+are NOT used anymore.
+
+A Hugging Face HTTP 402 response means the provider has no
+available inference credits/subscription and is therefore not
+treated as a useful fallback.
+
+Existing public APIs are preserved:
+
+    ask_hf()
+    ask_mvi()
+    generate_image()
+    generate_hf_image()
+    transcribe_hf_audio()
+    generate_hf_speech()
 """
 
 from __future__ import annotations
@@ -41,6 +83,63 @@ load_dotenv()
 
 
 # =========================================================
+# GENERAL CONFIGURATION
+# =========================================================
+
+REQUEST_USER_AGENT = os.getenv(
+    "REVELAAI_USER_AGENT",
+    "RevelaAI/2.0",
+).strip() or "RevelaAI/2.0"
+
+
+# =========================================================
+# MVI AI ENGINE
+# =========================================================
+#
+# MVI is treated as an independent intelligence provider.
+#
+# Expected architecture:
+#
+#     RevelaAI
+#         |
+#         +--> MVI AI Engine
+#
+# The endpoint can be overridden through Render environment
+# variables without changing this source file.
+#
+
+MVI_API_URL = os.getenv(
+    "MVI_API_URL",
+    "https://Musombi-mvi-ai-engine.hf.space/ask",
+).strip()
+
+MVI_API_KEY = os.getenv(
+    "MVI_API_KEY",
+    "",
+).strip()
+
+MVI_TIMEOUT = float(
+    os.getenv(
+        "MVI_TIMEOUT",
+        "120",
+    )
+)
+
+MVI_ENABLED = (
+    os.getenv(
+        "MVI_ENABLED",
+        "true",
+    ).strip().lower()
+    not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+)
+
+
+# =========================================================
 # HUGGING FACE CONFIGURATION
 # =========================================================
 
@@ -56,66 +155,94 @@ HF_API_URL = os.getenv(
 
 
 # =========================================================
-# TEXT MODEL CONFIGURATION
+# TEXT PROVIDER CONFIGURATION
 # =========================================================
+#
+# IMPORTANT:
+#
+# There are intentionally NO hard-coded paid/cheapest models
+# here anymore.
+#
+# HF_MODEL may be configured in Render when HF text generation
+# is actually available.
+#
+# Example:
+#
+#     HF_MODEL=<your-supported-hf-model>
+#
+# HF_FALLBACK_MODEL is optional.
+#
 
 HF_MODEL = os.getenv(
     "HF_MODEL",
-    "openai/gpt-oss-120b:cheapest",
+    "",
 ).strip()
 
 HF_FALLBACK_MODEL = os.getenv(
     "HF_FALLBACK_MODEL",
-    "openai/gpt-oss-20b:cheapest",
+    "",
 ).strip()
+
+
+# ---------------------------------------------------------
+# Text provider routing
+# ---------------------------------------------------------
+#
+# Valid:
+#
+#     mvi
+#     huggingface
+#
+# Multiple providers may be supplied:
+#
+#     MVI,HUGGINGFACE
+#
+# The first available provider is attempted first.
+#
+
+TEXT_PROVIDER_ORDER = [
+    item.strip().lower()
+    for item in os.getenv(
+        "REVELAAI_TEXT_PROVIDERS",
+        "mvi,huggingface",
+    ).split(",")
+    if item.strip()
+]
+
+if not TEXT_PROVIDER_ORDER:
+    TEXT_PROVIDER_ORDER = [
+        "mvi",
+        "huggingface",
+    ]
 
 
 # =========================================================
 # IMAGE MODEL CONFIGURATION
 # =========================================================
 
-# Primary image model.
 HF_IMAGE_MODEL = os.getenv(
     "HF_IMAGE_MODEL",
     "black-forest-labs/FLUX.1-dev",
 ).strip()
 
 
-# Optional dedicated model for images where text matters.
-#
-# Examples:
-# - posters
-# - banners
-# - labels
-# - flyers
-# - branded graphics
-# - social media cards
-#
-# Leave empty if you want the normal image model.
 HF_IMAGE_TEXT_MODEL = os.getenv(
     "HF_IMAGE_TEXT_MODEL",
     "",
 ).strip()
 
 
-# Image fallback model.
 HF_IMAGE_FALLBACK_MODEL = os.getenv(
     "HF_IMAGE_FALLBACK_MODEL",
     "black-forest-labs/FLUX.1-schnell",
 ).strip()
 
 
-# Provider routing.
-#
-# Empty:
-#     Hugging Face automatically selects the provider.
-#
-# Example:
-#     fal-ai
 HF_IMAGE_PROVIDER = os.getenv(
     "HF_IMAGE_PROVIDER",
     "",
 ).strip()
+
 
 HF_IMAGE_TEXT_PROVIDER = os.getenv(
     "HF_IMAGE_TEXT_PROVIDER",
@@ -126,74 +253,54 @@ HF_IMAGE_TEXT_PROVIDER = os.getenv(
 # =========================================================
 # IMAGE SIZE PRESETS
 # =========================================================
-#
-# These are deliberately human-friendly.
-# The future Canva-style API can say:
-#
-#     aspect_ratio="square"
-#     aspect_ratio="story"
-#     aspect_ratio="banner"
-#
-# instead of passing pixels everywhere.
-#
 
 IMAGE_SIZE_PRESETS: dict[str, tuple[int, int]] = {
 
-    # 1:1
     "square": (
         1024,
         1024,
     ),
 
-    # ~2:3
     "portrait": (
         832,
         1216,
     ),
 
-    # ~3:2
     "landscape": (
         1216,
         832,
     ),
 
-    # 16:9
     "wide": (
         1536,
         864,
     ),
 
-    # 9:16
     "story": (
         864,
         1536,
     ),
 
-    # 3:1
     "banner": (
         1536,
         512,
     ),
 
-    # 4:5
     "social_portrait": (
         1088,
         1360,
     ),
 
-    # ~16:9 social landscape
     "social_landscape": (
         1360,
         768,
     ),
 
-    # presentation
     "presentation": (
         1280,
         720,
     ),
 
-    # mobile canvas
     "phone": (
         768,
         1365,
@@ -223,18 +330,6 @@ HF_IMAGE_DEFAULT_HEIGHT = int(
 # =========================================================
 # IMAGE DEFAULT STEPS
 # =========================================================
-#
-# IMPORTANT:
-# Leave this empty by default.
-#
-# That allows _model_defaults() to choose:
-#
-# FLUX schnell -> 4
-# FLUX dev    -> 28
-#
-# instead of accidentally forcing every FLUX model
-# to run at 4 steps.
-#
 
 _steps_env = os.getenv(
     "HF_IMAGE_DEFAULT_STEPS",
@@ -345,6 +440,99 @@ class AIClientError(Exception):
 
 
 # =========================================================
+# PROVIDER STATUS HELPERS
+# =========================================================
+
+
+def _provider_enabled(
+    provider: str,
+) -> bool:
+    """
+    Determine whether a provider is configured.
+    """
+
+    provider = str(
+        provider or ""
+    ).strip().lower()
+
+    if provider == "mvi":
+        return bool(
+            MVI_ENABLED
+            and MVI_API_URL
+        )
+
+    if provider in {
+        "huggingface",
+        "hf",
+    }:
+        return bool(
+            HF_TOKEN
+            and HF_MODEL
+        )
+
+    return False
+
+
+def get_text_provider_status() -> dict[str, Any]:
+    """
+    Return safe diagnostic information about text providers.
+
+    Secrets are never returned.
+    """
+
+    providers: dict[str, Any] = {}
+
+    for provider in (
+        "mvi",
+        "huggingface",
+    ):
+
+        if provider == "mvi":
+
+            providers[provider] = {
+                "enabled": bool(
+                    MVI_ENABLED
+                    and MVI_API_URL
+                ),
+                "configured": bool(
+                    MVI_API_URL
+                ),
+                "url_configured": bool(
+                    MVI_API_URL
+                ),
+            }
+
+        else:
+
+            providers[provider] = {
+                "enabled": bool(
+                    HF_TOKEN
+                    and HF_MODEL
+                ),
+                "configured": bool(
+                    HF_TOKEN
+                    and HF_MODEL
+                ),
+                "token_configured": bool(
+                    HF_TOKEN
+                ),
+                "model_configured": bool(
+                    HF_MODEL
+                ),
+                "fallback_model_configured": bool(
+                    HF_FALLBACK_MODEL
+                ),
+            }
+
+    return {
+        "provider_order": list(
+            TEXT_PROVIDER_ORDER
+        ),
+        "providers": providers,
+    }
+
+
+# =========================================================
 # HUGGING FACE CONFIGURATION CHECK
 # =========================================================
 
@@ -352,6 +540,9 @@ class AIClientError(Exception):
 def hf_configured() -> bool:
     """
     Return whether Hugging Face credentials are configured.
+
+    This does not guarantee that the account has inference
+    credits.
     """
 
     return bool(HF_TOKEN)
@@ -381,7 +572,7 @@ def get_hf_headers() -> dict[str, str]:
         "Authorization": f"Bearer {HF_TOKEN}",
         "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "RevelaAI/1.0",
+        "User-Agent": REQUEST_USER_AGENT,
     }
 
 
@@ -461,12 +652,8 @@ def build_messages(
                 role = "user"
 
             content = (
-                item.get(
-                    "content"
-                )
-                or item.get(
-                    "text"
-                )
+                item.get("content")
+                or item.get("text")
                 or ""
             )
 
@@ -501,6 +688,349 @@ def build_messages(
 
 
 # =========================================================
+# MVI RESPONSE EXTRACTION
+# =========================================================
+
+
+def _extract_mvi_response(
+    data: Any,
+) -> str:
+    """
+    Extract text from several common FastAPI/AI response
+    shapes.
+
+    Supported examples:
+
+        {"response": "..."}
+        {"text": "..."}
+        {"answer": "..."}
+        {"message": "..."}
+        {"content": "..."}
+        {"result": "..."}
+        {"data": {"response": "..."}}
+    """
+
+    if data is None:
+        return ""
+
+    if isinstance(
+        data,
+        str,
+    ):
+        return data.strip()
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+        return str(data).strip()
+
+    keys = (
+        "response",
+        "text",
+        "answer",
+        "message",
+        "content",
+        "output",
+        "generated_text",
+    )
+
+    for key in keys:
+
+        value = data.get(
+            key
+        )
+
+        if isinstance(
+            value,
+            str,
+        ) and value.strip():
+
+            return value.strip()
+
+    nested = data.get(
+        "result"
+    )
+
+    if isinstance(
+        nested,
+        dict,
+    ):
+
+        result_text = (
+            _extract_mvi_response(
+                nested
+            )
+        )
+
+        if result_text:
+            return result_text
+
+    nested = data.get(
+        "data"
+    )
+
+    if isinstance(
+        nested,
+        dict,
+    ):
+
+        result_text = (
+            _extract_mvi_response(
+                nested
+            )
+        )
+
+        if result_text:
+            return result_text
+
+    choices = data.get(
+        "choices"
+    )
+
+    if isinstance(
+        choices,
+        list,
+    ) and choices:
+
+        first = choices[0]
+
+        if isinstance(
+            first,
+            dict,
+        ):
+
+            message = first.get(
+                "message"
+            )
+
+            if isinstance(
+                message,
+                dict,
+            ):
+
+                content = message.get(
+                    "content"
+                )
+
+                if content:
+
+                    return str(
+                        content
+                    ).strip()
+
+            generated = first.get(
+                "text"
+            )
+
+            if generated:
+
+                return str(
+                    generated
+                ).strip()
+
+    return ""
+
+
+# =========================================================
+# MVI CHAT REQUEST
+# =========================================================
+
+
+def _request_mvi(
+    *,
+    text: str,
+    system_prompt: str = "",
+    context: list[dict[str, Any]] | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Request text generation from MVI AI Engine.
+
+    The request intentionally sends a conservative payload
+    that can be handled by a lightweight FastAPI /ask endpoint.
+    """
+
+    if not MVI_ENABLED:
+
+        raise AIClientError(
+            "MVI provider is disabled.",
+            provider="mvi",
+            error_code="mvi_disabled",
+        )
+
+    if not MVI_API_URL:
+
+        raise AIClientError(
+            "MVI_API_URL is not configured.",
+            provider="mvi",
+            error_code="mvi_url_missing",
+        )
+
+    payload: dict[str, Any] = {
+        "prompt": str(text),
+    }
+
+    if system_prompt.strip():
+
+        payload[
+            "system_prompt"
+        ] = system_prompt.strip()
+
+    if context:
+
+        payload[
+            "context"
+        ] = context
+
+    if session_id:
+
+        payload[
+            "session_id"
+        ] = session_id
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": REQUEST_USER_AGENT,
+    }
+
+    if MVI_API_KEY:
+
+        headers[
+            "Authorization"
+        ] = f"Bearer {MVI_API_KEY}"
+
+    started = time.time()
+
+    try:
+
+        response = requests.post(
+            MVI_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=MVI_TIMEOUT,
+        )
+
+    except requests.Timeout as exc:
+
+        raise AIClientError(
+            "MVI AI Engine request timed out.",
+            provider="mvi",
+            error_code="mvi_timeout",
+        ) from exc
+
+    except requests.ConnectionError as exc:
+
+        raise AIClientError(
+            "Could not connect to MVI AI Engine.",
+            provider="mvi",
+            error_code="mvi_connection_error",
+        ) from exc
+
+    except requests.RequestException as exc:
+
+        raise AIClientError(
+            "MVI AI Engine request failed.",
+            provider="mvi",
+            error_code="mvi_request_error",
+        ) from exc
+
+    print(
+        "MVI response | "
+        f"status={response.status_code} | "
+        f"time={time.time() - started:.2f}s"
+    )
+
+    if not response.ok:
+
+        try:
+
+            error_data = response.json()
+
+        except ValueError:
+
+            error_data = {}
+
+        message = ""
+
+        if isinstance(
+            error_data,
+            dict,
+        ):
+
+            message = str(
+                error_data.get(
+                    "detail"
+                )
+                or error_data.get(
+                    "error"
+                )
+                or error_data.get(
+                    "message"
+                )
+                or ""
+            ).strip()
+
+        if not message:
+
+            message = (
+                response.text.strip()
+                or "MVI AI Engine request failed."
+            )
+
+        raise AIClientError(
+            message,
+            provider="mvi",
+            status_code=(
+                response.status_code
+            ),
+            error_code="mvi_provider_error",
+        )
+
+    try:
+
+        data = response.json()
+
+    except ValueError as exc:
+
+        raise AIClientError(
+            "MVI AI Engine returned invalid JSON.",
+            provider="mvi",
+            status_code=(
+                response.status_code
+            ),
+            error_code="mvi_invalid_json",
+        ) from exc
+
+    response_text = (
+        _extract_mvi_response(
+            data
+        )
+    )
+
+    if not response_text:
+
+        raise AIClientError(
+            "MVI AI Engine returned an empty response.",
+            provider="mvi",
+            status_code=(
+                response.status_code
+            ),
+            error_code="mvi_empty_response",
+        )
+
+    return {
+        "success": True,
+        "response": response_text,
+        "provider": "mvi",
+        "model": "mvi-ai-engine",
+        "session_id": session_id,
+        "raw": data,
+    }
+
+
+# =========================================================
 # HUGGING FACE INFERENCE CLIENT
 # =========================================================
 
@@ -513,9 +1043,10 @@ def _get_inference_client(
     Create a Hugging Face InferenceClient.
 
     Used for:
-    - image generation
-    - ASR
-    - TTS
+
+        - image generation
+        - ASR
+        - TTS
     """
 
     if not HF_TOKEN:
@@ -563,14 +1094,9 @@ def _get_inference_client(
 def _model_defaults(
     model: str,
 ) -> dict[str, Any]:
-    """
-    Best-known starting settings per model family.
-    """
 
     name = model.lower()
 
-    # FLUX schnell:
-    # designed for very few inference steps.
     if "schnell" in name:
 
         return {
@@ -579,7 +1105,6 @@ def _model_defaults(
             "supports_negative": False,
         }
 
-    # FLUX dev:
     if "flux" in name:
 
         return {
@@ -588,7 +1113,6 @@ def _model_defaults(
             "supports_negative": False,
         }
 
-    # Qwen image family:
     if "qwen-image" in name:
 
         return {
@@ -597,7 +1121,6 @@ def _model_defaults(
             "supports_negative": True,
         }
 
-    # Generic diffusion fallback.
     return {
         "steps": 30,
         "guidance": 5.0,
@@ -615,19 +1138,6 @@ def _provider_for(
     *,
     has_text: bool = False,
 ) -> str:
-    """
-    Resolve provider routing for the requested image model.
-
-    Text-heavy generation:
-        HF_IMAGE_TEXT_MODEL
-        +
-        HF_IMAGE_TEXT_PROVIDER
-
-    Normal image generation:
-        HF_IMAGE_MODEL
-        +
-        HF_IMAGE_PROVIDER
-    """
 
     if (
         has_text
@@ -672,9 +1182,6 @@ def _status_code(
 def _is_parameter_error(
     exc: Exception,
 ) -> bool:
-    """
-    True when the provider rejected request parameters.
-    """
 
     return (
         isinstance(
@@ -703,20 +1210,6 @@ def resolve_image_dimensions(
     height: int | None = None,
     aspect_ratio: str | None = None,
 ) -> tuple[int, int]:
-    """
-    Resolve final image dimensions.
-
-    Explicit width/height take precedence.
-
-    Otherwise:
-        aspect_ratio preset
-        ->
-        configured default
-    """
-
-    # -----------------------------------------------------
-    # Explicit dimensions
-    # -----------------------------------------------------
 
     if (
         width is not None
@@ -728,10 +1221,6 @@ def resolve_image_dimensions(
 
         if height is None:
             height = HF_IMAGE_DEFAULT_HEIGHT
-
-    # -----------------------------------------------------
-    # Preset
-    # -----------------------------------------------------
 
     elif aspect_ratio:
 
@@ -760,18 +1249,10 @@ def resolve_image_dimensions(
 
         width, height = dimensions
 
-    # -----------------------------------------------------
-    # Default
-    # -----------------------------------------------------
-
     else:
 
         width = HF_IMAGE_DEFAULT_WIDTH
         height = HF_IMAGE_DEFAULT_HEIGHT
-
-    # -----------------------------------------------------
-    # Integer validation
-    # -----------------------------------------------------
 
     try:
 
@@ -794,10 +1275,6 @@ def resolve_image_dimensions(
             ),
         ) from exc
 
-    # -----------------------------------------------------
-    # Width limits
-    # -----------------------------------------------------
-
     if width < 256 or width > 2048:
 
         raise AIClientError(
@@ -808,10 +1285,6 @@ def resolve_image_dimensions(
             provider="huggingface",
             error_code="invalid_image_width",
         )
-
-    # -----------------------------------------------------
-    # Height limits
-    # -----------------------------------------------------
 
     if height < 256 or height > 2048:
 
@@ -844,12 +1317,6 @@ def _text_to_image_once(
     guidance: float | None,
     seed: int | None,
 ):
-    """
-    Generate one image on one model.
-
-    If optional parameters are rejected,
-    retry once with only the basic parameters.
-    """
 
     defaults = _model_defaults(
         model
@@ -912,8 +1379,6 @@ def _text_to_image_once(
         negative_prompt or ""
     ).strip()
 
-    # FLUX models generally do not need
-    # negative_prompt and providers may reject it.
     if (
         negative
         and defaults[
@@ -924,10 +1389,6 @@ def _text_to_image_once(
         params[
             "negative_prompt"
         ] = negative
-
-    # -----------------------------------------------------
-    # Primary attempt
-    # -----------------------------------------------------
 
     try:
 
@@ -949,10 +1410,6 @@ def _text_to_image_once(
             f"provider={provider or 'auto'} | "
             f"status={_status_code(exc)}"
         )
-
-        # -------------------------------------------------
-        # Minimal compatibility retry
-        # -------------------------------------------------
 
         return client.text_to_image(
             prompt=prompt,
@@ -980,31 +1437,6 @@ def generate_hf_image(
     guidance_scale: float | None = None,
     seed: int | None = None,
 ):
-    """
-    Generate an image through Hugging Face
-    Inference Providers.
-
-    Model selection:
-
-        1. Explicit model
-        2. HF_IMAGE_TEXT_MODEL when has_text=True
-        3. HF_IMAGE_MODEL
-
-    Failure order:
-
-        selected model
-        ->
-        HF_IMAGE_FALLBACK_MODEL
-        ->
-        HF_IMAGE_MODEL
-
-    Returns:
-        PIL.Image.Image
-    """
-
-    # =====================================================
-    # PROMPT
-    # =====================================================
 
     prompt = str(
         prompt or ""
@@ -1019,10 +1451,6 @@ def generate_hf_image(
                 "empty_image_prompt"
             ),
         )
-
-    # =====================================================
-    # PRIMARY MODEL
-    # =====================================================
 
     explicit_model = str(
         model or ""
@@ -1057,10 +1485,6 @@ def generate_hf_image(
             ),
         )
 
-    # =====================================================
-    # DIMENSIONS
-    # =====================================================
-
     width, height = (
         resolve_image_dimensions(
             width=width,
@@ -1068,10 +1492,6 @@ def generate_hf_image(
             aspect_ratio=aspect_ratio,
         )
     )
-
-    # =====================================================
-    # CANDIDATE MODELS
-    # =====================================================
 
     candidates: list[str] = []
 
@@ -1094,10 +1514,6 @@ def generate_hf_image(
             candidates.append(
                 candidate
             )
-
-    # =====================================================
-    # GENERATION
-    # =====================================================
 
     last_error: Exception | None = None
 
@@ -1147,10 +1563,6 @@ def generate_hf_image(
 
             continue
 
-        # -------------------------------------------------
-        # Empty response
-        # -------------------------------------------------
-
         if image is None:
 
             print(
@@ -1160,10 +1572,6 @@ def generate_hf_image(
             )
 
             continue
-
-        # -------------------------------------------------
-        # Success
-        # -------------------------------------------------
 
         print(
             "HF image generation succeeded | "
@@ -1175,10 +1583,6 @@ def generate_hf_image(
         )
 
         return image
-
-    # =====================================================
-    # TOTAL FAILURE
-    # =====================================================
 
     raise AIClientError(
         "Hugging Face image generation failed.",
@@ -1198,9 +1602,6 @@ def generate_image(
     prompt: str,
     **kwargs: Any,
 ):
-    """
-    Canonical RevelaAI image-generation entry point.
-    """
 
     return generate_hf_image(
         prompt=prompt,
@@ -1216,15 +1617,6 @@ def generate_image(
 def _inspect_wav_audio(
     audio: bytes,
 ) -> dict[str, Any]:
-    """
-    Validate browser-generated PCM WAV audio.
-
-    Expected:
-        PCM WAV
-        16-bit samples
-
-    Mono is preferred, but stereo is accepted.
-    """
 
     if not audio:
 
@@ -1368,11 +1760,6 @@ def transcribe_hf_audio(
     audio: bytes,
     model: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Transcribe browser-generated WAV audio.
-
-    The frontend does NOT perform transcription.
-    """
 
     if not audio:
 
@@ -1430,10 +1817,6 @@ def transcribe_hf_audio(
             ),
         ) from exc
 
-    # Whisper remains explicitly routed through fal-ai.
-    #
-    # Do NOT modify the shared image/TTS client
-    # to force fal-ai globally.
     client = InferenceClient(
         api_key=HF_TOKEN,
         provider="fal-ai",
@@ -1472,10 +1855,6 @@ def transcribe_hf_audio(
             provider="huggingface",
             error_code="asr_failed",
         ) from exc
-
-    # -----------------------------------------------------
-    # Extract transcript
-    # -----------------------------------------------------
 
     transcript = getattr(
         result,
@@ -1541,11 +1920,6 @@ def generate_hf_speech(
     voice: str | None = None,
     **generation_kwargs: Any,
 ) -> bytes:
-    """
-    Generate speech using Hugging Face TTS.
-
-    Returns raw audio bytes.
-    """
 
     text = str(
         text or ""
@@ -1699,10 +2073,6 @@ def generate_hf_speech(
 def _extract_hf_response(
     data: dict,
 ) -> str:
-    """
-    Extract assistant text from a Hugging Face
-    OpenAI-compatible response.
-    """
 
     choices = data.get(
         "choices"
@@ -1769,7 +2139,6 @@ def _extract_hf_response(
     if content is None:
         content = ""
 
-    # Some providers may return content parts.
     if isinstance(
         content,
         list,
@@ -1834,9 +2203,6 @@ def _extract_hf_response(
 def _extract_provider_error(
     response: requests.Response,
 ) -> tuple[str, str]:
-    """
-    Extract a safe human-readable provider error.
-    """
 
     try:
 
@@ -1867,22 +2233,14 @@ def _extract_provider_error(
         ):
 
             message = (
-                error.get(
-                    "message"
-                )
-                or error.get(
-                    "type"
-                )
+                error.get("message")
+                or error.get("type")
                 or "Hugging Face request failed."
             )
 
             code = (
-                error.get(
-                    "code"
-                )
-                or error.get(
-                    "type"
-                )
+                error.get("code")
+                or error.get("type")
                 or "provider_error"
             )
 
@@ -1925,10 +2283,14 @@ def _request_hf(
     model: str,
     messages: list[dict[str, str]],
 ) -> dict:
-    """
-    Send a chat completion request
-    to Hugging Face.
-    """
+
+    if not model:
+
+        raise AIClientError(
+            "No Hugging Face text model is configured.",
+            provider="huggingface",
+            error_code="hf_text_model_missing",
+        )
 
     headers = get_hf_headers()
 
@@ -2040,34 +2402,44 @@ def _request_hf(
 
 
 # =========================================================
-# MAIN HUGGING FACE CHAT CLIENT
+# HUGGING FACE TEXT PROVIDER
 # =========================================================
 
 
-def ask_hf(
+def _ask_hf_text(
+    *,
     text: str,
     system_prompt: str = "",
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """
-    Generate an answer using Hugging Face
-    Inference Providers.
+    Hugging Face text provider.
+
+    Primary model:
+        HF_MODEL
+
+    Optional fallback:
+        HF_FALLBACK_MODEL
+
+    There are intentionally no hard-coded model names.
     """
 
-    if not str(
-        text or ""
-    ).strip():
+    if not HF_TOKEN:
 
-        return {
-            "success": False,
-            "response": "",
-            "error": "message is required",
-            "error_code": (
-                "empty_message"
-            ),
-            "provider": "huggingface",
-        }
+        raise AIClientError(
+            "HF_TOKEN is not configured.",
+            provider="huggingface",
+            error_code="hf_token_missing",
+        )
+
+    if not HF_MODEL:
+
+        raise AIClientError(
+            "HF_MODEL is not configured.",
+            provider="huggingface",
+            error_code="hf_text_model_missing",
+        )
 
     messages = build_messages(
         text=str(text),
@@ -2079,74 +2451,41 @@ def ask_hf(
 
     attempted_models: list[str] = []
 
-    primary_model = (
-        HF_MODEL
-        or "openai/gpt-oss-120b:cheapest"
-    )
+    candidates: list[str] = []
 
-    attempted_models.append(
-        primary_model
-    )
+    for candidate in (
+        HF_MODEL,
+        HF_FALLBACK_MODEL,
+    ):
 
-    try:
-
-        data = _request_hf(
-            model=primary_model,
-            messages=messages,
-        )
-
-        response_text = (
-            _extract_hf_response(
-                data
-            )
-        )
-
-        return {
-            "success": True,
-            "response": response_text,
-            "provider": "huggingface",
-            "model": primary_model,
-            "session_id": session_id,
-            "usage": data.get(
-                "usage",
-                {},
-            ),
-        }
-
-    except AIClientError as primary_error:
-
-        fallback_model = (
-            HF_FALLBACK_MODEL
-        )
+        candidate = str(
+            candidate or ""
+        ).strip()
 
         if (
-            not fallback_model
-            or fallback_model
-            == primary_model
+            candidate
+            and candidate
+            not in candidates
         ):
 
-            return {
-                "success": False,
-                "response": "",
-                "error": str(
-                    primary_error
-                ),
-                "error_code": (
-                    primary_error.error_code
-                    or "hf_error"
-                ),
-                "provider": "huggingface",
-                "model": primary_model,
-            }
+            candidates.append(
+                candidate
+            )
+
+    last_error: AIClientError | None = None
+
+    for index, model in enumerate(
+        candidates
+    ):
 
         attempted_models.append(
-            fallback_model
+            model
         )
 
         try:
 
             data = _request_hf(
-                model=fallback_model,
+                model=model,
                 messages=messages,
             )
 
@@ -2160,8 +2499,8 @@ def ask_hf(
                 "success": True,
                 "response": response_text,
                 "provider": "huggingface",
-                "model": fallback_model,
-                "fallback_used": True,
+                "model": model,
+                "fallback_used": index > 0,
                 "session_id": session_id,
                 "usage": data.get(
                     "usage",
@@ -2169,33 +2508,305 @@ def ask_hf(
                 ),
             }
 
-        except AIClientError as fallback_error:
+        except AIClientError as exc:
 
-            return {
-                "success": False,
-                "response": "",
-                "error": (
-                    str(
-                        fallback_error
-                    )
-                    or str(
-                        primary_error
-                    )
-                ),
-                "error_code": (
-                    fallback_error.error_code
-                    or primary_error.error_code
-                    or "hf_error"
-                ),
-                "provider": "huggingface",
-                "models_attempted": (
-                    attempted_models
-                ),
-            }
+            last_error = exc
+
+            # -------------------------------------------------
+            # 402 = no provider credits.
+            #
+            # Trying another model on the same paid provider
+            # is normally pointless.
+            # -------------------------------------------------
+
+            if exc.status_code == 402:
+
+                print(
+                    "HF text provider unavailable due to "
+                    "credits/billing | "
+                    f"model={model}"
+                )
+
+                break
+
+            print(
+                "HF text model failed | "
+                f"model={model} | "
+                f"status={exc.status_code} | "
+                f"error_code={exc.error_code}"
+            )
+
+    if last_error is None:
+
+        last_error = AIClientError(
+            "Hugging Face text generation failed.",
+            provider="huggingface",
+            error_code="hf_text_failed",
+        )
+
+    last_error.args = (
+        str(last_error)
+        or "Hugging Face text generation failed.",
+    )
+
+    raise last_error
 
 
 # =========================================================
-# BACKWARD COMPATIBILITY
+# MAIN TEXT CLIENT
+# =========================================================
+
+
+def ask_hf(
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+) -> dict:
+    """
+    Main RevelaAI text-generation entry point.
+
+    Provider order is controlled by:
+
+        REVELAAI_TEXT_PROVIDERS
+
+    Default:
+
+        mvi,huggingface
+
+    Example:
+
+        REVELAAI_TEXT_PROVIDERS=mvi,huggingface
+
+    The function name remains ask_hf() for backward
+    compatibility even though the underlying provider may
+    now be MVI.
+    """
+
+    if not str(
+        text or ""
+    ).strip():
+
+        return {
+            "success": False,
+            "response": "",
+            "error": "message is required",
+            "error_code": (
+                "empty_message"
+            ),
+            "provider": "revelaai",
+        }
+
+    provider_errors: list[dict[str, Any]] = []
+
+    for provider in TEXT_PROVIDER_ORDER:
+
+        provider = str(
+            provider or ""
+        ).strip().lower()
+
+        if provider in {
+            "mvi",
+            "mvi-ai",
+            "mvi_ai",
+        }:
+
+            if not _provider_enabled(
+                "mvi"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "mvi",
+                        "error": (
+                            "MVI provider is not configured."
+                        ),
+                        "error_code": (
+                            "mvi_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _request_mvi(
+                    text=str(text),
+                    system_prompt=(
+                        str(
+                            system_prompt or ""
+                        )
+                    ),
+                    context=context,
+                    session_id=session_id,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=mvi | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=mvi | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "mvi",
+                        "error": str(exc),
+                        "error_code": (
+                            exc.error_code
+                            or "mvi_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        if provider in {
+            "huggingface",
+            "hf",
+        }:
+
+            if not _provider_enabled(
+                "huggingface"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "huggingface",
+                        "error": (
+                            "Hugging Face text provider "
+                            "is not configured."
+                        ),
+                        "error_code": (
+                            "hf_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _ask_hf_text(
+                    text=str(text),
+                    system_prompt=(
+                        str(
+                            system_prompt or ""
+                        )
+                    ),
+                    session_id=session_id,
+                    context=context,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=huggingface | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=huggingface | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "huggingface",
+                        "error": str(exc),
+                        "error_code": (
+                            exc.error_code
+                            or "hf_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        print(
+            "TEXT PROVIDER UNKNOWN | "
+            f"provider={provider}"
+        )
+
+    # =====================================================
+    # TOTAL FAILURE
+    # =====================================================
+
+    if provider_errors:
+
+        last = provider_errors[-1]
+
+        return {
+            "success": False,
+            "response": "",
+            "error": (
+                last.get(
+                    "error"
+                )
+                or "No text provider is available."
+            ),
+            "error_code": (
+                last.get(
+                    "error_code"
+                )
+                or "text_generation_failed"
+            ),
+            "provider": (
+                last.get(
+                    "provider"
+                )
+                or "revelaai"
+            ),
+            "providers_attempted": [
+                item.get(
+                    "provider"
+                )
+                for item in provider_errors
+            ],
+            "provider_errors": provider_errors,
+            "session_id": session_id,
+        }
+
+    return {
+        "success": False,
+        "response": "",
+        "error": "No text provider is available.",
+        "error_code": "no_text_provider",
+        "provider": "revelaai",
+        "session_id": session_id,
+    }
+
+
+# =========================================================
+# MVI PUBLIC CLIENT
 # =========================================================
 
 
@@ -2203,19 +2814,56 @@ def ask_mvi(
     text: str,
     system_prompt: str = "",
     session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
 ):
     """
-    Temporary compatibility alias.
+    Public MVI client.
 
-    Existing imports can continue using ask_mvi()
-    while they migrate to ask_hf().
+    Unlike the old compatibility alias, this function now
+    actually targets MVI directly.
     """
 
-    return ask_hf(
-        text=text,
-        system_prompt=system_prompt,
-        session_id=session_id,
-    )
+    if not str(
+        text or ""
+    ).strip():
+
+        return {
+            "success": False,
+            "response": "",
+            "error": "message is required",
+            "error_code": (
+                "empty_message"
+            ),
+            "provider": "mvi",
+        }
+
+    try:
+
+        return _request_mvi(
+            text=str(text),
+            system_prompt=str(
+                system_prompt or ""
+            ),
+            context=context,
+            session_id=session_id,
+        )
+
+    except AIClientError as exc:
+
+        return {
+            "success": False,
+            "response": "",
+            "error": str(exc),
+            "error_code": (
+                exc.error_code
+                or "mvi_error"
+            ),
+            "provider": "mvi",
+            "status_code": (
+                exc.status_code
+            ),
+            "session_id": session_id,
+        }
 
 
 # =========================================================
@@ -2224,11 +2872,25 @@ def ask_mvi(
 
 __all__ = [
     "AIClientError",
+
+    # Configuration
+    "HF_TOKEN",
+    "HF_API_URL",
+    "HF_MODEL",
+    "HF_FALLBACK_MODEL",
+    "MVI_API_URL",
+    "MVI_ENABLED",
+    "TEXT_PROVIDER_ORDER",
+
+    # Diagnostics
     "hf_configured",
+    "get_text_provider_status",
     "get_hf_headers",
+
+    # Messages
     "build_messages",
 
-    # Image
+    # Images
     "IMAGE_SIZE_PRESETS",
     "resolve_image_dimensions",
     "generate_hf_image",
