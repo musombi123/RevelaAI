@@ -1,42 +1,32 @@
-# ai/ai_client.py
-
 """
 RevelaAI AI Client
 
-Text generation:
-    Hugging Face Inference Providers
+Server-side provider client for:
+- Text generation via Hugging Face Inference Providers
+- Image generation via Hugging Face Inference Providers
+- Speech recognition via Hugging Face Inference Providers
+- Text-to-speech via Hugging Face Inference Providers
 
-Image generation:
-    Hugging Face Inference Providers
-
-Speech recognition:
-    Hugging Face Inference Providers
-
-Text-to-speech:
-    Hugging Face Inference Providers
-
-Architecture:
-
-    RevelaAI
-        |
-        └---- Hugging Face
-                 |
-                 ├── Text: GPT-OSS
-                 ├── Image: FLUX
-                 ├── ASR: Whisper
-                 └── TTS: Kokoro
+Canva-style image-generation foundation:
+- Stable model/provider routing
+- Text-aware image routing
+- Aspect-ratio presets
+- Safe dimension validation
+- Model fallback
+- Seed support
+- Backward compatibility
 
 IMPORTANT:
-    HF_TOKEN must remain server-side.
-    It must NEVER be exposed to the frontend.
+HF_TOKEN must remain server-side.
+It must NEVER be exposed to the frontend.
 """
 
 from __future__ import annotations
 
-import io 
-import os 
-import time 
-import wave 
+import io
+import os
+import time
+import wave
 from typing import Any
 
 import requests
@@ -54,62 +44,207 @@ load_dotenv()
 # HUGGING FACE CONFIGURATION
 # =========================================================
 
-HF_TOKEN = (
-    os.getenv(
-        "HF_TOKEN",
-        "",
-    )
-    .strip()
-)
+HF_TOKEN = os.getenv(
+    "HF_TOKEN",
+    "",
+).strip()
 
-HF_API_URL = (
-    os.getenv(
-        "HF_API_URL",
-        "https://router.huggingface.co/v1/chat/completions",
-    )
-    .strip()
-)
+HF_API_URL = os.getenv(
+    "HF_API_URL",
+    "https://router.huggingface.co/v1/chat/completions",
+).strip()
 
 
 # =========================================================
 # TEXT MODEL CONFIGURATION
 # =========================================================
 
-HF_MODEL = (
-    os.getenv(
-        "HF_MODEL",
-        "openai/gpt-oss-120b:cheapest",
-    )
-    .strip()
-)
+HF_MODEL = os.getenv(
+    "HF_MODEL",
+    "openai/gpt-oss-120b:cheapest",
+).strip()
 
-HF_FALLBACK_MODEL = (
-    os.getenv(
-        "HF_FALLBACK_MODEL",
-        "openai/gpt-oss-20b:cheapest",
-    )
-    .strip()
-)
+HF_FALLBACK_MODEL = os.getenv(
+    "HF_FALLBACK_MODEL",
+    "openai/gpt-oss-20b:cheapest",
+).strip()
 
 
 # =========================================================
 # IMAGE MODEL CONFIGURATION
 # =========================================================
 
-HF_IMAGE_MODEL = (
+# Primary image model.
+HF_IMAGE_MODEL = os.getenv(
+    "HF_IMAGE_MODEL",
+    "black-forest-labs/FLUX.1-dev",
+).strip()
+
+
+# Optional dedicated model for images where text matters.
+#
+# Examples:
+# - posters
+# - banners
+# - labels
+# - flyers
+# - branded graphics
+# - social media cards
+#
+# Leave empty if you want the normal image model.
+HF_IMAGE_TEXT_MODEL = os.getenv(
+    "HF_IMAGE_TEXT_MODEL",
+    "",
+).strip()
+
+
+# Image fallback model.
+HF_IMAGE_FALLBACK_MODEL = os.getenv(
+    "HF_IMAGE_FALLBACK_MODEL",
+    "black-forest-labs/FLUX.1-schnell",
+).strip()
+
+
+# Provider routing.
+#
+# Empty:
+#     Hugging Face automatically selects the provider.
+#
+# Example:
+#     fal-ai
+HF_IMAGE_PROVIDER = os.getenv(
+    "HF_IMAGE_PROVIDER",
+    "",
+).strip()
+
+HF_IMAGE_TEXT_PROVIDER = os.getenv(
+    "HF_IMAGE_TEXT_PROVIDER",
+    "",
+).strip()
+
+
+# =========================================================
+# IMAGE SIZE PRESETS
+# =========================================================
+#
+# These are deliberately human-friendly.
+# The future Canva-style API can say:
+#
+#     aspect_ratio="square"
+#     aspect_ratio="story"
+#     aspect_ratio="banner"
+#
+# instead of passing pixels everywhere.
+#
+
+IMAGE_SIZE_PRESETS: dict[str, tuple[int, int]] = {
+
+    # 1:1
+    "square": (
+        1024,
+        1024,
+    ),
+
+    # ~2:3
+    "portrait": (
+        832,
+        1216,
+    ),
+
+    # ~3:2
+    "landscape": (
+        1216,
+        832,
+    ),
+
+    # 16:9
+    "wide": (
+        1536,
+        864,
+    ),
+
+    # 9:16
+    "story": (
+        864,
+        1536,
+    ),
+
+    # 3:1
+    "banner": (
+        1536,
+        512,
+    ),
+
+    # 4:5
+    "social_portrait": (
+        1088,
+        1360,
+    ),
+
+    # ~16:9 social landscape
+    "social_landscape": (
+        1360,
+        768,
+    ),
+
+    # presentation
+    "presentation": (
+        1280,
+        720,
+    ),
+
+    # mobile canvas
+    "phone": (
+        768,
+        1365,
+    ),
+}
+
+
+# =========================================================
+# IMAGE DEFAULT DIMENSIONS
+# =========================================================
+
+HF_IMAGE_DEFAULT_WIDTH = int(
     os.getenv(
-        "HF_IMAGE_MODEL",
-        "black-forest-labs/FLUX.1-schnell",
+        "HF_IMAGE_DEFAULT_WIDTH",
+        "1024",
     )
-    .strip()
 )
 
-HF_IMAGE_FALLBACK_MODEL = (
+HF_IMAGE_DEFAULT_HEIGHT = int(
     os.getenv(
-        "HF_IMAGE_FALLBACK_MODEL",
-        "",
+        "HF_IMAGE_DEFAULT_HEIGHT",
+        "1024",
     )
-    .strip()
+)
+
+
+# =========================================================
+# IMAGE DEFAULT STEPS
+# =========================================================
+#
+# IMPORTANT:
+# Leave this empty by default.
+#
+# That allows _model_defaults() to choose:
+#
+# FLUX schnell -> 4
+# FLUX dev    -> 28
+#
+# instead of accidentally forcing every FLUX model
+# to run at 4 steps.
+#
+
+_steps_env = os.getenv(
+    "HF_IMAGE_DEFAULT_STEPS",
+    "",
+).strip()
+
+HF_IMAGE_DEFAULT_STEPS = (
+    int(_steps_env)
+    if _steps_env
+    else None
 )
 
 
@@ -117,28 +252,23 @@ HF_IMAGE_FALLBACK_MODEL = (
 # VOICE MODEL CONFIGURATION
 # =========================================================
 
-HF_ASR_MODEL = (
-    os.getenv(
-        "HF_ASR_MODEL",
-        "openai/whisper-large-v3",
-    )
-    .strip()
-)
+HF_ASR_MODEL = os.getenv(
+    "HF_ASR_MODEL",
+    "openai/whisper-large-v3",
+).strip()
 
-HF_TTS_MODEL = (
-    os.getenv(
-        "HF_TTS_MODEL",
-        "hexgrad/Kokoro-82M",
-    )
-    .strip()
-)
+
+HF_TTS_MODEL = os.getenv(
+    "HF_TTS_MODEL",
+    "hexgrad/Kokoro-82M",
+).strip()
+
 
 HF_TTS_MIME_TYPE = (
     os.getenv(
         "HF_TTS_MIME_TYPE",
         "audio/wav",
-    )
-    .strip()
+    ).strip()
     or "audio/wav"
 )
 
@@ -189,34 +319,9 @@ HF_TEMPERATURE = float(
 
 
 # =========================================================
-# IMAGE GENERATION PARAMETERS
-# =========================================================
-
-HF_IMAGE_DEFAULT_WIDTH = int(
-    os.getenv(
-        "HF_IMAGE_DEFAULT_WIDTH",
-        "1024",
-    )
-)
-
-HF_IMAGE_DEFAULT_HEIGHT = int(
-    os.getenv(
-        "HF_IMAGE_DEFAULT_HEIGHT",
-        "1024",
-    )
-)
-
-HF_IMAGE_DEFAULT_STEPS = int(
-    os.getenv(
-        "HF_IMAGE_DEFAULT_STEPS",
-        "4",
-    )
-)
-
-
-# =========================================================
 # ERRORS
 # =========================================================
+
 
 class AIClientError(Exception):
     """
@@ -230,7 +335,8 @@ class AIClientError(Exception):
         provider: str = "unknown",
         status_code: int | None = None,
         error_code: str | None = None,
-    ):
+    ) -> None:
+
         super().__init__(message)
 
         self.provider = provider
@@ -242,19 +348,19 @@ class AIClientError(Exception):
 # HUGGING FACE CONFIGURATION CHECK
 # =========================================================
 
+
 def hf_configured() -> bool:
     """
-    Return whether Hugging Face is configured.
+    Return whether Hugging Face credentials are configured.
     """
 
-    return bool(
-        HF_TOKEN
-    )
+    return bool(HF_TOKEN)
 
 
 # =========================================================
 # HUGGING FACE HEADERS
 # =========================================================
+
 
 def get_hf_headers() -> dict[str, str]:
     """
@@ -283,6 +389,7 @@ def get_hf_headers() -> dict[str, str]:
 # MESSAGE NORMALIZATION
 # =========================================================
 
+
 def _normalize_message_content(
     value: Any,
 ) -> str:
@@ -296,14 +403,13 @@ def _normalize_message_content(
     ):
         return value
 
-    return str(
-        value
-    )
+    return str(value)
 
 
 # =========================================================
 # CHAT MESSAGE BUILDER
 # =========================================================
+
 
 def build_messages(
     *,
@@ -319,10 +425,12 @@ def build_messages(
 
     if system_prompt.strip():
 
-        messages.append({
-            "role": "system",
-            "content": system_prompt.strip(),
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": system_prompt.strip(),
+            }
+        )
 
     if isinstance(
         context,
@@ -349,6 +457,7 @@ def build_messages(
                 "user",
                 "assistant",
             }:
+
                 role = "user"
 
             content = (
@@ -370,19 +479,23 @@ def build_messages(
             if not content:
                 continue
 
-            messages.append({
-                "role": role,
-                "content": content,
-            })
-
-    messages.append({
-        "role": "user",
-        "content": (
-            _normalize_message_content(
-                text
+            messages.append(
+                {
+                    "role": role,
+                    "content": content,
+                }
             )
-        ),
-    })
+
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                _normalize_message_content(
+                    text
+                )
+            ),
+        }
+    )
 
     return messages
 
@@ -391,11 +504,18 @@ def build_messages(
 # HUGGING FACE INFERENCE CLIENT
 # =========================================================
 
-def _get_inference_client():
+
+def _get_inference_client(
+    provider: str | None = None,
+    timeout: float | None = None,
+):
     """
     Create a Hugging Face InferenceClient.
 
-    Used for image generation, ASR, and TTS.
+    Used for:
+    - image generation
+    - ASR
+    - TTS
     """
 
     if not HF_TOKEN:
@@ -420,32 +540,471 @@ def _get_inference_client():
             error_code="huggingface_hub_missing",
         ) from exc
 
+    options: dict[str, Any] = {
+        "api_key": HF_TOKEN,
+    }
+
+    if provider:
+        options["provider"] = provider
+
+    if timeout:
+        options["timeout"] = timeout
+
     return InferenceClient(
-        api_key=HF_TOKEN,
+        **options
     )
 
 
 # =========================================================
-# HUGGING FACE IMAGE GENERATION
+# IMAGE MODEL DEFAULTS
 # =========================================================
+
+
+def _model_defaults(
+    model: str,
+) -> dict[str, Any]:
+    """
+    Best-known starting settings per model family.
+    """
+
+    name = model.lower()
+
+    # FLUX schnell:
+    # designed for very few inference steps.
+    if "schnell" in name:
+
+        return {
+            "steps": 4,
+            "guidance": None,
+            "supports_negative": False,
+        }
+
+    # FLUX dev:
+    if "flux" in name:
+
+        return {
+            "steps": 28,
+            "guidance": 3.5,
+            "supports_negative": False,
+        }
+
+    # Qwen image family:
+    if "qwen-image" in name:
+
+        return {
+            "steps": 30,
+            "guidance": 4.0,
+            "supports_negative": True,
+        }
+
+    # Generic diffusion fallback.
+    return {
+        "steps": 30,
+        "guidance": 5.0,
+        "supports_negative": True,
+    }
+
+
+# =========================================================
+# IMAGE PROVIDER ROUTING
+# =========================================================
+
+
+def _provider_for(
+    model: str,
+    *,
+    has_text: bool = False,
+) -> str:
+    """
+    Resolve provider routing for the requested image model.
+
+    Text-heavy generation:
+        HF_IMAGE_TEXT_MODEL
+        +
+        HF_IMAGE_TEXT_PROVIDER
+
+    Normal image generation:
+        HF_IMAGE_MODEL
+        +
+        HF_IMAGE_PROVIDER
+    """
+
+    if (
+        has_text
+        and HF_IMAGE_TEXT_MODEL
+        and model == HF_IMAGE_TEXT_MODEL
+    ):
+
+        return HF_IMAGE_TEXT_PROVIDER
+
+    if (
+        HF_IMAGE_TEXT_MODEL
+        and model == HF_IMAGE_TEXT_MODEL
+    ):
+
+        return HF_IMAGE_TEXT_PROVIDER
+
+    return HF_IMAGE_PROVIDER
+
+
+# =========================================================
+# EXCEPTION HELPERS
+# =========================================================
+
+
+def _status_code(
+    exc: Exception,
+) -> int | None:
+
+    response = getattr(
+        exc,
+        "response",
+        None,
+    )
+
+    return getattr(
+        response,
+        "status_code",
+        None,
+    )
+
+
+def _is_parameter_error(
+    exc: Exception,
+) -> bool:
+    """
+    True when the provider rejected request parameters.
+    """
+
+    return (
+        isinstance(
+            exc,
+            (
+                TypeError,
+                ValueError,
+            ),
+        )
+        or _status_code(exc)
+        in (
+            400,
+            422,
+        )
+    )
+
+
+# =========================================================
+# IMAGE DIMENSION RESOLUTION
+# =========================================================
+
+
+def resolve_image_dimensions(
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    aspect_ratio: str | None = None,
+) -> tuple[int, int]:
+    """
+    Resolve final image dimensions.
+
+    Explicit width/height take precedence.
+
+    Otherwise:
+        aspect_ratio preset
+        ->
+        configured default
+    """
+
+    # -----------------------------------------------------
+    # Explicit dimensions
+    # -----------------------------------------------------
+
+    if (
+        width is not None
+        or height is not None
+    ):
+
+        if width is None:
+            width = HF_IMAGE_DEFAULT_WIDTH
+
+        if height is None:
+            height = HF_IMAGE_DEFAULT_HEIGHT
+
+    # -----------------------------------------------------
+    # Preset
+    # -----------------------------------------------------
+
+    elif aspect_ratio:
+
+        key = str(
+            aspect_ratio
+        ).strip().lower()
+
+        dimensions = (
+            IMAGE_SIZE_PRESETS.get(
+                key
+            )
+        )
+
+        if dimensions is None:
+
+            raise AIClientError(
+                (
+                    "Unsupported image aspect "
+                    f"ratio preset: {aspect_ratio}"
+                ),
+                provider="huggingface",
+                error_code=(
+                    "invalid_image_aspect_ratio"
+                ),
+            )
+
+        width, height = dimensions
+
+    # -----------------------------------------------------
+    # Default
+    # -----------------------------------------------------
+
+    else:
+
+        width = HF_IMAGE_DEFAULT_WIDTH
+        height = HF_IMAGE_DEFAULT_HEIGHT
+
+    # -----------------------------------------------------
+    # Integer validation
+    # -----------------------------------------------------
+
+    try:
+
+        width = int(width)
+        height = int(height)
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+
+        raise AIClientError(
+            (
+                "Image width and height "
+                "must be integers."
+            ),
+            provider="huggingface",
+            error_code=(
+                "invalid_image_dimensions"
+            ),
+        ) from exc
+
+    # -----------------------------------------------------
+    # Width limits
+    # -----------------------------------------------------
+
+    if width < 256 or width > 2048:
+
+        raise AIClientError(
+            (
+                "Image width must be "
+                "between 256 and 2048 pixels."
+            ),
+            provider="huggingface",
+            error_code="invalid_image_width",
+        )
+
+    # -----------------------------------------------------
+    # Height limits
+    # -----------------------------------------------------
+
+    if height < 256 or height > 2048:
+
+        raise AIClientError(
+            (
+                "Image height must be "
+                "between 256 and 2048 pixels."
+            ),
+            provider="huggingface",
+            error_code="invalid_image_height",
+        )
+
+    return width, height
+
+
+# =========================================================
+# ONE IMAGE GENERATION ATTEMPT
+# =========================================================
+
+
+def _text_to_image_once(
+    model: str,
+    prompt: str,
+    *,
+    has_text: bool,
+    negative_prompt: str | None,
+    width: int,
+    height: int,
+    steps: int | None,
+    guidance: float | None,
+    seed: int | None,
+):
+    """
+    Generate one image on one model.
+
+    If optional parameters are rejected,
+    retry once with only the basic parameters.
+    """
+
+    defaults = _model_defaults(
+        model
+    )
+
+    provider = _provider_for(
+        model,
+        has_text=has_text,
+    )
+
+    client = _get_inference_client(
+        provider=(
+            provider or None
+        ),
+        timeout=HF_IMAGE_TIMEOUT,
+    )
+
+    final_steps = (
+        steps
+        if steps is not None
+        else defaults["steps"]
+    )
+
+    final_guidance = (
+        guidance
+        if guidance is not None
+        else defaults["guidance"]
+    )
+
+    params: dict[str, Any] = {
+        "prompt": prompt,
+        "model": model,
+        "width": width,
+        "height": height,
+    }
+
+    if final_steps is not None:
+
+        params[
+            "num_inference_steps"
+        ] = int(
+            final_steps
+        )
+
+    if final_guidance is not None:
+
+        params[
+            "guidance_scale"
+        ] = float(
+            final_guidance
+        )
+
+    if seed is not None:
+
+        params[
+            "seed"
+        ] = int(seed)
+
+    negative = str(
+        negative_prompt or ""
+    ).strip()
+
+    # FLUX models generally do not need
+    # negative_prompt and providers may reject it.
+    if (
+        negative
+        and defaults[
+            "supports_negative"
+        ]
+    ):
+
+        params[
+            "negative_prompt"
+        ] = negative
+
+    # -----------------------------------------------------
+    # Primary attempt
+    # -----------------------------------------------------
+
+    try:
+
+        return client.text_to_image(
+            **params
+        )
+
+    except Exception as exc:
+
+        if not _is_parameter_error(
+            exc
+        ):
+
+            raise
+
+        print(
+            "HF image retry with basic parameters | "
+            f"model={model} | "
+            f"provider={provider or 'auto'} | "
+            f"status={_status_code(exc)}"
+        )
+
+        # -------------------------------------------------
+        # Minimal compatibility retry
+        # -------------------------------------------------
+
+        return client.text_to_image(
+            prompt=prompt,
+            model=model,
+            width=width,
+            height=height,
+        )
+
+
+# =========================================================
+# PUBLIC IMAGE GENERATION
+# =========================================================
+
 
 def generate_hf_image(
     prompt: str,
     *,
     model: str | None = None,
+    has_text: bool = False,
     negative_prompt: str | None = None,
-    width: int = HF_IMAGE_DEFAULT_WIDTH,
-    height: int = HF_IMAGE_DEFAULT_HEIGHT,
+    width: int | None = None,
+    height: int | None = None,
+    aspect_ratio: str | None = None,
     num_inference_steps: int | None = HF_IMAGE_DEFAULT_STEPS,
     guidance_scale: float | None = None,
     seed: int | None = None,
 ):
     """
-    Generate an image through Hugging Face Inference Providers.
+    Generate an image through Hugging Face
+    Inference Providers.
+
+    Model selection:
+
+        1. Explicit model
+        2. HF_IMAGE_TEXT_MODEL when has_text=True
+        3. HF_IMAGE_MODEL
+
+    Failure order:
+
+        selected model
+        ->
+        HF_IMAGE_FALLBACK_MODEL
+        ->
+        HF_IMAGE_MODEL
 
     Returns:
         PIL.Image.Image
     """
+
+    # =====================================================
+    # PROMPT
+    # =====================================================
 
     prompt = str(
         prompt or ""
@@ -456,206 +1015,188 @@ def generate_hf_image(
         raise AIClientError(
             "Image prompt is required.",
             provider="huggingface",
-            error_code="empty_image_prompt",
+            error_code=(
+                "empty_image_prompt"
+            ),
         )
 
-    selected_model = (
-        str(
-            model
-        ).strip()
-        if model
-        else HF_IMAGE_MODEL
-    )
+    # =====================================================
+    # PRIMARY MODEL
+    # =====================================================
 
-    if not selected_model:
+    explicit_model = str(
+        model or ""
+    ).strip()
+
+    if explicit_model:
+
+        primary = explicit_model
+
+    elif (
+        has_text
+        and HF_IMAGE_TEXT_MODEL
+    ):
+
+        primary = (
+            HF_IMAGE_TEXT_MODEL
+        )
+
+    else:
+
+        primary = (
+            HF_IMAGE_MODEL
+        )
+
+    if not primary:
 
         raise AIClientError(
             "No Hugging Face image model is configured.",
             provider="huggingface",
-            error_code="image_model_missing",
-        )
-
-    try:
-
-        width = int(
-            width
-        )
-
-        height = int(
-            height
-        )
-
-    except (
-        TypeError,
-        ValueError,
-    ) as exc:
-
-        raise AIClientError(
-            "Image width and height must be integers.",
-            provider="huggingface",
-            error_code="invalid_image_dimensions",
-        ) from exc
-
-    if width < 256 or width > 2048:
-
-        raise AIClientError(
-            "Image width must be between 256 and 2048 pixels.",
-            provider="huggingface",
-            error_code="invalid_image_width",
-        )
-
-    if height < 256 or height > 2048:
-
-        raise AIClientError(
-            "Image height must be between 256 and 2048 pixels.",
-            provider="huggingface",
-            error_code="invalid_image_height",
-        )
-
-    client = _get_inference_client()
-
-    start = time.time()
-
-    try:
-
-        image = client.text_to_image(
-            prompt=prompt,
-            model=selected_model,
-            negative_prompt=(
-                str(
-                    negative_prompt
-                ).strip()
-                if negative_prompt
-                else None
+            error_code=(
+                "image_model_missing"
             ),
+        )
+
+    # =====================================================
+    # DIMENSIONS
+    # =====================================================
+
+    width, height = (
+        resolve_image_dimensions(
             width=width,
             height=height,
-            num_inference_steps=(
-                int(
-                    num_inference_steps
-                )
-                if num_inference_steps is not None
-                else None
-            ),
-            guidance_scale=(
-                float(
-                    guidance_scale
-                )
-                if guidance_scale is not None
-                else None
-            ),
-            seed=(
-                int(seed)
-                if seed is not None
-                else None
-            ),
+            aspect_ratio=aspect_ratio,
         )
+    )
 
-    except Exception as exc:
+    # =====================================================
+    # CANDIDATE MODELS
+    # =====================================================
 
-        elapsed = (
-            time.time() - start
-        )
+    candidates: list[str] = []
 
-        print(
-            "HF image generation failed | "
-            f"model={selected_model} | "
-            f"time={elapsed:.2f}s"
-        )
+    for candidate in (
+        primary,
+        HF_IMAGE_FALLBACK_MODEL,
+        HF_IMAGE_MODEL,
+    ):
 
-        fallback_model = (
-            HF_IMAGE_FALLBACK_MODEL
-        )
+        candidate = str(
+            candidate or ""
+        ).strip()
 
         if (
-            fallback_model
-            and fallback_model != selected_model
+            candidate
+            and candidate
+            not in candidates
         ):
 
-            print(
-                "HF image fallback | "
-                f"model={fallback_model}"
+            candidates.append(
+                candidate
             )
 
-            try:
+    # =====================================================
+    # GENERATION
+    # =====================================================
 
-                image = client.text_to_image(
-                    prompt=prompt,
-                    model=fallback_model,
+    last_error: Exception | None = None
+
+    for candidate in candidates:
+
+        started = time.time()
+
+        provider = _provider_for(
+            candidate,
+            has_text=has_text,
+        )
+
+        try:
+
+            image = (
+                _text_to_image_once(
+                    candidate,
+                    prompt,
+                    has_text=has_text,
                     negative_prompt=(
-                        str(
-                            negative_prompt
-                        ).strip()
-                        if negative_prompt
-                        else None
+                        negative_prompt
                     ),
                     width=width,
                     height=height,
-                    num_inference_steps=(
-                        int(
-                            num_inference_steps
-                        )
-                        if num_inference_steps is not None
-                        else None
+                    steps=(
+                        num_inference_steps
                     ),
-                    guidance_scale=(
-                        float(
-                            guidance_scale
-                        )
-                        if guidance_scale is not None
-                        else None
+                    guidance=(
+                        guidance_scale
                     ),
-                    seed=(
-                        int(seed)
-                        if seed is not None
-                        else None
-                    ),
+                    seed=seed,
                 )
+            )
 
-            except Exception as fallback_exc:
+        except Exception as exc:
 
-                raise AIClientError(
-                    "Hugging Face image generation failed.",
-                    provider="huggingface",
-                    error_code="image_generation_failed",
-                ) from fallback_exc
+            last_error = exc
 
-        else:
+            print(
+                "HF image generation failed | "
+                f"model={candidate} | "
+                f"provider={provider or 'auto'} | "
+                f"error={type(exc).__name__} | "
+                f"status={_status_code(exc)} | "
+                f"time={time.time() - started:.2f}s"
+            )
 
-            raise AIClientError(
-                "Hugging Face image generation failed.",
-                provider="huggingface",
-                error_code="image_generation_failed",
-            ) from exc
+            continue
 
-    elapsed = (
-        time.time() - start
-    )
+        # -------------------------------------------------
+        # Empty response
+        # -------------------------------------------------
 
-    print(
-        "HF image generation | "
-        f"model={selected_model} | "
-        f"time={elapsed:.2f}s"
-    )
+        if image is None:
 
-    if image is None:
+            print(
+                "HF image generation returned nothing | "
+                f"model={candidate} | "
+                f"provider={provider or 'auto'}"
+            )
 
-        raise AIClientError(
-            "Hugging Face returned no image.",
-            provider="huggingface",
-            error_code="empty_image_response",
+            continue
+
+        # -------------------------------------------------
+        # Success
+        # -------------------------------------------------
+
+        print(
+            "HF image generation succeeded | "
+            f"model={candidate} | "
+            f"provider={provider or 'auto'} | "
+            f"has_text={has_text} | "
+            f"size={width}x{height} | "
+            f"time={time.time() - started:.2f}s"
         )
 
-    return image
+        return image
+
+    # =====================================================
+    # TOTAL FAILURE
+    # =====================================================
+
+    raise AIClientError(
+        "Hugging Face image generation failed.",
+        provider="huggingface",
+        error_code=(
+            "image_generation_failed"
+        ),
+    ) from last_error
 
 
 # =========================================================
 # GENERIC IMAGE ALIAS
 # =========================================================
 
+
 def generate_image(
     prompt: str,
-    **kwargs,
+    **kwargs: Any,
 ):
     """
     Canonical RevelaAI image-generation entry point.
@@ -671,19 +1212,18 @@ def generate_image(
 # VOICE — WAV VALIDATION
 # =========================================================
 
+
 def _inspect_wav_audio(
     audio: bytes,
 ) -> dict[str, Any]:
     """
-    Validate a browser-generated WAV file.
+    Validate browser-generated PCM WAV audio.
 
     Expected:
         PCM WAV
         16-bit samples
-        mono preferred
 
-    The sample rate may be 44100 or 48000 Hz depending
-    on the browser/device.
+    Mono is preferred, but stereo is accepted.
     """
 
     if not audio:
@@ -697,12 +1237,18 @@ def _inspect_wav_audio(
     if len(audio) < 44:
 
         raise AIClientError(
-            "Audio is too small to be a valid WAV file.",
+            (
+                "Audio is too small to be "
+                "a valid WAV file."
+            ),
             provider="huggingface",
             error_code="invalid_wav",
         )
 
-    if audio[:4] != b"RIFF" or audio[8:12] != b"WAVE":
+    if (
+        audio[:4] != b"RIFF"
+        or audio[8:12] != b"WAVE"
+    ):
 
         raise AIClientError(
             "Voice input must be a valid WAV file.",
@@ -736,7 +1282,10 @@ def _inspect_wav_audio(
     ) as exc:
 
         raise AIClientError(
-            "The uploaded WAV file could not be decoded.",
+            (
+                "The uploaded WAV file "
+                "could not be decoded."
+            ),
             provider="huggingface",
             error_code="invalid_wav",
         ) from exc
@@ -744,10 +1293,14 @@ def _inspect_wav_audio(
     if compression != "NONE":
 
         raise AIClientError(
-            "Compressed WAV audio is not supported. "
-            "Please send PCM WAV audio.",
+            (
+                "Compressed WAV audio is not supported. "
+                "Please send PCM WAV audio."
+            ),
             provider="huggingface",
-            error_code="unsupported_wav_compression",
+            error_code=(
+                "unsupported_wav_compression"
+            ),
         )
 
     if channels < 1:
@@ -755,15 +1308,22 @@ def _inspect_wav_audio(
         raise AIClientError(
             "WAV contains no audio channels.",
             provider="huggingface",
-            error_code="invalid_wav_channels",
+            error_code=(
+                "invalid_wav_channels"
+            ),
         )
 
     if sample_width != 2:
 
         raise AIClientError(
-            "Voice input must use 16-bit PCM WAV audio.",
+            (
+                "Voice input must use "
+                "16-bit PCM WAV audio."
+            ),
             provider="huggingface",
-            error_code="unsupported_wav_bit_depth",
+            error_code=(
+                "unsupported_wav_bit_depth"
+            ),
         )
 
     if sample_rate < 8000:
@@ -771,7 +1331,9 @@ def _inspect_wav_audio(
         raise AIClientError(
             "Voice sample rate is too low.",
             provider="huggingface",
-            error_code="unsupported_sample_rate",
+            error_code=(
+                "unsupported_sample_rate"
+            ),
         )
 
     if duration < 0.25:
@@ -801,13 +1363,13 @@ def _inspect_wav_audio(
 # VOICE — SPEECH TO TEXT
 # =========================================================
 
+
 def transcribe_hf_audio(
     audio: bytes,
     model: str | None = None,
 ) -> dict[str, Any]:
     """
-    Transcribe browser-generated WAV audio through
-    Hugging Face Inference Providers.
+    Transcribe browser-generated WAV audio.
 
     The frontend does NOT perform transcription.
     """
@@ -825,7 +1387,9 @@ def transcribe_hf_audio(
         raise AIClientError(
             "HF_TOKEN is not configured.",
             provider="huggingface",
-            error_code="hf_token_missing",
+            error_code=(
+                "hf_token_missing"
+            ),
         )
 
     selected_model = (
@@ -839,11 +1403,15 @@ def transcribe_hf_audio(
         raise AIClientError(
             "No Hugging Face ASR model is configured.",
             provider="huggingface",
-            error_code="asr_model_missing",
+            error_code=(
+                "asr_model_missing"
+            ),
         )
 
-    audio_info = _inspect_wav_audio(
-        audio
+    audio_info = (
+        _inspect_wav_audio(
+            audio
+        )
     )
 
     try:
@@ -857,31 +1425,33 @@ def transcribe_hf_audio(
         raise AIClientError(
             "huggingface_hub is not installed.",
             provider="huggingface",
-            error_code="huggingface_hub_missing",
+            error_code=(
+                "huggingface_hub_missing"
+            ),
         ) from exc
 
-    # Whisper is explicitly routed through fal-ai.
-    # Do NOT change the global _get_inference_client()
-    # to fal-ai because image/TTS use that shared client.
+    # Whisper remains explicitly routed through fal-ai.
+    #
+    # Do NOT modify the shared image/TTS client
+    # to force fal-ai globally.
     client = InferenceClient(
         api_key=HF_TOKEN,
         provider="fal-ai",
+        timeout=HF_IMAGE_TIMEOUT,
     )
 
-    start = time.time()
+    started = time.time()
 
     try:
 
-        result = client.automatic_speech_recognition(
-            audio=audio,
-            model=selected_model,
+        result = (
+            client.automatic_speech_recognition(
+                audio=audio,
+                model=selected_model,
+            )
         )
 
     except Exception as exc:
-
-        elapsed = (
-            time.time() - start
-        )
 
         print(
             "HF ASR failed | "
@@ -891,18 +1461,21 @@ def transcribe_hf_audio(
             f"duration={audio_info['duration_seconds']}s | "
             f"sample_rate={audio_info['sample_rate']} | "
             f"channels={audio_info['channels']} | "
-            f"time={elapsed:.2f}s"
+            f"time={time.time() - started:.2f}s"
         )
 
         raise AIClientError(
-            "Hugging Face speech recognition failed.",
+            (
+                "Hugging Face speech "
+                "recognition failed."
+            ),
             provider="huggingface",
             error_code="asr_failed",
         ) from exc
 
-    elapsed = (
-        time.time() - start
-    )
+    # -----------------------------------------------------
+    # Extract transcript
+    # -----------------------------------------------------
 
     transcript = getattr(
         result,
@@ -910,9 +1483,12 @@ def transcribe_hf_audio(
         None,
     )
 
-    if transcript is None and isinstance(
-        result,
-        dict,
+    if (
+        transcript is None
+        and isinstance(
+            result,
+            dict,
+        )
     ):
 
         transcript = result.get(
@@ -928,17 +1504,21 @@ def transcribe_hf_audio(
         f"model={selected_model} | "
         "provider=fal-ai | "
         f"duration={audio_info['duration_seconds']}s | "
-        f"time={elapsed:.2f}s | "
+        f"time={time.time() - started:.2f}s | "
         f"text_length={len(transcript)}"
     )
 
     if not transcript:
 
         raise AIClientError(
-            "No recognizable speech was detected "
-            "in the recording.",
+            (
+                "No recognizable speech "
+                "was detected in the recording."
+            ),
             provider="huggingface",
-            error_code="empty_transcription",
+            error_code=(
+                "empty_transcription"
+            ),
         )
 
     return {
@@ -949,9 +1529,11 @@ def transcribe_hf_audio(
         "audio": audio_info,
     }
 
+
 # =========================================================
 # VOICE — TEXT TO SPEECH
 # =========================================================
+
 
 def generate_hf_speech(
     text: str,
@@ -962,10 +1544,7 @@ def generate_hf_speech(
     """
     Generate speech using Hugging Face TTS.
 
-    Returns:
-        Raw audio bytes.
-
-    The provider/model determines the actual audio encoding.
+    Returns raw audio bytes.
     """
 
     text = str(
@@ -977,7 +1556,9 @@ def generate_hf_speech(
         raise AIClientError(
             "Speech text is required.",
             provider="huggingface",
-            error_code="empty_speech_text",
+            error_code=(
+                "empty_speech_text"
+            ),
         )
 
     if not HF_TOKEN:
@@ -985,13 +1566,13 @@ def generate_hf_speech(
         raise AIClientError(
             "HF_TOKEN is not configured.",
             provider="huggingface",
-            error_code="hf_token_missing",
+            error_code=(
+                "hf_token_missing"
+            ),
         )
 
     selected_model = (
-        str(
-            model
-        ).strip()
+        str(model).strip()
         if model
         else HF_TTS_MODEL
     )
@@ -1001,12 +1582,16 @@ def generate_hf_speech(
         raise AIClientError(
             "No Hugging Face TTS model is configured.",
             provider="huggingface",
-            error_code="tts_model_missing",
+            error_code=(
+                "tts_model_missing"
+            ),
         )
 
-    client = _get_inference_client()
+    client = _get_inference_client(
+        timeout=HF_READ_TIMEOUT,
+    )
 
-    start = time.time()
+    started = time.time()
 
     extra_body: dict[str, Any] = {}
 
@@ -1018,51 +1603,58 @@ def generate_hf_speech(
 
         if voice_value:
 
-            extra_body["voice"] = (
-                voice_value
-            )
+            extra_body[
+                "voice"
+            ] = voice_value
 
     try:
 
-        audio = client.text_to_speech(
-            text=text,
-            model=selected_model,
-            extra_body=(
-                extra_body
-                if extra_body
-                else None
-            ),
-            **generation_kwargs,
-        )
+        if extra_body:
+
+            audio = (
+                client.text_to_speech(
+                    text=text,
+                    model=selected_model,
+                    extra_body=extra_body,
+                    **generation_kwargs,
+                )
+            )
+
+        else:
+
+            audio = (
+                client.text_to_speech(
+                    text=text,
+                    model=selected_model,
+                    **generation_kwargs,
+                )
+            )
 
     except Exception as exc:
-
-        elapsed = (
-            time.time() - start
-        )
 
         print(
             "HF TTS failed | "
             f"model={selected_model} | "
-            f"time={elapsed:.2f}s"
+            f"time={time.time() - started:.2f}s"
         )
 
         raise AIClientError(
-            "Hugging Face text-to-speech failed.",
+            (
+                "Hugging Face text-to-speech "
+                "failed."
+            ),
             provider="huggingface",
             error_code="tts_failed",
         ) from exc
-
-    elapsed = (
-        time.time() - start
-    )
 
     if not audio:
 
         raise AIClientError(
             "Hugging Face returned empty audio.",
             provider="huggingface",
-            error_code="empty_audio_response",
+            error_code=(
+                "empty_audio_response"
+            ),
         )
 
     if not isinstance(
@@ -1079,15 +1671,20 @@ def generate_hf_speech(
         except Exception as exc:
 
             raise AIClientError(
-                "Hugging Face returned invalid audio data.",
+                (
+                    "Hugging Face returned "
+                    "invalid audio data."
+                ),
                 provider="huggingface",
-                error_code="invalid_audio_response",
+                error_code=(
+                    "invalid_audio_response"
+                ),
             ) from exc
 
     print(
         "HF TTS succeeded | "
         f"model={selected_model} | "
-        f"time={elapsed:.2f}s | "
+        f"time={time.time() - started:.2f}s | "
         f"bytes={len(audio)}"
     )
 
@@ -1097,6 +1694,7 @@ def generate_hf_speech(
 # =========================================================
 # RESPONSE EXTRACTION
 # =========================================================
+
 
 def _extract_hf_response(
     data: dict,
@@ -1110,15 +1708,20 @@ def _extract_hf_response(
         "choices"
     )
 
-    if not isinstance(
-        choices,
-        list,
-    ) or not choices:
+    if (
+        not isinstance(
+            choices,
+            list,
+        )
+        or not choices
+    ):
 
         raise AIClientError(
             "Hugging Face returned no choices.",
             provider="huggingface",
-            error_code="empty_model_response",
+            error_code=(
+                "empty_model_response"
+            ),
         )
 
     first_choice = choices[0]
@@ -1129,9 +1732,14 @@ def _extract_hf_response(
     ):
 
         raise AIClientError(
-            "Hugging Face returned an invalid choice.",
+            (
+                "Hugging Face returned "
+                "an invalid choice."
+            ),
             provider="huggingface",
-            error_code="invalid_model_response",
+            error_code=(
+                "invalid_model_response"
+            ),
         )
 
     message = first_choice.get(
@@ -1144,9 +1752,14 @@ def _extract_hf_response(
     ):
 
         raise AIClientError(
-            "Hugging Face returned no assistant message.",
+            (
+                "Hugging Face returned "
+                "no assistant message."
+            ),
             provider="huggingface",
-            error_code="missing_assistant_message",
+            error_code=(
+                "missing_assistant_message"
+            ),
         )
 
     content = message.get(
@@ -1156,12 +1769,13 @@ def _extract_hf_response(
     if content is None:
         content = ""
 
+    # Some providers may return content parts.
     if isinstance(
         content,
         list,
     ):
 
-        parts = []
+        parts: list[str] = []
 
         for item in content:
 
@@ -1199,9 +1813,14 @@ def _extract_hf_response(
     if not content:
 
         raise AIClientError(
-            "Hugging Face returned an empty response.",
+            (
+                "Hugging Face returned "
+                "an empty response."
+            ),
             provider="huggingface",
-            error_code="empty_response",
+            error_code=(
+                "empty_response"
+            ),
         )
 
     return content
@@ -1210,6 +1829,7 @@ def _extract_hf_response(
 # =========================================================
 # HF ERROR EXTRACTION
 # =========================================================
+
 
 def _extract_provider_error(
     response: requests.Response,
@@ -1225,7 +1845,10 @@ def _extract_provider_error(
     except ValueError:
 
         return (
-            "Hugging Face returned an invalid error response.",
+            (
+                "Hugging Face returned "
+                "an invalid error response."
+            ),
             "invalid_error_response",
         )
 
@@ -1296,13 +1919,15 @@ def _extract_provider_error(
 # HF CHAT REQUEST
 # =========================================================
 
+
 def _request_hf(
     *,
     model: str,
     messages: list[dict[str, str]],
 ) -> dict:
     """
-    Send a chat completion request to Hugging Face.
+    Send a chat completion request
+    to Hugging Face.
     """
 
     headers = get_hf_headers()
@@ -1314,7 +1939,7 @@ def _request_hf(
         "max_tokens": HF_MAX_TOKENS,
     }
 
-    start = time.time()
+    started = time.time()
 
     try:
 
@@ -1341,7 +1966,9 @@ def _request_hf(
         raise AIClientError(
             "Could not connect to Hugging Face.",
             provider="huggingface",
-            error_code="hf_connection_error",
+            error_code=(
+                "hf_connection_error"
+            ),
         ) from exc
 
     except requests.RequestException as exc:
@@ -1349,18 +1976,16 @@ def _request_hf(
         raise AIClientError(
             "Hugging Face request failed.",
             provider="huggingface",
-            error_code="hf_request_error",
+            error_code=(
+                "hf_request_error"
+            ),
         ) from exc
-
-    elapsed = (
-        time.time() - start
-    )
 
     print(
         "HF response | "
         f"model={model} | "
         f"status={response.status_code} | "
-        f"time={elapsed:.2f}s"
+        f"time={time.time() - started:.2f}s"
     )
 
     if not response.ok:
@@ -1374,7 +1999,9 @@ def _request_hf(
         raise AIClientError(
             message,
             provider="huggingface",
-            status_code=response.status_code,
+            status_code=(
+                response.status_code
+            ),
             error_code=error_code,
         )
 
@@ -1387,7 +2014,9 @@ def _request_hf(
         raise AIClientError(
             "Hugging Face returned invalid JSON.",
             provider="huggingface",
-            status_code=response.status_code,
+            status_code=(
+                response.status_code
+            ),
             error_code="invalid_json",
         ) from exc
 
@@ -1397,9 +2026,14 @@ def _request_hf(
     ):
 
         raise AIClientError(
-            "Hugging Face returned an invalid response.",
+            (
+                "Hugging Face returned "
+                "an invalid response."
+            ),
             provider="huggingface",
-            error_code="invalid_response",
+            error_code=(
+                "invalid_response"
+            ),
         )
 
     return data
@@ -1409,6 +2043,7 @@ def _request_hf(
 # MAIN HUGGING FACE CHAT CLIENT
 # =========================================================
 
+
 def ask_hf(
     text: str,
     system_prompt: str = "",
@@ -1416,7 +2051,8 @@ def ask_hf(
     context: list[dict[str, Any]] | None = None,
 ) -> dict:
     """
-    Generate an answer using Hugging Face Inference Providers.
+    Generate an answer using Hugging Face
+    Inference Providers.
     """
 
     if not str(
@@ -1427,7 +2063,9 @@ def ask_hf(
             "success": False,
             "response": "",
             "error": "message is required",
-            "error_code": "empty_message",
+            "error_code": (
+                "empty_message"
+            ),
             "provider": "huggingface",
         }
 
@@ -1439,7 +2077,7 @@ def ask_hf(
         context=context,
     )
 
-    attempted_models = []
+    attempted_models: list[str] = []
 
     primary_model = (
         HF_MODEL
@@ -1483,7 +2121,8 @@ def ask_hf(
 
         if (
             not fallback_model
-            or fallback_model == primary_model
+            or fallback_model
+            == primary_model
         ):
 
             return {
@@ -1559,10 +2198,11 @@ def ask_hf(
 # BACKWARD COMPATIBILITY
 # =========================================================
 
+
 def ask_mvi(
-    text,
-    system_prompt="",
-    session_id=None,
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
 ):
     """
     Temporary compatibility alias.
@@ -1587,10 +2227,18 @@ __all__ = [
     "hf_configured",
     "get_hf_headers",
     "build_messages",
+
+    # Image
+    "IMAGE_SIZE_PRESETS",
+    "resolve_image_dimensions",
     "generate_hf_image",
     "generate_image",
+
+    # Voice
     "transcribe_hf_audio",
     "generate_hf_speech",
+
+    # Text
     "ask_hf",
     "ask_mvi",
 ]
