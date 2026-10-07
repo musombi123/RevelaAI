@@ -8,8 +8,19 @@ This module is the structured-design engine for:
 - simple posters
 - typography-led graphics
 
-It uses RevelaAI text generation to create SVG source, then applies
-strict sanitization and validation before returning it.
+Architecture:
+
+    generate_svg()
+          |
+          +--> RevelaAI AI provider
+          |       |
+          |       +--> successful SVG
+          |
+          +--> local deterministic SVG fallback
+                  |
+                  +--> safe SVG
+
+The AI provider is optional.
 
 IMPORTANT:
 - No scripts.
@@ -17,16 +28,27 @@ IMPORTANT:
 - No event handlers.
 - No remote images/fonts.
 - User supplied text is never modified.
+- SVGs are sanitized and validated before returning.
+- Provider credit/network failures must not crash image generation.
 """
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import re
 import xml.etree.ElementTree as ET
 from html import unescape
 from typing import Any
 
 from ai.ai_client import ask_hf
+
+
+# =========================================================
+# LOGGING
+# =========================================================
+
+logger = logging.getLogger(__name__)
 
 
 # =========================================================
@@ -121,6 +143,8 @@ HARD SVG RULES
 
 ROOT_VIEWBOX = "0 0 1024 1024"
 
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"
+
 ALLOWED_TAGS = {
     "svg",
     "g",
@@ -205,39 +229,27 @@ def _local_name(tag: str) -> str:
     return tag
 
 
-def _text_content(
-    element: ET.Element,
-) -> str:
+def _text_content(element: ET.Element) -> str:
     """Collect text content from an element and descendants."""
 
     chunks: list[str] = []
 
     if element.text:
-        chunks.append(
-            element.text
-        )
+        chunks.append(element.text)
 
     for child in list(element):
 
         if child.tail:
-            chunks.append(
-                child.tail
-            )
+            chunks.append(child.tail)
 
         chunks.append(
-            _text_content(
-                child
-            )
+            _text_content(child)
         )
 
-    return "".join(
-        chunks
-    )
+    return "".join(chunks)
 
 
-def _normalize_rendered_text(
-    value: str,
-) -> str:
+def _normalize_rendered_text(value: str) -> str:
     """
     Normalize SVG text only for validation.
 
@@ -247,9 +259,7 @@ def _normalize_rendered_text(
     return re.sub(
         r"\s+",
         " ",
-        unescape(
-            value or ""
-        ),
+        unescape(value or ""),
     ).strip()
 
 
@@ -268,10 +278,7 @@ def _build_design_brief(
     - the normalized image planner specification
     """
 
-    if isinstance(
-        request,
-        dict,
-    ):
+    if isinstance(request, dict):
 
         spec = request
 
@@ -281,24 +288,15 @@ def _build_design_brief(
             or ""
         ).strip()
 
-        inferred_text = spec.get(
-            "text"
-        )
+        inferred_text = spec.get("text")
 
         if text is not None:
+            exact_text = str(text)
 
-            exact_text = str(
-                text
-            )
-
-        elif inferred_text:
-
-            exact_text = str(
-                inferred_text
-            )
+        elif inferred_text is not None:
+            exact_text = str(inferred_text)
 
         else:
-
             exact_text = None
 
         metadata: list[str] = []
@@ -311,25 +309,17 @@ def _build_design_brief(
             "format",
         ):
 
-            value = spec.get(
-                key
-            )
+            value = spec.get(key)
 
             if value:
-
                 metadata.append(
                     f"{key}={value}"
                 )
 
-        palette = spec.get(
-            "palette"
-        )
+        palette = spec.get("palette")
 
         if (
-            isinstance(
-                palette,
-                list,
-            )
+            isinstance(palette, list)
             and palette
         ):
 
@@ -347,9 +337,7 @@ def _build_design_brief(
 
             base += (
                 "\nDesign specification: "
-                + "; ".join(
-                    metadata
-                )
+                + "; ".join(metadata)
             )
 
     else:
@@ -370,7 +358,7 @@ def _build_design_brief(
             "SVG design request cannot be empty."
         )
 
-    if exact_text:
+    if exact_text is not None:
 
         base += (
             "\nEXACT TEXT TO RENDER: "
@@ -382,6 +370,35 @@ def _build_design_brief(
         base,
         exact_text,
     )
+
+
+def _request_spec(
+    request: str | dict[str, Any],
+    text: str | None = None,
+) -> dict[str, Any]:
+    """
+    Normalize a design request into a predictable dictionary.
+
+    This is intentionally lightweight so it remains compatible with
+    the existing image planner.
+    """
+
+    if isinstance(request, dict):
+
+        spec = dict(request)
+
+    else:
+
+        spec = {
+            "request": str(
+                request or ""
+            )
+        }
+
+    if text is not None:
+        spec["text"] = text
+
+    return spec
 
 
 # =========================================================
@@ -398,10 +415,8 @@ def _sanitize_attributes(
         element.attrib
     ):
 
-        local_attribute = (
-            _local_name(
-                attribute
-            )
+        local_attribute = _local_name(
+            attribute
         )
 
         value = str(
@@ -505,7 +520,7 @@ def _sanitize_tree(
 
     root.attrib[
         "xmlns"
-    ] = "http://www.w3.org/2000/svg"
+    ] = SVG_NAMESPACE
 
     root.attrib[
         "viewBox"
@@ -537,9 +552,7 @@ def _sanitize_tree(
     }
 
     normalized_allowed = {
-        _local_name(
-            item
-        )
+        _local_name(item)
         for item in allowed_root_attributes
     }
 
@@ -547,10 +560,8 @@ def _sanitize_tree(
         root.attrib
     ):
 
-        local_attribute = (
-            _local_name(
-                attribute
-            )
+        local_attribute = _local_name(
+            attribute
         )
 
         if local_attribute not in (
@@ -572,9 +583,7 @@ def _sanitize_tree(
         parent: ET.Element,
     ) -> None:
 
-        for child in list(
-            parent
-        ):
+        for child in list(parent):
 
             child_name = (
                 _local_name(
@@ -652,7 +661,6 @@ def _validate_requested_text(
     """
 
     if expected_text is None:
-
         return
 
     rendered: list[str] = []
@@ -674,9 +682,7 @@ def _validate_requested_text(
 
     actual = (
         _normalize_rendered_text(
-            " ".join(
-                rendered
-            )
+            " ".join(rendered)
         )
     )
 
@@ -889,8 +895,1140 @@ def sanitize_svg(
 
 
 # =========================================================
+# LOCAL DESIGN HELPERS
+# =========================================================
+
+
+def _stable_palette(
+    spec: dict[str, Any],
+) -> tuple[str, str, str]:
+    """
+    Resolve a deterministic 3-color palette.
+
+    Explicit planner palettes win.
+
+    Otherwise the request gets a stable palette derived from
+    its content so the same request produces the same fallback.
+    """
+
+    palette = spec.get(
+        "palette"
+    )
+
+    if isinstance(
+        palette,
+        list,
+    ):
+
+        cleaned = [
+            str(item).strip()
+            for item in palette
+            if str(item).strip()
+        ]
+
+        if len(cleaned) >= 3:
+
+            return (
+                cleaned[0],
+                cleaned[1],
+                cleaned[2],
+            )
+
+        if len(cleaned) == 2:
+
+            return (
+                cleaned[0],
+                cleaned[1],
+                "#111827",
+            )
+
+        if len(cleaned) == 1:
+
+            return (
+                cleaned[0],
+                "#111827",
+                "#FFFFFF",
+            )
+
+    request_text = (
+        str(
+            spec.get("request")
+            or spec.get("prompt")
+            or ""
+        )
+        .lower()
+    )
+
+    # -----------------------------------------------------
+    # Domain-specific fallback palettes
+    # -----------------------------------------------------
+
+    if any(
+        word in request_text
+        for word in (
+            "shamba",
+            "farm",
+            "agriculture",
+            "crop",
+            "agro",
+            "leaf",
+        )
+    ):
+
+        return (
+            "#15803D",
+            "#84CC16",
+            "#0F172A",
+        )
+
+    if any(
+        word in request_text
+        for word in (
+            "biashara",
+            "business",
+            "market",
+            "commerce",
+            "shop",
+        )
+    ):
+
+        return (
+            "#2563EB",
+            "#0F172A",
+            "#38BDF8",
+        )
+
+    if any(
+        word in request_text
+        for word in (
+            "elimu",
+            "education",
+            "school",
+            "learning",
+            "teacher",
+        )
+    ):
+
+        return (
+            "#7C3AED",
+            "#2563EB",
+            "#111827",
+        )
+
+    if any(
+        word in request_text
+        for word in (
+            "community",
+            "jumuiya",
+            "social",
+            "people",
+        )
+    ):
+
+        return (
+            "#0F766E",
+            "#14B8A6",
+            "#0F172A",
+        )
+
+    if any(
+        word in request_text
+        for word in (
+            "scripture",
+            "bible",
+            "theology",
+            "faith",
+            "church",
+        )
+    ):
+
+        return (
+            "#92400E",
+            "#D97706",
+            "#1F2937",
+        )
+
+    if any(
+        word in request_text
+        for word in (
+            "programming",
+            "developer",
+            "software",
+            "code",
+            "technology",
+            "tech",
+        )
+    ):
+
+        return (
+            "#06B6D4",
+            "#2563EB",
+            "#0F172A",
+        )
+
+    # -----------------------------------------------------
+    # Stable generic palette
+    # -----------------------------------------------------
+
+    digest = hashlib.sha256(
+        request_text.encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+    palettes = (
+        (
+            "#2563EB",
+            "#7C3AED",
+            "#111827",
+        ),
+        (
+            "#0F766E",
+            "#0891B2",
+            "#111827",
+        ),
+        (
+            "#DB2777",
+            "#7C3AED",
+            "#111827",
+        ),
+        (
+            "#EA580C",
+            "#F59E0B",
+            "#111827",
+        ),
+    )
+
+    index = int(
+        digest[:8],
+        16,
+    ) % len(palettes)
+
+    return palettes[index]
+
+
+def _svg_root() -> ET.Element:
+    """Create the canonical RevelaAI SVG root."""
+
+    return ET.Element(
+        "svg",
+        {
+            "xmlns": SVG_NAMESPACE,
+            "viewBox": ROOT_VIEWBOX,
+        },
+    )
+
+
+def _add(
+    parent: ET.Element,
+    tag: str,
+    **attributes: Any,
+) -> ET.Element:
+    """Small safe SVG element factory."""
+
+    cleaned = {
+        key: str(value)
+        for key, value in attributes.items()
+        if value is not None
+    }
+
+    return ET.SubElement(
+        parent,
+        tag,
+        cleaned,
+    )
+
+
+def _add_text(
+    root: ET.Element,
+    value: str,
+    *,
+    x: int = 512,
+    y: int = 780,
+    font_size: int = 82,
+    fill: str = "#111827",
+    font_weight: str = "700",
+) -> None:
+    """
+    Add only explicitly requested user text.
+
+    This function must never invent words.
+    """
+
+    _add(
+        root,
+        "text",
+        x=x,
+        y=y,
+        fill=fill,
+        **{
+            "font-family": "Arial, Helvetica, sans-serif",
+            "font-size": font_size,
+            "font-weight": font_weight,
+            "text-anchor": "middle",
+        },
+    ).text = value
+
+
+# =========================================================
+# LOCAL SYMBOLS
+# =========================================================
+
+
+def _draw_leaf(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Clean agricultural leaf mark."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M512 150 "
+            "C390 190 315 285 330 400 "
+            "C345 515 435 565 512 585 "
+            "C589 565 679 515 694 400 "
+            "C709 285 634 190 512 150 Z"
+        ),
+        fill=primary,
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M512 205 "
+            "C500 300 500 400 512 540"
+        ),
+        fill="none",
+        stroke="#FFFFFF",
+        **{
+            "stroke-width": "18",
+            "stroke-linecap": "round",
+        },
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M505 320 "
+            "C455 300 410 275 370 235"
+        ),
+        fill="none",
+        stroke="#FFFFFF",
+        **{
+            "stroke-width": "14",
+            "stroke-linecap": "round",
+        },
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M519 390 "
+            "C570 365 620 330 655 285"
+        ),
+        fill="none",
+        stroke="#FFFFFF",
+        **{
+            "stroke-width": "14",
+            "stroke-linecap": "round",
+        },
+    )
+
+    _add(
+        group,
+        "circle",
+        cx=512,
+        cy=570,
+        r=28,
+        fill=secondary,
+    )
+
+
+def _draw_business(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Modern commerce / business symbol."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "rect",
+        x=270,
+        y=330,
+        width=484,
+        height=310,
+        rx=48,
+        fill=primary,
+    )
+
+    _add(
+        group,
+        "rect",
+        x=350,
+        y=250,
+        width=324,
+        height=110,
+        rx=28,
+        fill=secondary,
+    )
+
+    _add(
+        group,
+        "rect",
+        x=330,
+        y=430,
+        width=82,
+        height=135,
+        rx=18,
+        fill="#FFFFFF",
+    )
+
+    _add(
+        group,
+        "rect",
+        x=471,
+        y=390,
+        width=82,
+        height=175,
+        rx=18,
+        fill="#FFFFFF",
+    )
+
+    _add(
+        group,
+        "rect",
+        x=612,
+        y=345,
+        width=82,
+        height=220,
+        rx=18,
+        fill="#FFFFFF",
+    )
+
+
+def _draw_education(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Simple open-book education mark."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M512 315 "
+            "C430 270 350 270 275 315 "
+            "L275 650 "
+            "C355 605 430 605 512 650 Z"
+        ),
+        fill=primary,
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M512 315 "
+            "C594 270 674 270 749 315 "
+            "L749 650 "
+            "C669 605 594 605 512 650 Z"
+        ),
+        fill=secondary,
+    )
+
+    _add(
+        group,
+        "line",
+        x1=512,
+        y1=315,
+        x2=512,
+        y2=650,
+        stroke="#FFFFFF",
+        **{
+            "stroke-width": "18",
+        },
+    )
+
+
+def _draw_community(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Three-person community symbol."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "circle",
+        cx=512,
+        cy=300,
+        r=88,
+        fill=primary,
+    )
+
+    _add(
+        group,
+        "circle",
+        cx=320,
+        cy=390,
+        r=68,
+        fill=secondary,
+    )
+
+    _add(
+        group,
+        "circle",
+        cx=704,
+        cy=390,
+        r=68,
+        fill=secondary,
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M380 680 "
+            "C385 520 420 445 512 445 "
+            "C604 445 639 520 644 680 Z"
+        ),
+        fill=primary,
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M210 680 "
+            "C215 555 245 500 320 500 "
+            "C365 500 397 525 420 575 "
+            "L420 680 Z"
+        ),
+        fill=secondary,
+    )
+
+    _add(
+        group,
+        "path",
+        d=(
+            "M604 575 "
+            "C627 525 659 500 704 500 "
+            "C779 500 809 555 814 680 "
+            "L604 680 Z"
+        ),
+        fill=secondary,
+    )
+
+
+def _draw_scripture(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Simple scripture / faith mark."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "rect",
+        x=330,
+        y=300,
+        width=364,
+        height=370,
+        rx=32,
+        fill="#FFFFFF",
+        stroke=primary,
+        **{
+            "stroke-width": "22",
+        },
+    )
+
+    _add(
+        group,
+        "line",
+        x1=512,
+        y1=320,
+        x2=512,
+        y2=650,
+        stroke=primary,
+        **{
+            "stroke-width": "14",
+        },
+    )
+
+    _add(
+        group,
+        "line",
+        x1=425,
+        y1=410,
+        x2=425,
+        y2=520,
+        stroke=secondary,
+        **{
+            "stroke-width": "20",
+            "stroke-linecap": "round",
+        },
+    )
+
+    _add(
+        group,
+        "line",
+        x1=370,
+        y1=465,
+        x2=480,
+        y2=465,
+        stroke=secondary,
+        **{
+            "stroke-width": "20",
+            "stroke-linecap": "round",
+        },
+    )
+
+
+def _draw_programming(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Developer / programming symbol."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "polyline",
+        points="455,310 315,500 455,690",
+        fill="none",
+        stroke=primary,
+        **{
+            "stroke-width": "48",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+        },
+    )
+
+    _add(
+        group,
+        "polyline",
+        points="569,310 709,500 569,690",
+        fill="none",
+        stroke=secondary,
+        **{
+            "stroke-width": "48",
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+        },
+    )
+
+    _add(
+        group,
+        "line",
+        x1=545,
+        y1=275,
+        x2=479,
+        y2=725,
+        stroke="#111827",
+        **{
+            "stroke-width": "38",
+            "stroke-linecap": "round",
+        },
+    )
+
+
+def _draw_generic(
+    root: ET.Element,
+    primary: str,
+    secondary: str,
+) -> None:
+    """Professional abstract fallback symbol."""
+
+    group = _add(
+        root,
+        "g",
+    )
+
+    _add(
+        group,
+        "circle",
+        cx=512,
+        cy=480,
+        r=220,
+        fill="none",
+        stroke=primary,
+        **{
+            "stroke-width": "52",
+        },
+    )
+
+    _add(
+        group,
+        "polygon",
+        points="512,245 680,555 344,555",
+        fill=secondary,
+    )
+
+    _add(
+        group,
+        "circle",
+        cx=512,
+        cy=480,
+        r=72,
+        fill="#FFFFFF",
+    )
+
+
+# =========================================================
+# LOCAL SVG FALLBACK
+# =========================================================
+
+
+def _local_svg_fallback(
+    request: str | dict[str, Any],
+    *,
+    text: str | None = None,
+) -> str:
+    """
+    Deterministic local SVG designer.
+
+    This is intentionally independent of:
+    - Hugging Face
+    - external APIs
+    - model downloads
+    - network access
+    - image generation providers
+
+    It guarantees that simple vector requests can still produce
+    a valid asset when the remote AI provider is unavailable.
+    """
+
+    spec = _request_spec(
+        request,
+        text,
+    )
+
+    request_text = str(
+        spec.get("request")
+        or spec.get("prompt")
+        or ""
+    ).strip()
+
+    exact_text = (
+        str(spec["text"])
+        if spec.get("text") is not None
+        else None
+    )
+
+    kind = str(
+        spec.get("kind")
+        or ""
+    ).lower()
+
+    style = str(
+        spec.get("style")
+        or ""
+    ).lower()
+
+    layout = str(
+        spec.get("layout")
+        or ""
+    ).lower()
+
+    primary, secondary, dark = (
+        _stable_palette(
+            spec
+        )
+    )
+
+    root = _svg_root()
+
+    # -----------------------------------------------------
+    # Optional explicit background
+    # -----------------------------------------------------
+
+    background_requested = any(
+        word in (
+            request_text
+            + " "
+            + style
+        ).lower()
+        for word in (
+            "background",
+            "solid background",
+            "colored background",
+        )
+    )
+
+    if background_requested:
+
+        _add(
+            root,
+            "rect",
+            x=0,
+            y=0,
+            width=1024,
+            height=1024,
+            fill="#FFFFFF",
+        )
+
+    # -----------------------------------------------------
+    # Determine visual family
+    # -----------------------------------------------------
+
+    normalized = (
+        request_text
+        + " "
+        + kind
+        + " "
+        + style
+        + " "
+        + layout
+    ).lower()
+
+    if any(
+        word in normalized
+        for word in (
+            "shamba",
+            "farm",
+            "agriculture",
+            "crop",
+            "agro",
+            "leaf",
+        )
+    ):
+
+        _draw_leaf(
+            root,
+            primary,
+            secondary,
+        )
+
+    elif any(
+        word in normalized
+        for word in (
+            "biashara",
+            "business",
+            "market",
+            "commerce",
+            "shop",
+        )
+    ):
+
+        _draw_business(
+            root,
+            primary,
+            secondary,
+        )
+
+    elif any(
+        word in normalized
+        for word in (
+            "elimu",
+            "education",
+            "school",
+            "learning",
+            "teacher",
+        )
+    ):
+
+        _draw_education(
+            root,
+            primary,
+            secondary,
+        )
+
+    elif any(
+        word in normalized
+        for word in (
+            "community",
+            "jumuiya",
+            "social",
+            "people",
+        )
+    ):
+
+        _draw_community(
+            root,
+            primary,
+            secondary,
+        )
+
+    elif any(
+        word in normalized
+        for word in (
+            "scripture",
+            "bible",
+            "theology",
+            "faith",
+            "church",
+        )
+    ):
+
+        _draw_scripture(
+            root,
+            primary,
+            secondary,
+        )
+
+    elif any(
+        word in normalized
+        for word in (
+            "programming",
+            "developer",
+            "software",
+            "code",
+            "technology",
+            "tech",
+        )
+    ):
+
+        _draw_programming(
+            root,
+            primary,
+            secondary,
+        )
+
+    else:
+
+        _draw_generic(
+            root,
+            primary,
+            secondary,
+        )
+
+    # -----------------------------------------------------
+    # User text
+    #
+    # IMPORTANT:
+    # Never invent fallback text.
+    # -----------------------------------------------------
+
+    if exact_text is not None:
+
+        text_size = 82
+
+        # Long text gets progressively smaller so the
+        # deterministic fallback remains usable.
+        text_length = len(
+            exact_text
+        )
+
+        if text_length > 24:
+            text_size = 62
+
+        if text_length > 36:
+            text_size = 48
+
+        if text_length > 52:
+            text_size = 38
+
+        # Default logo composition:
+        # symbol above, exact user text below.
+        _add_text(
+            root,
+            exact_text,
+            y=800,
+            font_size=text_size,
+            fill=dark,
+        )
+
+    # -----------------------------------------------------
+    # Final sanitize + validate
+    # -----------------------------------------------------
+
+    return sanitize_svg(
+        _serialize_svg(root),
+        expected_text=exact_text,
+    )
+
+
+# =========================================================
+# PROVIDER ERROR CLASSIFICATION
+# =========================================================
+
+
+def _provider_error_is_fallbackable(
+    result: dict[str, Any],
+) -> bool:
+    """
+    Determine whether the remote provider failure should trigger
+    local SVG generation.
+
+    Expected cases include:
+    - no HF credits
+    - HTTP 402
+    - authentication failure
+    - rate limits
+    - provider unavailable
+    - provider timeout
+    - upstream 5xx
+    """
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+        return True
+
+    status = result.get(
+        "status"
+    )
+
+    error = str(
+        result.get(
+            "error"
+        )
+        or ""
+    ).lower()
+
+    status_text = str(
+        status
+        or ""
+    ).lower()
+
+    combined = (
+        f"{status_text} {error}"
+    )
+
+    fallback_markers = (
+        "402",
+        "401",
+        "403",
+        "408",
+        "409",
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+        "credit",
+        "credits",
+        "pre-paid",
+        "prepaid",
+        "remaining credits",
+        "inference provider",
+        "rate limit",
+        "rate-limit",
+        "timeout",
+        "timed out",
+        "temporarily unavailable",
+        "service unavailable",
+        "upstream",
+        "connection",
+        "network",
+    )
+
+    return any(
+        marker in combined
+        for marker in fallback_markers
+    )
+
+
+# =========================================================
 # AI SVG GENERATION
 # =========================================================
+
+
+def _generate_ai_svg(
+    brief: str,
+    *,
+    expected_text: str | None,
+) -> str:
+    """
+    Ask the configured AI provider for SVG and sanitize it.
+
+    Provider failures are converted to RuntimeError so the public
+    generate_svg() function can decide whether to use local fallback.
+    """
+
+    result = ask_hf(
+        text=brief,
+        system_prompt=SVG_SYSTEM,
+    )
+
+    if not isinstance(
+        result,
+        dict,
+    ):
+
+        raise RuntimeError(
+            "SVG AI provider returned an invalid response."
+        )
+
+    if not result.get(
+        "success"
+    ):
+
+        error = (
+            result.get(
+                "error"
+            )
+            or "SVG generation failed."
+        )
+
+        status = result.get(
+            "status"
+        )
+
+        if status:
+
+            raise RuntimeError(
+                f"SVG provider error "
+                f"(status={status}): {error}"
+            )
+
+        raise RuntimeError(
+            f"SVG provider error: {error}"
+        )
+
+    raw_svg = result.get(
+        "response"
+    )
+
+    if not raw_svg:
+
+        raise RuntimeError(
+            "SVG generation returned no content."
+        )
+
+    return sanitize_svg(
+        raw_svg,
+        expected_text=expected_text,
+    )
 
 
 def generate_svg(
@@ -899,6 +2037,14 @@ def generate_svg(
 ) -> str:
     """
     Generate a structured SVG.
+
+    Provider strategy:
+
+        1. Try RevelaAI AI provider.
+        2. Sanitize and validate AI SVG.
+        3. If provider credits/network/rate-limit/etc. fail,
+           use deterministic local SVG generation.
+        4. Return a valid sanitized SVG.
 
     Backward compatible:
 
@@ -921,36 +2067,107 @@ def generate_svg(
         )
     )
 
-    result = ask_hf(
-        text=brief,
-        system_prompt=SVG_SYSTEM,
-    )
+    # -----------------------------------------------------
+    # AI-FIRST
+    # -----------------------------------------------------
 
-    if not result.get(
-        "success"
-    ):
+    try:
 
-        raise RuntimeError(
-            result.get(
-                "error"
+        svg = _generate_ai_svg(
+            brief,
+            expected_text=exact_text,
+        )
+
+        logger.info(
+            "SVG generation succeeded using AI provider."
+        )
+
+        return svg
+
+    except Exception as exc:
+
+        error_message = str(
+            exc
+        )
+
+        # -------------------------------------------------
+        # Expected provider failure:
+        # use local deterministic SVG.
+        # -------------------------------------------------
+
+        provider_result = {
+            "error": error_message,
+        }
+
+        if _provider_error_is_fallbackable(
+            provider_result
+        ):
+
+            logger.warning(
+                "SVG AI provider unavailable; "
+                "using deterministic local fallback. "
+                "error=%s",
+                error_message,
             )
-            or "SVG generation failed."
+
+            try:
+
+                return _local_svg_fallback(
+                    request,
+                    text=exact_text,
+                )
+
+            except Exception as fallback_exc:
+
+                logger.exception(
+                    "Local SVG fallback failed. "
+                    "error=%s",
+                    fallback_exc,
+                )
+
+                raise RuntimeError(
+                    (
+                        "Both AI SVG generation and "
+                        "local SVG fallback failed."
+                    )
+                ) from fallback_exc
+
+        # -------------------------------------------------
+        # Non-provider SVG failure.
+        #
+        # Still attempt local fallback because malformed
+        # model output should not take down image generation.
+        # -------------------------------------------------
+
+        logger.warning(
+            "SVG AI generation failed; "
+            "attempting local deterministic fallback. "
+            "error=%s",
+            error_message,
         )
 
-    raw_svg = result.get(
-        "response"
-    )
+        try:
 
-    if not raw_svg:
+            return _local_svg_fallback(
+                request,
+                text=exact_text,
+            )
 
-        raise RuntimeError(
-            "SVG generation returned no content."
-        )
+        except Exception as fallback_exc:
 
-    return sanitize_svg(
-        raw_svg,
-        expected_text=exact_text,
-    )
+            logger.exception(
+                "Local SVG fallback failed. "
+                "error=%s",
+                fallback_exc,
+            )
+
+            raise RuntimeError(
+                (
+                    "SVG generation failed and "
+                    "local fallback was unable to "
+                    "produce a valid SVG."
+                )
+            ) from fallback_exc
 
 
 # =========================================================
