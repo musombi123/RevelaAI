@@ -23,43 +23,42 @@ Architecture
           |            |                |
           v            v                v
         Gemini         MVI          Hugging Face
-        Text AI      Optional        Images/Voice
+        Text AI      Optional          Voice
           |
           +--> Primary:
-          |      Gemini 3.8 Flash
+          |      Configured Gemini model
           |
           +--> Fallback:
-                 Gemini 3.5 Flash-Lite
+                 Configured Gemini fallback
 
 
-TEXT
-----
+IMAGE
+-----
 
-Primary provider:
-    Gemini API
+Primary image provider:
 
-Primary model:
-    gemini-3.8-flash
+    Pollinations
 
-Fallback model:
-    gemini-3.5-flash-lite
+Primary image model:
 
-MVI is intentionally NOT part of the default text path.
+    flux
 
-MVI remains available through:
-    ask_mvi()
+    Pollinations alias for Flux Schnell.
 
-It may be explicitly enabled through:
+Pollinations generation endpoint:
 
-    REVELAAI_TEXT_PROVIDERS=gemini,mvi
+    https://gen.pollinations.ai/image/{prompt}?model=flux
+
+POLLINATIONS_API_KEY must remain server-side.
+
+Never expose the Pollinations API key to the frontend.
 
 
-HUGGING FACE
-------------
+VOICE
+-----
 
 Hugging Face remains available for:
 
-    - Images
     - ASR
     - TTS
 
@@ -71,10 +70,19 @@ Never expose HF_TOKEN to the frontend.
 IMPORTANT
 ---------
 
-The old hard-coded models are NOT used:
+The old hard-coded text models are NOT used:
 
     openai/gpt-oss-120b:cheapest
     openai/gpt-oss-20b:cheapest
+
+The old Hugging Face image models are NOT used for image generation.
+
+Backward-compatible image functions remain:
+
+    generate_hf_image()
+    generate_image()
+
+Both now route to Pollinations.
 
 
 Existing public APIs are preserved:
@@ -124,20 +132,6 @@ REQUEST_USER_AGENT = (
 # =========================================================
 # GEMINI CONFIGURATION
 # =========================================================
-#
-# Gemini is now the PRIMARY text provider.
-#
-# Current strategy:
-#
-#     Primary:
-#         gemini-3.8-flash
-#
-#     Fallback:
-#         gemini-3.5-flash-lite
-#
-# The values are configurable through Render environment
-# variables without changing this file.
-#
 
 GEMINI_API_KEY = (
     os.getenv(
@@ -191,7 +185,7 @@ GEMINI_CONNECT_TIMEOUT = float(
 GEMINI_READ_TIMEOUT = float(
     os.getenv(
         "GEMINI_READ_TIMEOUT",
-        "120",
+        "30",
     )
 )
 
@@ -213,12 +207,6 @@ GEMINI_TEMPERATURE = float(
 # =========================================================
 # MVI AI ENGINE
 # =========================================================
-#
-# MVI is optional.
-#
-# It is kept as a separate proprietary provider and is NOT
-# used unless explicitly included in the provider order.
-#
 
 MVI_API_URL = (
     os.getenv(
@@ -258,6 +246,15 @@ MVI_ENABLED = (
 # =========================================================
 # HUGGING FACE CONFIGURATION
 # =========================================================
+#
+# HF remains available for:
+#
+#     - optional text fallback
+#     - ASR
+#     - TTS
+#
+# It is intentionally NOT used for image generation.
+#
 
 HF_TOKEN = (
     os.getenv(
@@ -272,13 +269,6 @@ HF_API_URL = (
         "https://router.huggingface.co/v1/chat/completions",
     ).strip()
 )
-
-
-# Optional HF text model.
-#
-# No default is supplied because HF text generation may be
-# unavailable when inference credits are exhausted.
-#
 
 HF_MODEL = (
     os.getenv(
@@ -298,25 +288,6 @@ HF_FALLBACK_MODEL = (
 # =========================================================
 # TEXT PROVIDER ORDER
 # =========================================================
-#
-# Default:
-#
-#     gemini
-#
-# Optional:
-#
-#     gemini,mvi
-#
-#     gemini,huggingface
-#
-#     gemini,mvi,huggingface
-#
-# Gemini itself performs model-level fallback:
-#
-#     Gemini 3.8 Flash
-#         ->
-#     Gemini 3.5 Flash-Lite
-#
 
 TEXT_PROVIDER_ORDER = [
     item.strip().lower()
@@ -334,43 +305,103 @@ if not TEXT_PROVIDER_ORDER:
 
 
 # =========================================================
-# IMAGE MODEL CONFIGURATION
+# POLLINATIONS IMAGE CONFIGURATION
 # =========================================================
+#
+# Primary image engine:
+#
+#     Pollinations
+#
+# Primary model:
+#
+#     flux
+#
+# The production Pollinations API currently uses:
+#
+#     https://gen.pollinations.ai/image/{prompt}
+#
+# with:
+#
+#     ?model=flux
+#
+# Authentication:
+#
+#     Authorization: Bearer <POLLINATIONS_API_KEY>
+#
+# Keep the key server-side.
+#
 
-HF_IMAGE_MODEL = (
+POLLINATIONS_API_KEY = (
     os.getenv(
-        "HF_IMAGE_MODEL",
-        "black-forest-labs/FLUX.1-dev",
-    ).strip()
-)
-
-HF_IMAGE_TEXT_MODEL = (
-    os.getenv(
-        "HF_IMAGE_TEXT_MODEL",
+        "POLLINATIONS_API_KEY",
         "",
     ).strip()
 )
 
-HF_IMAGE_FALLBACK_MODEL = (
+POLLINATIONS_API_BASE_URL = (
     os.getenv(
-        "HF_IMAGE_FALLBACK_MODEL",
-        "black-forest-labs/FLUX.1-schnell",
+        "POLLINATIONS_API_BASE_URL",
+        "https://gen.pollinations.ai",
     ).strip()
+    or "https://gen.pollinations.ai"
 )
 
-HF_IMAGE_PROVIDER = (
+POLLINATIONS_IMAGE_MODEL = (
     os.getenv(
-        "HF_IMAGE_PROVIDER",
+        "POLLINATIONS_IMAGE_MODEL",
+        "flux",
+    ).strip()
+    or "flux"
+)
+
+# Empty by default.
+#
+# This deliberately prevents unexpected additional
+# Pollen consumption from automatic fallback generation.
+#
+# Enable explicitly in Render when desired, for example:
+#
+#     POLLINATIONS_IMAGE_FALLBACK_MODEL=zimage
+#
+
+POLLINATIONS_IMAGE_FALLBACK_MODEL = (
+    os.getenv(
+        "POLLINATIONS_IMAGE_FALLBACK_MODEL",
         "",
     ).strip()
 )
 
-HF_IMAGE_TEXT_PROVIDER = (
+POLLINATIONS_IMAGE_TIMEOUT = float(
     os.getenv(
-        "HF_IMAGE_TEXT_PROVIDER",
-        "",
-    ).strip()
+        "POLLINATIONS_IMAGE_TIMEOUT",
+        "120",
+    )
 )
+
+POLLINATIONS_MAX_IMAGE_BYTES = int(
+    os.getenv(
+        "POLLINATIONS_MAX_IMAGE_BYTES",
+        str(15 * 1024 * 1024),
+    )
+)
+
+
+# =========================================================
+# LEGACY IMAGE VARIABLES
+# =========================================================
+#
+# These names are preserved because older RevelaAI
+# application code may import them.
+#
+# They no longer control an actual Hugging Face image
+# generation request.
+#
+
+HF_IMAGE_MODEL = POLLINATIONS_IMAGE_MODEL
+HF_IMAGE_TEXT_MODEL = ""
+HF_IMAGE_FALLBACK_MODEL = POLLINATIONS_IMAGE_FALLBACK_MODEL
+HF_IMAGE_PROVIDER = "pollinations"
+HF_IMAGE_TEXT_PROVIDER = "pollinations"
 
 
 # =========================================================
@@ -413,6 +444,12 @@ HF_IMAGE_DEFAULT_HEIGHT = int(
 # =========================================================
 # IMAGE DEFAULT STEPS
 # =========================================================
+#
+# Preserved for backward compatibility.
+#
+# Pollinations' hosted image endpoint controls model
+# inference internally, so these values are not sent.
+#
 
 _steps_env = (
     os.getenv(
@@ -533,6 +570,7 @@ class AIClientError(Exception):
 def _provider_enabled(
     provider: str,
 ) -> bool:
+
     provider = (
         str(
             provider or ""
@@ -547,6 +585,7 @@ def _provider_enabled(
         "google-ai",
         "googleai",
     }:
+
         return bool(
             GEMINI_ENABLED
             and GEMINI_API_KEY
@@ -554,7 +593,12 @@ def _provider_enabled(
             and GEMINI_MODEL
         )
 
-    if provider == "mvi":
+    if provider in {
+        "mvi",
+        "mvi-ai",
+        "mvi_ai",
+    }:
+
         return bool(
             MVI_ENABLED
             and MVI_API_URL
@@ -564,12 +608,71 @@ def _provider_enabled(
         "huggingface",
         "hf",
     }:
+
         return bool(
             HF_TOKEN
             and HF_MODEL
         )
 
+    if provider in {
+        "pollinations",
+        "pollinations-ai",
+        "polli",
+    }:
+
+        return bool(
+            POLLINATIONS_API_KEY
+            and POLLINATIONS_API_BASE_URL
+            and POLLINATIONS_IMAGE_MODEL
+        )
+
     return False
+
+
+def pollinations_configured() -> bool:
+    """
+    Return whether Pollinations image generation is
+    configured with a server-side API key.
+    """
+
+    return bool(
+        POLLINATIONS_API_KEY
+        and POLLINATIONS_API_BASE_URL
+        and POLLINATIONS_IMAGE_MODEL
+    )
+
+
+def get_image_provider_status() -> dict[str, Any]:
+    """
+    Return safe image-provider diagnostics.
+
+    Secrets are never returned.
+    """
+
+    return {
+        "provider": "pollinations",
+        "enabled": bool(
+            POLLINATIONS_API_KEY
+            and POLLINATIONS_API_BASE_URL
+            and POLLINATIONS_IMAGE_MODEL
+        ),
+        "configured": bool(
+            POLLINATIONS_API_KEY
+            and POLLINATIONS_API_BASE_URL
+            and POLLINATIONS_IMAGE_MODEL
+        ),
+        "api_key_configured": bool(
+            POLLINATIONS_API_KEY
+        ),
+        "base_url_configured": bool(
+            POLLINATIONS_API_BASE_URL
+        ),
+        "model": POLLINATIONS_IMAGE_MODEL,
+        "fallback_model": (
+            POLLINATIONS_IMAGE_FALLBACK_MODEL
+            or None
+        ),
+    }
 
 
 def get_text_provider_status() -> dict[str, Any]:
@@ -634,6 +737,7 @@ def get_text_provider_status() -> dict[str, Any]:
                 ),
             },
         },
+        "image": get_image_provider_status(),
     }
 
 
@@ -653,6 +757,7 @@ def get_gemini_headers() -> dict[str, str]:
     """
 
     if not GEMINI_API_KEY:
+
         raise AIClientError(
             "GEMINI_API_KEY is not configured.",
             provider="gemini",
@@ -668,7 +773,7 @@ def get_gemini_headers() -> dict[str, str]:
 
 
 # =========================================================
-# HF CONFIGURATION
+# HUGGING FACE CONFIGURATION
 # =========================================================
 
 
@@ -688,6 +793,7 @@ def get_hf_headers() -> dict[str, str]:
     """
 
     if not HF_TOKEN:
+
         raise AIClientError(
             "HF_TOKEN is not configured.",
             provider="huggingface",
@@ -705,6 +811,35 @@ def get_hf_headers() -> dict[str, str]:
 
 
 # =========================================================
+# POLLINATIONS HEADERS
+# =========================================================
+
+
+def get_pollinations_headers() -> dict[str, str]:
+    """
+    Build Pollinations authorization headers.
+
+    The secret is never logged.
+    """
+
+    if not POLLINATIONS_API_KEY:
+
+        raise AIClientError(
+            "POLLINATIONS_API_KEY is not configured.",
+            provider="pollinations",
+            error_code="pollinations_api_key_missing",
+        )
+
+    return {
+        "Authorization": (
+            f"Bearer {POLLINATIONS_API_KEY}"
+        ),
+        "Accept": "image/*,application/json",
+        "User-Agent": REQUEST_USER_AGENT,
+    }
+
+
+# =========================================================
 # MESSAGE NORMALIZATION
 # =========================================================
 
@@ -712,6 +847,7 @@ def get_hf_headers() -> dict[str, str]:
 def _normalize_message_content(
     value: Any,
 ) -> str:
+
     if value is None:
         return ""
 
@@ -739,9 +875,6 @@ def build_messages(
 ) -> list[dict[str, str]]:
     """
     Build OpenAI-compatible messages.
-
-    This function is preserved because existing RevelaAI
-    components may use it directly.
     """
 
     messages: list[
@@ -749,6 +882,7 @@ def build_messages(
     ] = []
 
     if system_prompt.strip():
+
         messages.append(
             {
                 "role": "system",
@@ -760,6 +894,7 @@ def build_messages(
         context,
         list,
     ):
+
         for item in context:
 
             if not isinstance(
@@ -781,6 +916,7 @@ def build_messages(
                 "assistant",
                 "model",
             }:
+
                 role = "user"
 
             if role == "model":
@@ -834,20 +970,9 @@ def build_messages(
 def _messages_to_gemini_contents(
     messages: list[dict[str, str]],
 ) -> tuple[str, list[dict[str, Any]]]:
-    """
-    Convert OpenAI-style messages into Gemini generateContent
-    request format.
-
-    Gemini uses:
-
-        role=user
-        role=model
-
-    System messages are returned separately as the Gemini
-    systemInstruction.
-    """
 
     system_parts: list[str] = []
+
     contents: list[
         dict[str, Any]
     ] = []
@@ -880,9 +1005,11 @@ def _messages_to_gemini_contents(
             continue
 
         if role == "system":
+
             system_parts.append(
                 content
             )
+
             continue
 
         gemini_role = (
@@ -905,9 +1032,11 @@ def _messages_to_gemini_contents(
             }
         )
 
-    system_instruction = "\n\n".join(
-        system_parts
-    ).strip()
+    system_instruction = (
+        "\n\n".join(
+            system_parts
+        ).strip()
+    )
 
     return (
         system_instruction,
@@ -923,14 +1052,12 @@ def _messages_to_gemini_contents(
 def _extract_gemini_response(
     data: Any,
 ) -> str:
-    """
-    Extract text from Gemini generateContent response.
-    """
 
     if not isinstance(
         data,
         dict,
     ):
+
         raise AIClientError(
             "Gemini returned an invalid response.",
             provider="gemini",
@@ -941,20 +1068,22 @@ def _extract_gemini_response(
         "candidates"
     )
 
-    if not isinstance(
-        candidates,
-        list,
-    ) or not candidates:
+    if (
+        not isinstance(
+            candidates,
+            list,
+        )
+        or not candidates
+    ):
 
         prompt_feedback = data.get(
             "promptFeedback"
         )
 
         if prompt_feedback:
+
             raise AIClientError(
-                (
-                    "Gemini returned no candidates."
-                ),
+                "Gemini returned no candidates.",
                 provider="gemini",
                 error_code="gemini_no_candidates",
             )
@@ -971,6 +1100,7 @@ def _extract_gemini_response(
         first,
         dict,
     ):
+
         raise AIClientError(
             "Gemini returned an invalid candidate.",
             provider="gemini",
@@ -985,6 +1115,7 @@ def _extract_gemini_response(
         content,
         dict,
     ):
+
         raise AIClientError(
             "Gemini returned no response content.",
             provider="gemini",
@@ -999,6 +1130,7 @@ def _extract_gemini_response(
         parts,
         list,
     ):
+
         raise AIClientError(
             "Gemini returned no response parts.",
             provider="gemini",
@@ -1029,6 +1161,7 @@ def _extract_gemini_response(
     ).strip()
 
     if not result:
+
         raise AIClientError(
             "Gemini returned an empty response.",
             provider="gemini",
@@ -1048,9 +1181,11 @@ def _extract_gemini_error(
 ) -> tuple[str, str]:
 
     try:
+
         data = response.json()
 
     except ValueError:
+
         return (
             (
                 "Gemini returned "
@@ -1094,15 +1229,12 @@ def _extract_gemini_error(
             )
 
             return (
-                str(
-                    message
-                ),
-                str(
-                    code
-                ),
+                str(message),
+                str(code),
             )
 
         if error:
+
             return (
                 str(error),
                 "gemini_provider_error",
@@ -1113,6 +1245,7 @@ def _extract_gemini_error(
         )
 
         if message:
+
             return (
                 str(message),
                 "gemini_provider_error",
@@ -1134,11 +1267,9 @@ def _request_gemini(
     model: str,
     messages: list[dict[str, str]],
 ) -> dict[str, Any]:
-    """
-    Execute one Gemini generateContent request.
-    """
 
     if not GEMINI_ENABLED:
+
         raise AIClientError(
             "Gemini provider is disabled.",
             provider="gemini",
@@ -1146,6 +1277,7 @@ def _request_gemini(
         )
 
     if not GEMINI_API_KEY:
+
         raise AIClientError(
             "GEMINI_API_KEY is not configured.",
             provider="gemini",
@@ -1153,17 +1285,11 @@ def _request_gemini(
         )
 
     if not model:
+
         raise AIClientError(
             "No Gemini model is configured.",
             provider="gemini",
             error_code="gemini_model_missing",
-        )
-
-    if not GEMINI_API_BASE_URL:
-        raise AIClientError(
-            "GEMINI_API_BASE_URL is not configured.",
-            provider="gemini",
-            error_code="gemini_url_missing",
         )
 
     system_instruction, contents = (
@@ -1173,6 +1299,7 @@ def _request_gemini(
     )
 
     if not contents:
+
         raise AIClientError(
             "Gemini request contains no user content.",
             provider="gemini",
@@ -1191,6 +1318,7 @@ def _request_gemini(
     }
 
     if system_instruction:
+
         payload[
             "systemInstruction"
         ] = {
@@ -1203,7 +1331,7 @@ def _request_gemini(
 
     encoded_model = quote(
         model,
-        safe=""
+        safe="",
     )
 
     url = (
@@ -1323,17 +1451,9 @@ def _ask_gemini_text(
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """
-    Main Gemini text provider.
-
-    Primary:
-        GEMINI_MODEL
-
-    Fallback:
-        GEMINI_FALLBACK_MODEL
-    """
 
     if not GEMINI_ENABLED:
+
         raise AIClientError(
             "Gemini provider is disabled.",
             provider="gemini",
@@ -1341,6 +1461,7 @@ def _ask_gemini_text(
         )
 
     if not GEMINI_API_KEY:
+
         raise AIClientError(
             "GEMINI_API_KEY is not configured.",
             provider="gemini",
@@ -1348,6 +1469,7 @@ def _ask_gemini_text(
         )
 
     if not GEMINI_MODEL:
+
         raise AIClientError(
             "GEMINI_MODEL is not configured.",
             provider="gemini",
@@ -1377,11 +1499,13 @@ def _ask_gemini_text(
             candidate
             and candidate not in candidates
         ):
+
             candidates.append(
                 candidate
             )
 
     if not candidates:
+
         raise AIClientError(
             "No Gemini text model is configured.",
             provider="gemini",
@@ -1390,9 +1514,7 @@ def _ask_gemini_text(
 
     attempted_models: list[str] = []
 
-    last_error: AIClientError | None = (
-        None
-    )
+    last_error: AIClientError | None = None
 
     for index, model in enumerate(
         candidates
@@ -1439,6 +1561,7 @@ def _ask_gemini_text(
                     dict,
                 )
             ):
+
                 finish_reason = (
                     model_candidates[0].get(
                         "finishReason"
@@ -1458,21 +1581,12 @@ def _ask_gemini_text(
                 ),
                 "session_id": session_id,
                 "usage": usage,
-                "finish_reason": (
-                    finish_reason
-                ),
+                "finish_reason": finish_reason,
             }
 
         except AIClientError as exc:
 
             last_error = exc
-
-            # -------------------------------------------------
-            # Authentication/configuration/billing issues.
-            #
-            # Trying another model will not repair a broken
-            # API key or disabled account.
-            # -------------------------------------------------
 
             if exc.status_code in {
                 401,
@@ -1489,11 +1603,6 @@ def _ask_gemini_text(
 
                 break
 
-            # -------------------------------------------------
-            # Rate limits, temporary provider problems and
-            # model availability errors can use fallback.
-            # -------------------------------------------------
-
             if exc.status_code in {
                 400,
                 404,
@@ -1504,11 +1613,14 @@ def _ask_gemini_text(
                 502,
                 503,
                 504,
+            } or exc.error_code in {
+                "gemini_timeout",
+                "gemini_connection_error",
             }:
 
                 print(
-                    "GEMINI model failed; trying fallback "
-                    "when available | "
+                    "GEMINI model failed; "
+                    "trying fallback when available | "
                     f"model={model} | "
                     f"status={exc.status_code} | "
                     f"error_code={exc.error_code}"
@@ -1547,9 +1659,6 @@ def ask_gemini(
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """
-    Direct public Gemini text client.
-    """
 
     if not str(
         text or ""
@@ -1613,12 +1722,14 @@ def _extract_mvi_response(
         data,
         str,
     ):
+
         return data.strip()
 
     if not isinstance(
         data,
         dict,
     ):
+
         return str(
             data
         ).strip()
@@ -1639,10 +1750,13 @@ def _extract_mvi_response(
             key
         )
 
-        if isinstance(
-            value,
-            str,
-        ) and value.strip():
+        if (
+            isinstance(
+                value,
+                str,
+            )
+            and value.strip()
+        ):
 
             return value.strip()
 
@@ -1929,9 +2043,10 @@ def _get_inference_client(
 
     Used for:
 
-        - image generation
         - ASR
         - TTS
+
+    NOT used for image generation.
     """
 
     if not HF_TOKEN:
@@ -1976,6 +2091,72 @@ def _get_inference_client(
 
 
 # =========================================================
+# POLLINATIONS IMAGE MODEL NORMALIZATION
+# =========================================================
+
+
+def _normalize_pollinations_image_model(
+    model: str | None,
+) -> str:
+
+    requested = str(
+        model or ""
+    ).strip().lower()
+
+    if not requested:
+        return POLLINATIONS_IMAGE_MODEL
+
+    # -----------------------------------------------------
+    # Modern Pollinations aliases.
+    # -----------------------------------------------------
+
+    if requested in {
+        "flux",
+        "black-forest-labs/flux.1-schnell",
+        "black-forest-labs/flux.1-schnell",
+        "black-forest-labs/flux",
+    }:
+
+        return "flux"
+
+    if requested in {
+        "zimage",
+        "z-image",
+        "z-image-turbo",
+        "z-image/z-image-turbo",
+    }:
+
+        return "zimage"
+
+    # -----------------------------------------------------
+    # Legacy Hugging Face FLUX names.
+    #
+    # This prevents old frontend/backend values from
+    # accidentally causing an HF inference request.
+    # -----------------------------------------------------
+
+    if requested in {
+        "black-forest-labs/flux.1-dev",
+        "black-forest-labs/flux.1-schnell",
+        "black-forest-labs/flux1-dev",
+        "black-forest-labs/flux1-schnell",
+        "flux.1-dev",
+        "flux.1-schnell",
+    }:
+
+        return "flux"
+
+    # -----------------------------------------------------
+    # Otherwise allow a valid Pollinations model ID or
+    # alias to pass through.
+    # -----------------------------------------------------
+
+    return str(
+        model
+    ).strip()
+
+
+# =========================================================
 # IMAGE MODEL DEFAULTS
 # =========================================================
 
@@ -1984,7 +2165,12 @@ def _model_defaults(
     model: str,
 ) -> dict[str, Any]:
 
-    name = model.lower()
+    name = (
+        str(
+            model or ""
+        )
+        .lower()
+    )
 
     if "schnell" in name:
 
@@ -2013,7 +2199,7 @@ def _model_defaults(
     return {
         "steps": 30,
         "guidance": 5.0,
-        "supports_negative": True,
+        "supports_negative": False,
     }
 
 
@@ -2028,13 +2214,7 @@ def _provider_for(
     has_text: bool = False,
 ) -> str:
 
-    if (
-        HF_IMAGE_TEXT_MODEL
-        and model == HF_IMAGE_TEXT_MODEL
-    ):
-        return HF_IMAGE_TEXT_PROVIDER
-
-    return HF_IMAGE_PROVIDER
+    return "pollinations"
 
 
 # =========================================================
@@ -2098,11 +2278,13 @@ def resolve_image_dimensions(
     ):
 
         if width is None:
+
             width = (
                 HF_IMAGE_DEFAULT_WIDTH
             )
 
         if height is None:
+
             height = (
                 HF_IMAGE_DEFAULT_HEIGHT
             )
@@ -2126,7 +2308,7 @@ def resolve_image_dimensions(
                     "Unsupported image aspect "
                     f"ratio preset: {aspect_ratio}"
                 ),
-                provider="huggingface",
+                provider="pollinations",
                 error_code=(
                     "invalid_image_aspect_ratio"
                 ),
@@ -2164,7 +2346,7 @@ def resolve_image_dimensions(
                 "Image width and height "
                 "must be integers."
             ),
-            provider="huggingface",
+            provider="pollinations",
             error_code=(
                 "invalid_image_dimensions"
             ),
@@ -2177,7 +2359,7 @@ def resolve_image_dimensions(
                 "Image width must be "
                 "between 256 and 2048 pixels."
             ),
-            provider="huggingface",
+            provider="pollinations",
             error_code="invalid_image_width",
         )
 
@@ -2188,7 +2370,7 @@ def resolve_image_dimensions(
                 "Image height must be "
                 "between 256 and 2048 pixels."
             ),
-            provider="huggingface",
+            provider="pollinations",
             error_code="invalid_image_height",
         )
 
@@ -2199,123 +2381,526 @@ def resolve_image_dimensions(
 
 
 # =========================================================
-# ONE IMAGE ATTEMPT
+# POLLINATIONS ERROR EXTRACTION
 # =========================================================
 
 
-def _text_to_image_once(
+def _extract_pollinations_error(
+    response: requests.Response,
+) -> tuple[str, str]:
+
+    try:
+
+        data = response.json()
+
+    except ValueError:
+
+        message = (
+            response.text.strip()
+        )
+
+        if response.status_code == 401:
+
+            return (
+                (
+                    "Pollinations authentication failed. "
+                    "Check POLLINATIONS_API_KEY."
+                ),
+                "pollinations_unauthorized",
+            )
+
+        if response.status_code == 402:
+
+            return (
+                (
+                    "Pollinations has no available "
+                    "Pollen balance for this request."
+                ),
+                "pollinations_insufficient_balance",
+            )
+
+        if response.status_code == 403:
+
+            return (
+                (
+                    "Pollinations denied access to "
+                    "the requested generation."
+                ),
+                "pollinations_forbidden",
+            )
+
+        return (
+            message
+            or "Pollinations image generation failed.",
+            "pollinations_provider_error",
+        )
+
+    if isinstance(
+        data,
+        dict,
+    ):
+
+        error = data.get(
+            "error"
+        )
+
+        if isinstance(
+            error,
+            dict,
+        ):
+
+            message = (
+                error.get(
+                    "message"
+                )
+                or error.get(
+                    "detail"
+                )
+                or error.get(
+                    "error"
+                )
+                or "Pollinations image generation failed."
+            )
+
+            code = (
+                error.get(
+                    "code"
+                )
+                or error.get(
+                    "type"
+                )
+                or "pollinations_provider_error"
+            )
+
+            return (
+                str(
+                    message
+                ),
+                str(
+                    code
+                ),
+            )
+
+        if error:
+
+            return (
+                str(
+                    error
+                ),
+                "pollinations_provider_error",
+            )
+
+        message = (
+            data.get(
+                "message"
+            )
+            or data.get(
+                "detail"
+            )
+        )
+
+        if message:
+
+            return (
+                str(
+                    message
+                ),
+                "pollinations_provider_error",
+            )
+
+    if response.status_code == 401:
+
+        return (
+            (
+                "Pollinations authentication failed. "
+                "Check POLLINATIONS_API_KEY."
+            ),
+            "pollinations_unauthorized",
+        )
+
+    if response.status_code == 402:
+
+        return (
+            (
+                "Pollinations has no available "
+                "Pollen balance for this request."
+            ),
+            "pollinations_insufficient_balance",
+        )
+
+    if response.status_code == 403:
+
+        return (
+            (
+                "Pollinations denied access to "
+                "the requested generation."
+            ),
+            "pollinations_forbidden",
+        )
+
+    return (
+        "Pollinations image generation failed.",
+        "pollinations_provider_error",
+    )
+
+
+# =========================================================
+# POLLINATIONS IMAGE BYTES
+# =========================================================
+
+
+def _request_pollinations_image(
+    *,
     model: str,
     prompt: str,
-    *,
-    has_text: bool,
-    negative_prompt: str | None,
     width: int,
     height: int,
-    steps: int | None,
-    guidance: float | None,
-    seed: int | None,
-):
+    seed: int | None = None,
+    negative_prompt: str | None = None,
+) -> bytes:
 
-    defaults = _model_defaults(
-        model
+    if not POLLINATIONS_API_KEY:
+
+        raise AIClientError(
+            (
+                "POLLINATIONS_API_KEY is not configured."
+            ),
+            provider="pollinations",
+            error_code=(
+                "pollinations_api_key_missing"
+            ),
+        )
+
+    if not POLLINATIONS_API_BASE_URL:
+
+        raise AIClientError(
+            (
+                "POLLINATIONS_API_BASE_URL "
+                "is not configured."
+            ),
+            provider="pollinations",
+            error_code=(
+                "pollinations_url_missing"
+            ),
+        )
+
+    if not model:
+
+        raise AIClientError(
+            (
+                "No Pollinations image model "
+                "is configured."
+            ),
+            provider="pollinations",
+            error_code=(
+                "pollinations_image_model_missing"
+            ),
+        )
+
+    clean_prompt = str(
+        prompt or ""
+    ).strip()
+
+    if not clean_prompt:
+
+        raise AIClientError(
+            "Image prompt is required.",
+            provider="pollinations",
+            error_code="empty_image_prompt",
+        )
+
+    # -----------------------------------------------------
+    # Pollinations GET image endpoint.
+    #
+    # The prompt is part of the URL path.
+    # Other supported controls are query parameters.
+    # -----------------------------------------------------
+
+    encoded_prompt = quote(
+        clean_prompt,
+        safe="",
     )
 
-    provider = _provider_for(
-        model,
-        has_text=has_text,
-    )
-
-    client = _get_inference_client(
-        provider=(
-            provider or None
-        ),
-        timeout=HF_IMAGE_TIMEOUT,
-    )
-
-    final_steps = (
-        steps
-        if steps is not None
-        else defaults["steps"]
-    )
-
-    final_guidance = (
-        guidance
-        if guidance is not None
-        else defaults["guidance"]
+    url = (
+        f"{POLLINATIONS_API_BASE_URL.rstrip('/')}"
+        f"/image/{encoded_prompt}"
     )
 
     params: dict[str, Any] = {
-        "prompt": prompt,
         "model": model,
-        "width": width,
-        "height": height,
+        "width": int(width),
+        "height": int(height),
     }
-
-    if final_steps is not None:
-
-        params[
-            "num_inference_steps"
-        ] = int(
-            final_steps
-        )
-
-    if final_guidance is not None:
-
-        params[
-            "guidance_scale"
-        ] = float(
-            final_guidance
-        )
 
     if seed is not None:
 
         params[
             "seed"
-        ] = int(
-            seed
-        )
+        ] = int(seed)
+
+    # -----------------------------------------------------
+    # Pollinations' current simple image endpoint does not
+    # expose the Hugging Face negative_prompt parameter in
+    # the same way.
+    #
+    # Preserve the user's intent by turning it into an
+    # explicit generation constraint.
+    # -----------------------------------------------------
 
     negative = str(
         negative_prompt or ""
     ).strip()
 
-    if (
-        negative
-        and defaults[
-            "supports_negative"
-        ]
-    ):
+    if negative:
 
         params[
-            "negative_prompt"
-        ] = negative
+            "enhance"
+        ] = "false"
+
+        effective_prompt = (
+            f"{clean_prompt}. "
+            f"Avoid: {negative}"
+        )
+
+        encoded_prompt = quote(
+            effective_prompt,
+            safe="",
+        )
+
+        url = (
+            f"{POLLINATIONS_API_BASE_URL.rstrip('/')}"
+            f"/image/{encoded_prompt}"
+        )
+
+    headers = (
+        get_pollinations_headers()
+    )
+
+    started = time.time()
 
     try:
 
-        return client.text_to_image(
-            **params
+        response = requests.get(
+            url,
+            headers=headers,
+            params=params,
+            timeout=POLLINATIONS_IMAGE_TIMEOUT,
         )
+
+    except requests.Timeout as exc:
+
+        raise AIClientError(
+            "Pollinations image request timed out.",
+            provider="pollinations",
+            error_code="pollinations_timeout",
+        ) from exc
+
+    except requests.ConnectionError as exc:
+
+        raise AIClientError(
+            "Could not connect to Pollinations.",
+            provider="pollinations",
+            error_code="pollinations_connection_error",
+        ) from exc
+
+    except requests.RequestException as exc:
+
+        raise AIClientError(
+            "Pollinations image request failed.",
+            provider="pollinations",
+            error_code="pollinations_request_error",
+        ) from exc
+
+    elapsed = (
+        time.time() - started
+    )
+
+    content_type = (
+        response.headers.get(
+            "Content-Type",
+            "",
+        )
+        .split(";")[0]
+        .strip()
+        .lower()
+    )
+
+    print(
+        "POLLINATIONS IMAGE RESPONSE | "
+        f"model={model} | "
+        f"status={response.status_code} | "
+        f"content_type={content_type or 'unknown'} | "
+        f"bytes={len(response.content)} | "
+        f"size={width}x{height} | "
+        f"time={elapsed:.2f}s"
+    )
+
+    if not response.ok:
+
+        message, error_code = (
+            _extract_pollinations_error(
+                response
+            )
+        )
+
+        raise AIClientError(
+            message,
+            provider="pollinations",
+            status_code=(
+                response.status_code
+            ),
+            error_code=error_code,
+        )
+
+    if not response.content:
+
+        raise AIClientError(
+            "Pollinations returned an empty image.",
+            provider="pollinations",
+            status_code=(
+                response.status_code
+            ),
+            error_code="pollinations_empty_image",
+        )
+
+    if (
+        POLLINATIONS_MAX_IMAGE_BYTES > 0
+        and len(response.content)
+        > POLLINATIONS_MAX_IMAGE_BYTES
+    ):
+
+        raise AIClientError(
+            (
+                "Pollinations returned an image "
+                "larger than the configured limit."
+            ),
+            provider="pollinations",
+            status_code=(
+                response.status_code
+            ),
+            error_code=(
+                "pollinations_image_too_large"
+            ),
+        )
+
+    # -----------------------------------------------------
+    # The simple endpoint returns raster image bytes for
+    # the flux model. Validate that the bytes really form
+    # an image before handing them to the application.
+    # -----------------------------------------------------
+
+    try:
+
+        from PIL import Image
+
+    except ImportError as exc:
+
+        raise AIClientError(
+            "Pillow is not installed.",
+            provider="pollinations",
+            error_code="pillow_missing",
+        ) from exc
+
+    try:
+
+        with Image.open(
+            io.BytesIO(
+                response.content
+            )
+        ) as image:
+
+            image.verify()
 
     except Exception as exc:
 
-        if not _is_parameter_error(
-            exc
-        ):
-            raise
+        # Sometimes providers can return an error document
+        # despite a successful HTTP status.
+        #
+        # Keep the raw provider body out of logs because
+        # it may contain unexpected request information.
 
-        print(
-            "HF image retry with basic parameters | "
-            f"model={model} | "
-            f"provider={provider or 'auto'} | "
-            f"status={_status_code(exc)}"
-        )
+        raise AIClientError(
+            (
+                "Pollinations returned data that "
+                "could not be decoded as an image."
+            ),
+            provider="pollinations",
+            status_code=(
+                response.status_code
+            ),
+            error_code=(
+                "pollinations_invalid_image"
+            ),
+        ) from exc
 
-        return client.text_to_image(
-            prompt=prompt,
+    return response.content
+
+
+# =========================================================
+# POLLINATIONS ONE IMAGE ATTEMPT
+# =========================================================
+
+
+def _pollinations_image_once(
+    *,
+    model: str,
+    prompt: str,
+    negative_prompt: str | None,
+    width: int,
+    height: int,
+    seed: int | None,
+) -> Any:
+
+    image_bytes = (
+        _request_pollinations_image(
             model=model,
+            prompt=prompt,
             width=width,
             height=height,
+            seed=seed,
+            negative_prompt=negative_prompt,
         )
+    )
+
+    try:
+
+        from PIL import Image
+
+    except ImportError as exc:
+
+        raise AIClientError(
+            "Pillow is not installed.",
+            provider="pollinations",
+            error_code="pillow_missing",
+        ) from exc
+
+    try:
+
+        image = Image.open(
+            io.BytesIO(
+                image_bytes
+            )
+        )
+
+        # -------------------------------------------------
+        # Detach the image from the response BytesIO so
+        # the returned object remains usable by callers.
+        # -------------------------------------------------
+
+        image.load()
+
+        return image.copy()
+
+    except Exception as exc:
+
+        raise AIClientError(
+            (
+                "Could not decode the "
+                "Pollinations image."
+            ),
+            provider="pollinations",
+            error_code="pollinations_image_decode_failed",
+        ) from exc
 
 
 # =========================================================
@@ -2336,6 +2921,22 @@ def generate_hf_image(
     guidance_scale: float | None = None,
     seed: int | None = None,
 ):
+    """
+    Backward-compatible image-generation entry point.
+
+    IMPORTANT:
+
+        This function name is retained because the existing
+        RevelaAI application imports generate_hf_image().
+
+        It NO LONGER calls Hugging Face.
+
+        It routes to Pollinations.
+    """
+
+    del has_text
+    del num_inference_steps
+    del guidance_scale
 
     prompt = str(
         prompt or ""
@@ -2345,38 +2946,23 @@ def generate_hf_image(
 
         raise AIClientError(
             "Image prompt is required.",
-            provider="huggingface",
+            provider="pollinations",
             error_code="empty_image_prompt",
         )
 
-    explicit_model = str(
-        model or ""
-    ).strip()
-
-    if explicit_model:
-
-        primary = explicit_model
-
-    elif (
-        has_text
-        and HF_IMAGE_TEXT_MODEL
-    ):
-
-        primary = (
-            HF_IMAGE_TEXT_MODEL
+    selected_model = (
+        _normalize_pollinations_image_model(
+            model
         )
+        if model
+        else POLLINATIONS_IMAGE_MODEL
+    )
 
-    else:
-
-        primary = (
-            HF_IMAGE_MODEL
-        )
-
-    if not primary:
+    if not selected_model:
 
         raise AIClientError(
-            "No Hugging Face image model is configured.",
-            provider="huggingface",
+            "No Pollinations image model is configured.",
+            provider="pollinations",
             error_code="image_model_missing",
         )
 
@@ -2390,24 +2976,39 @@ def generate_hf_image(
 
     candidates: list[str] = []
 
-    for candidate in (
-        primary,
-        HF_IMAGE_FALLBACK_MODEL,
-        HF_IMAGE_MODEL,
+    # -----------------------------------------------------
+    # Primary model.
+    # -----------------------------------------------------
+
+    if selected_model:
+
+        candidates.append(
+            selected_model
+        )
+
+    # -----------------------------------------------------
+    # Explicitly configured fallback only.
+    #
+    # No default fallback is provided so free/budget
+    # usage cannot silently become additional paid usage.
+    # -----------------------------------------------------
+
+    fallback_model = (
+        _normalize_pollinations_image_model(
+            POLLINATIONS_IMAGE_FALLBACK_MODEL
+        )
+        if POLLINATIONS_IMAGE_FALLBACK_MODEL
+        else ""
+    )
+
+    if (
+        fallback_model
+        and fallback_model not in candidates
     ):
 
-        candidate = str(
-            candidate or ""
-        ).strip()
-
-        if (
-            candidate
-            and candidate not in candidates
-        ):
-
-            candidates.append(
-                candidate
-            )
+        candidates.append(
+            fallback_model
+        )
 
     last_error: Exception | None = None
 
@@ -2417,41 +3018,62 @@ def generate_hf_image(
 
         provider = _provider_for(
             candidate,
-            has_text=has_text,
+            has_text=False,
         )
 
         try:
 
             image = (
-                _text_to_image_once(
-                    candidate,
-                    prompt,
-                    has_text=has_text,
+                _pollinations_image_once(
+                    model=candidate,
+                    prompt=prompt,
                     negative_prompt=(
                         negative_prompt
                     ),
                     width=width,
                     height=height,
-                    steps=(
-                        num_inference_steps
-                    ),
-                    guidance=(
-                        guidance_scale
-                    ),
                     seed=seed,
                 )
             )
+
+        except AIClientError as exc:
+
+            last_error = exc
+
+            print(
+                "POLLINATIONS IMAGE FAILED | "
+                f"model={candidate} | "
+                f"provider={provider} | "
+                f"status={exc.status_code} | "
+                f"error_code={exc.error_code} | "
+                f"time={time.time() - started:.2f}s"
+            )
+
+            # -------------------------------------------------
+            # Do not blindly repeat a request for auth/billing
+            # failures. Those conditions will not be repaired
+            # by retrying another model.
+            # -------------------------------------------------
+
+            if exc.status_code in {
+                401,
+                402,
+                403,
+            }:
+
+                break
+
+            continue
 
         except Exception as exc:
 
             last_error = exc
 
             print(
-                "HF image generation failed | "
+                "POLLINATIONS IMAGE FAILED | "
                 f"model={candidate} | "
-                f"provider={provider or 'auto'} | "
+                f"provider={provider} | "
                 f"error={type(exc).__name__} | "
-                f"status={_status_code(exc)} | "
                 f"time={time.time() - started:.2f}s"
             )
 
@@ -2459,28 +3081,34 @@ def generate_hf_image(
 
         if image is None:
 
-            print(
-                "HF image generation returned nothing | "
-                f"model={candidate} | "
-                f"provider={provider or 'auto'}"
+            last_error = AIClientError(
+                "Pollinations returned no image.",
+                provider="pollinations",
+                error_code="pollinations_empty_image",
             )
 
             continue
 
         print(
-            "HF image generation succeeded | "
+            "POLLINATIONS IMAGE SUCCESS | "
             f"model={candidate} | "
-            f"provider={provider or 'auto'} | "
-            f"has_text={has_text} | "
+            f"provider={provider} | "
             f"size={width}x{height} | "
             f"time={time.time() - started:.2f}s"
         )
 
         return image
 
+    if isinstance(
+        last_error,
+        AIClientError,
+    ):
+
+        raise last_error
+
     raise AIClientError(
-        "Hugging Face image generation failed.",
-        provider="huggingface",
+        "Pollinations image generation failed.",
+        provider="pollinations",
         error_code="image_generation_failed",
     ) from last_error
 
@@ -2494,6 +3122,12 @@ def generate_image(
     prompt: str,
     **kwargs: Any,
 ):
+    """
+    Generic image-generation alias.
+
+    Routes to Pollinations.
+    """
+
     return generate_hf_image(
         prompt=prompt,
         **kwargs,
@@ -2948,395 +3582,7 @@ def generate_hf_speech(
 
 
 # =========================================================
-# MAIN REVELAAI TEXT CLIENT
-# =========================================================
-
-
-def ask_hf(
-    text: str,
-    system_prompt: str = "",
-    session_id: str | None = None,
-    context: list[dict[str, Any]] | None = None,
-) -> dict:
-    """
-    Backward-compatible main text-generation entry point.
-
-    IMPORTANT:
-
-        The function is still called ask_hf() because the
-        existing RevelaAI application may import it.
-
-        It no longer means "Hugging Face only".
-
-    Default provider:
-
-        Gemini
-
-    Default model:
-
-        gemini-3.8-flash
-
-    Fallback:
-
-        gemini-3.5-flash-lite
-    """
-
-    if not str(
-        text or ""
-    ).strip():
-
-        return {
-            "success": False,
-            "response": "",
-            "error": "message is required",
-            "error_code": "empty_message",
-            "provider": "revelaai",
-            "session_id": session_id,
-        }
-
-    provider_errors: list[
-        dict[str, Any]
-    ] = []
-
-    for provider in TEXT_PROVIDER_ORDER:
-
-        provider = (
-            str(
-                provider or ""
-            )
-            .strip()
-            .lower()
-        )
-
-        # =====================================================
-        # GEMINI
-        # =====================================================
-
-        if provider in {
-            "gemini",
-            "google",
-            "google-ai",
-            "googleai",
-        }:
-
-            if not _provider_enabled(
-                "gemini"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "gemini",
-                        "error": (
-                            "Gemini text provider "
-                            "is not configured."
-                        ),
-                        "error_code": (
-                            "gemini_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _ask_gemini_text(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    session_id=(
-                        session_id
-                    ),
-                    context=context,
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=gemini | "
-                    f"model={result.get('model')} | "
-                    f"fallback={result.get('fallback_used')} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=gemini | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "gemini",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "gemini_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
-
-        # =====================================================
-        # MVI
-        # =====================================================
-
-        if provider in {
-            "mvi",
-            "mvi-ai",
-            "mvi_ai",
-        }:
-
-            if not _provider_enabled(
-                "mvi"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": (
-                            "MVI provider "
-                            "is not configured."
-                        ),
-                        "error_code": (
-                            "mvi_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _request_mvi(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    context=context,
-                    session_id=(
-                        session_id
-                    ),
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=mvi | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=mvi | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "mvi_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
-
-        # =====================================================
-        # HUGGING FACE
-        # =====================================================
-
-        if provider in {
-            "huggingface",
-            "hf",
-        }:
-
-            if not _provider_enabled(
-                "huggingface"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "huggingface",
-                        "error": (
-                            "Hugging Face text "
-                            "provider is not configured."
-                        ),
-                        "error_code": (
-                            "hf_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _ask_hf_text(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    session_id=(
-                        session_id
-                    ),
-                    context=context,
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=huggingface | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=huggingface | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "huggingface",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "hf_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
-
-        # =====================================================
-        # UNKNOWN PROVIDER
-        # =====================================================
-
-        print(
-            "TEXT PROVIDER UNKNOWN | "
-            f"provider={provider}"
-        )
-
-        provider_errors.append(
-            {
-                "provider": provider,
-                "error": (
-                    "Unknown text provider."
-                ),
-                "error_code": (
-                    "unknown_text_provider"
-                ),
-            }
-        )
-
-    # =========================================================
-    # TOTAL FAILURE
-    # =========================================================
-
-    if provider_errors:
-
-        last = provider_errors[-1]
-
-        return {
-            "success": False,
-            "response": "",
-            "error": (
-                last.get(
-                    "error"
-                )
-                or "No text provider is available."
-            ),
-            "error_code": (
-                last.get(
-                    "error_code"
-                )
-                or "text_generation_failed"
-            ),
-            "provider": (
-                last.get(
-                    "provider"
-                )
-                or "revelaai"
-            ),
-            "providers_attempted": [
-                item.get(
-                    "provider"
-                )
-                for item in provider_errors
-            ],
-            "provider_errors": (
-                provider_errors
-            ),
-            "session_id": session_id,
-        }
-
-    return {
-        "success": False,
-        "response": "",
-        "error": (
-            "No text provider is available."
-        ),
-        "error_code": (
-            "no_text_provider"
-        ),
-        "provider": "revelaai",
-        "session_id": session_id,
-    }
-
-
-# =========================================================
-# HF TEXT PROVIDER
+# HF TEXT RESPONSE EXTRACTION
 # =========================================================
 
 
@@ -3416,6 +3662,7 @@ def _extract_hf_response(
                 )
 
                 if part_text:
+
                     parts.append(
                         str(
                             part_text
@@ -3445,6 +3692,11 @@ def _extract_hf_response(
         )
 
     return content
+
+
+# =========================================================
+# HF PROVIDER ERROR EXTRACTION
+# =========================================================
 
 
 def _extract_provider_error(
@@ -3500,20 +3752,14 @@ def _extract_provider_error(
             )
 
             return (
-                str(
-                    message
-                ),
-                str(
-                    code
-                ),
+                str(message),
+                str(code),
             )
 
         if error:
 
             return (
-                str(
-                    error
-                ),
+                str(error),
                 "provider_error",
             )
 
@@ -3524,9 +3770,7 @@ def _extract_provider_error(
         if message:
 
             return (
-                str(
-                    message
-                ),
+                str(message),
                 "provider_error",
             )
 
@@ -3534,6 +3778,11 @@ def _extract_provider_error(
         "Hugging Face request failed.",
         "provider_error",
     )
+
+
+# =========================================================
+# HF TEXT REQUEST
+# =========================================================
 
 
 def _request_hf(
@@ -3655,6 +3904,11 @@ def _request_hf(
     return data
 
 
+# =========================================================
+# HF TEXT PROVIDER
+# =========================================================
+
+
 def _ask_hf_text(
     *,
     text: str,
@@ -3707,9 +3961,7 @@ def _ask_hf_text(
                 candidate
             )
 
-    last_error: AIClientError | None = (
-        None
-    )
+    last_error: AIClientError | None = None
 
     for index, model in enumerate(
         candidates
@@ -3766,6 +4018,377 @@ def _ask_hf_text(
         )
 
     raise last_error
+
+
+# =========================================================
+# MAIN REVELAAI TEXT CLIENT
+# =========================================================
+
+
+def ask_hf(
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+) -> dict:
+
+    """
+    Backward-compatible main text-generation entry point.
+
+    The function name is preserved because existing
+    RevelaAI modules may still import ask_hf().
+
+    Actual provider order is controlled through:
+
+        REVELAAI_TEXT_PROVIDERS
+
+    Recommended production configuration:
+
+        REVELAAI_TEXT_PROVIDERS=gemini
+    """
+
+    if not str(
+        text or ""
+    ).strip():
+
+        return {
+            "success": False,
+            "response": "",
+            "error": "message is required",
+            "error_code": "empty_message",
+            "provider": "revelaai",
+            "session_id": session_id,
+        }
+
+    provider_errors: list[
+        dict[str, Any]
+    ] = []
+
+    for provider in TEXT_PROVIDER_ORDER:
+
+        provider = (
+            str(
+                provider or ""
+            )
+            .strip()
+            .lower()
+        )
+
+        # =====================================================
+        # GEMINI
+        # =====================================================
+
+        if provider in {
+            "gemini",
+            "google",
+            "google-ai",
+            "googleai",
+        }:
+
+            if not _provider_enabled(
+                "gemini"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "gemini",
+                        "error": (
+                            "Gemini text provider "
+                            "is not configured."
+                        ),
+                        "error_code": (
+                            "gemini_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _ask_gemini_text(
+                    text=str(
+                        text
+                    ),
+                    system_prompt=str(
+                        system_prompt
+                        or ""
+                    ),
+                    session_id=session_id,
+                    context=context,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=gemini | "
+                    f"model={result.get('model')} | "
+                    f"fallback={result.get('fallback_used')} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=gemini | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "gemini",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "gemini_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =====================================================
+        # MVI
+        # =====================================================
+
+        if provider in {
+            "mvi",
+            "mvi-ai",
+            "mvi_ai",
+        }:
+
+            if not _provider_enabled(
+                "mvi"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "mvi",
+                        "error": (
+                            "MVI provider "
+                            "is not configured."
+                        ),
+                        "error_code": (
+                            "mvi_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _request_mvi(
+                    text=str(
+                        text
+                    ),
+                    system_prompt=str(
+                        system_prompt
+                        or ""
+                    ),
+                    context=context,
+                    session_id=session_id,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=mvi | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=mvi | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "mvi",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "mvi_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =====================================================
+        # HUGGING FACE
+        # =====================================================
+
+        if provider in {
+            "huggingface",
+            "hf",
+        }:
+
+            if not _provider_enabled(
+                "huggingface"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "huggingface",
+                        "error": (
+                            "Hugging Face text "
+                            "provider is not configured."
+                        ),
+                        "error_code": (
+                            "hf_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = _ask_hf_text(
+                    text=str(
+                        text
+                    ),
+                    system_prompt=str(
+                        system_prompt
+                        or ""
+                    ),
+                    session_id=session_id,
+                    context=context,
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=huggingface | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=huggingface | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "huggingface",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "hf_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =====================================================
+        # UNKNOWN PROVIDER
+        # =====================================================
+
+        print(
+            "TEXT PROVIDER UNKNOWN | "
+            f"provider={provider}"
+        )
+
+        provider_errors.append(
+            {
+                "provider": provider,
+                "error": "Unknown text provider.",
+                "error_code": (
+                    "unknown_text_provider"
+                ),
+            }
+        )
+
+    # =========================================================
+    # TOTAL FAILURE
+    # =========================================================
+
+    if provider_errors:
+
+        last = provider_errors[-1]
+
+        return {
+            "success": False,
+            "response": "",
+            "error": (
+                last.get(
+                    "error"
+                )
+                or "No text provider is available."
+            ),
+            "error_code": (
+                last.get(
+                    "error_code"
+                )
+                or "text_generation_failed"
+            ),
+            "provider": (
+                last.get(
+                    "provider"
+                )
+                or "revelaai"
+            ),
+            "providers_attempted": [
+                item.get(
+                    "provider"
+                )
+                for item in provider_errors
+            ],
+            "provider_errors": (
+                provider_errors
+            ),
+            "session_id": session_id,
+        }
+
+    return {
+        "success": False,
+        "response": "",
+        "error": (
+            "No text provider is available."
+        ),
+        "error_code": "no_text_provider",
+        "provider": "revelaai",
+        "session_id": session_id,
+    }
 
 
 # =========================================================
@@ -3849,16 +4472,31 @@ __all__ = [
     "MVI_API_URL",
     "MVI_ENABLED",
 
+    # Pollinations
+    "POLLINATIONS_API_KEY",
+    "POLLINATIONS_API_BASE_URL",
+    "POLLINATIONS_IMAGE_MODEL",
+    "POLLINATIONS_IMAGE_FALLBACK_MODEL",
+
+    # Legacy image names
+    "HF_IMAGE_MODEL",
+    "HF_IMAGE_TEXT_MODEL",
+    "HF_IMAGE_FALLBACK_MODEL",
+    "HF_IMAGE_PROVIDER",
+
     # Provider routing
     "TEXT_PROVIDER_ORDER",
 
     # Diagnostics
     "hf_configured",
+    "pollinations_configured",
     "get_text_provider_status",
+    "get_image_provider_status",
 
     # Headers
     "get_gemini_headers",
     "get_hf_headers",
+    "get_pollinations_headers",
 
     # Messages
     "build_messages",
@@ -3878,4 +4516,3 @@ __all__ = [
     "transcribe_hf_audio",
     "generate_hf_speech",
 ]
-
