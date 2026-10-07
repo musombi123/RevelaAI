@@ -13,10 +13,15 @@ Architecture:
     v                          v
  Orchestrator              AI Client
     |                          |
-    |                          +--> Hugging Face / GPT-OSS
+    |                          +--> Gemini
+    |                          |      +--> Gemini 3.8 Flash
+    |                          |      +--> Gemini fallback
+    |                          |
     |                          +--> Hugging Face / FLUX
     |                          +--> Hugging Face / Whisper
     |                          +--> Hugging Face / TTS
+    |                          |
+    |                          +--> MVI (optional)
     |
     +--> RevelaCode Backend gateway
     +--> Online research
@@ -41,6 +46,8 @@ Production principles:
     - Image model/provider routing is owned by ai.ai_client.py.
     - Image planning is owned by ai.image_planner.py.
     - Structured designs are rendered through ai.svg_designer.py.
+    - Gemini is the primary text provider.
+    - MVI is optional and is never silently used as a text downgrade.
 """
 
 from __future__ import annotations
@@ -205,6 +212,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from ai.ai_client import (
     generate_hf_image,
     generate_hf_speech,
+    get_text_provider_status,
     hf_configured,
     transcribe_hf_audio,
 )
@@ -333,14 +341,10 @@ MAX_CONTENT_LENGTH = int(
 )
 
 
-# ---------------------------------------------------------
-# Conversation memory
-# ---------------------------------------------------------
-#
-# Keep the browser and backend context windows aligned.
-#
-# The frontend currently sends the last 12 messages.
-#
+# =========================================================
+# CONVERSATION MEMORY
+# =========================================================
+
 MAX_HISTORY = int(
     os.getenv(
         "MAX_HISTORY",
@@ -412,10 +416,10 @@ AUDIO_RETENTION_SECONDS = int(
 REVELAAI_BUILD_ID = (
     os.getenv(
         "REVELAAI_BUILD_ID",
-        "canva-image-v1-memory-v1",
+        "canva-image-v1-memory-v1-gemini-text-v1",
     )
     .strip()
-    or "canva-image-v1-memory-v1"
+    or "canva-image-v1-memory-v1-gemini-text-v1"
 )
 
 
@@ -442,13 +446,6 @@ REVELAAI_ENABLE_HF_TTS = (
 # =========================================================
 # IMAGE ENGINE CONFIGURATION
 # =========================================================
-#
-# The image model/provider/dimensions/inference parameters
-# are owned by ai.ai_client.py.
-#
-# This application layer only exposes the engine identity and
-# does not duplicate model routing defaults.
-#
 
 REVELAAI_IMAGE_ENGINE_VERSION = (
     os.getenv(
@@ -460,9 +457,13 @@ REVELAAI_IMAGE_ENGINE_VERSION = (
 )
 
 
-# Read-only reporting helper. Generation itself remains owned
-# by ai.ai_client.py.
 def configured_image_model() -> str:
+    """
+    Read-only image model reporting helper.
+
+    Actual image routing remains owned by ai.ai_client.py.
+    """
+
     return (
         os.getenv(
             "HF_IMAGE_MODEL",
@@ -471,6 +472,172 @@ def configured_image_model() -> str:
         .strip()
         or "black-forest-labs/FLUX.1-dev"
     )
+
+
+# =========================================================
+# TEXT PROVIDER DIAGNOSTICS
+# =========================================================
+
+def get_revelaai_text_status() -> dict[str, Any]:
+    """
+    Return safe text-provider diagnostics.
+
+    Credentials are never returned.
+    """
+
+    try:
+
+        status = (
+            get_text_provider_status()
+        )
+
+        if not isinstance(
+            status,
+            dict,
+        ):
+
+            return {
+                "provider_order": [],
+                "providers": {},
+            }
+
+        return status
+
+    except Exception as exc:
+
+        app.logger.warning(
+            "Could not resolve text provider status | error=%s",
+            exc,
+        )
+
+        return {
+            "provider_order": [],
+            "providers": {},
+        }
+
+
+def get_active_text_provider() -> str:
+    """
+    Resolve the first configured/enabled text provider.
+    """
+
+    status = (
+        get_revelaai_text_status()
+    )
+
+    provider_order = (
+        status.get(
+            "provider_order",
+            [],
+        )
+    )
+
+    providers = (
+        status.get(
+            "providers",
+            {},
+        )
+    )
+
+    if not isinstance(
+        provider_order,
+        list,
+    ):
+        provider_order = []
+
+    if not isinstance(
+        providers,
+        dict,
+    ):
+        providers = {}
+
+    for provider in provider_order:
+
+        provider_name = str(
+            provider or ""
+        ).strip().lower()
+
+        info = providers.get(
+            provider_name,
+            {},
+        )
+
+        if not isinstance(
+            info,
+            dict,
+        ):
+            continue
+
+        if info.get(
+            "enabled",
+            False,
+        ):
+            return provider_name
+
+    return "none"
+
+
+def get_active_text_model() -> str | None:
+    """
+    Resolve the primary configured model for the active
+    provider without exposing credentials.
+    """
+
+    status = (
+        get_revelaai_text_status()
+    )
+
+    active_provider = (
+        get_active_text_provider()
+    )
+
+    providers = (
+        status.get(
+            "providers",
+            {},
+        )
+    )
+
+    if not isinstance(
+        providers,
+        dict,
+    ):
+        return None
+
+    info = providers.get(
+        active_provider,
+        {},
+    )
+
+    if not isinstance(
+        info,
+        dict,
+    ):
+        return None
+
+    primary_model = (
+        info.get(
+            "primary_model"
+        )
+    )
+
+    if primary_model:
+        return str(
+            primary_model
+        )
+
+    model = (
+        info.get(
+            "model"
+        )
+    )
+
+    if model:
+        return str(
+            model
+        )
+
+    return None
 
 
 # =========================================================
@@ -512,10 +679,6 @@ app.config.update({
 # =========================================================
 # PROXY SUPPORT
 # =========================================================
-
-# Render sits behind a proxy/load balancer.
-# ProxyFix allows request.host_url and scheme information
-# to correctly reflect the public HTTPS URL.
 
 app.wsgi_app = ProxyFix(
     app.wsgi_app,
@@ -715,8 +878,7 @@ def handle_unexpected_error(
     """
     Production catch-all.
 
-    The complete exception is logged server-side.
-    Clients receive a safe message rather than a traceback.
+    Complete exception details are logged server-side.
     """
 
     app.logger.exception(
@@ -759,9 +921,6 @@ SESSION_LOCK = Lock()
 
 
 def _prune_session_memory() -> None:
-    """
-    Remove expired sessions and enforce the maximum count.
-    """
 
     now = time.time()
 
@@ -804,18 +963,6 @@ def _prune_session_memory() -> None:
 
 
 def get_session_id() -> str:
-    """
-    Resolve the conversation identifier.
-
-    Preferred:
-        X-Session-ID
-
-    Fallback:
-        secure browser cookie
-
-    Final fallback:
-        short-lived generated ID
-    """
 
     header_id = (
         request.headers.get(
@@ -861,9 +1008,6 @@ def get_session_id() -> str:
 def get_session(
     session_id: str,
 ) -> dict[str, Any]:
-    """
-    Retrieve or initialize bounded session state.
-    """
 
     with SESSION_LOCK:
 
@@ -938,26 +1082,6 @@ def save_session(
 def normalize_client_context(
     raw_context: Any,
 ) -> list[dict[str, str]]:
-    """
-    Normalize conversation context supplied by the frontend.
-
-    Supported structured input:
-
-        [
-            {"role": "user", "content": "..."},
-            {"role": "assistant", "content": "..."}
-        ]
-
-    Backward compatibility is also supported for the older
-    frontend format:
-
-        User: ...
-        Assistant: ...
-    """
-
-    # -----------------------------------------------------
-    # STRUCTURED CONTEXT
-    # -----------------------------------------------------
 
     if isinstance(
         raw_context,
@@ -1010,10 +1134,6 @@ def normalize_client_context(
         return normalized[
             -MAX_HISTORY:
         ]
-
-    # -----------------------------------------------------
-    # LEGACY TEXT CONTEXT
-    # -----------------------------------------------------
 
     if isinstance(
         raw_context,
@@ -1084,10 +1204,6 @@ def normalize_client_context(
 def build_server_context(
     session: dict[str, Any],
 ) -> list[dict[str, str]]:
-    """
-    Build normalized conversation context from the server
-    session.
-    """
 
     messages = (
         session.get(
@@ -1158,18 +1274,6 @@ def resolve_conversation_context(
     list[dict[str, str]],
     str,
 ]:
-    """
-    Resolve the best available conversation memory.
-
-    Priority:
-
-        1. Client/browser context
-        2. Server session context
-
-    When client context exists, it is also used to
-    rehydrate the server-side session so conversation
-    continuity survives ordinary server-session loss.
-    """
 
     normalized_client = (
         normalize_client_context(
@@ -1214,11 +1318,6 @@ def resolve_conversation_context(
 def set_session_cookie(
     response,
 ):
-    """
-    Set a session cookie for same-origin deployments.
-
-    The frontend can also explicitly use X-Session-ID.
-    """
 
     session_id = getattr(
         g,
@@ -1257,12 +1356,10 @@ DEFAULT_IMAGE_DIR = os.path.join(
     "revelaai_images",
 )
 
-
 DEFAULT_AUDIO_DIR = os.path.join(
     tempfile.gettempdir(),
     "revelaai_audio",
 )
-
 
 IMAGE_DIR = (
     os.getenv(
@@ -1272,7 +1369,6 @@ IMAGE_DIR = (
     or DEFAULT_IMAGE_DIR
 )
 
-
 AUDIO_DIR = (
     os.getenv(
         "REVELAAI_AUDIO_DIR",
@@ -1281,12 +1377,10 @@ AUDIO_DIR = (
     or DEFAULT_AUDIO_DIR
 )
 
-
 os.makedirs(
     IMAGE_DIR,
     exist_ok=True,
 )
-
 
 os.makedirs(
     AUDIO_DIR,
@@ -1299,12 +1393,6 @@ os.makedirs(
 # =========================================================
 
 def cleanup_generated_files() -> None:
-    """
-    Remove old generated image/audio files.
-
-    Render's normal filesystem is temporary, so this is
-    intentionally lightweight.
-    """
 
     now = time.time()
 
@@ -1368,12 +1456,6 @@ FEATURES_DIR = (
 
 
 def load_features():
-    """
-    Dynamically load optional generated feature classes.
-
-    Failed optional features do not prevent the API from
-    starting.
-    """
 
     features = {}
 
@@ -1447,12 +1529,6 @@ FEATURES = load_features()
 def process_uploaded_document(
     file_storage,
 ) -> tuple[str, dict[str, Any]]:
-    """
-    Process supported uploaded documents.
-
-    Returns:
-        message_text, metadata
-    """
 
     if file_storage is None:
 
@@ -1746,10 +1822,6 @@ def process_uploaded_document(
             },
         )
 
-    # -----------------------------------------------------
-    # Unsupported
-    # -----------------------------------------------------
-
     raise ValueError(
         (
             "Unsupported file type. "
@@ -1810,7 +1882,6 @@ IMAGE_INTENT_PHRASES = {
     "generate a graphic",
 }
 
-
 IMAGE_DESIGN_RE = re.compile(
     r"\b(?:create|make|design|generate|draw|produce)"
     r"\s+(?:me\s+)?(?:a|an)?\s*"
@@ -1824,13 +1895,6 @@ IMAGE_DESIGN_RE = re.compile(
 def is_image_generation_request(
     message: str,
 ) -> bool:
-    """
-    Determine whether the user's request explicitly asks
-    for image/design generation.
-
-    Runs before the general intent router so GPT-OSS cannot
-    accidentally treat a visual request as a normal question.
-    """
 
     lowered = (
         str(
@@ -1863,7 +1927,6 @@ def _optional_int(
     value: Any,
     label: str,
 ) -> int | None:
-    """Parse an optional integer, allowing blank form values."""
 
     if value is None:
         return None
@@ -1895,31 +1958,6 @@ def _optional_int(
 def parse_image_options(
     source: Any,
 ) -> dict[str, Any]:
-    """
-    Read optional Canva-style image controls.
-
-    Supported:
-        aspect_ratio
-        width
-        height
-        seed
-
-    Examples:
-
-        {
-            "aspect_ratio": "square"
-        }
-
-        {
-            "aspect_ratio": "story",
-            "seed": 42
-        }
-
-        {
-            "width": 1280,
-            "height": 720
-        }
-    """
 
     if not isinstance(
         source,
@@ -1929,10 +1967,6 @@ def parse_image_options(
         return {}
 
     options: dict[str, Any] = {}
-
-    # -----------------------------------------------------
-    # Aspect ratio
-    # -----------------------------------------------------
 
     aspect_ratio = (
         source.get(
@@ -1953,10 +1987,6 @@ def parse_image_options(
         options[
             "aspect_ratio"
         ] = aspect_ratio
-
-    # -----------------------------------------------------
-    # Width / height / seed
-    # -----------------------------------------------------
 
     width = _optional_int(
         source.get(
@@ -2004,7 +2034,6 @@ def parse_image_options(
 def _save_svg_asset(
     svg: str,
 ) -> tuple[str, str]:
-    """Save validated SVG and return filename/path."""
 
     filename = (
         "revelaai_"
@@ -2035,7 +2064,6 @@ def _save_svg_asset(
 def _save_raster_asset(
     image: Any,
 ) -> tuple[str, str]:
-    """Save a PIL-compatible image and return filename/path."""
 
     filename = (
         "revelaai_"
@@ -2063,22 +2091,6 @@ def generate_image_asset(
     *,
     image_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """
-    Generate and persist one visual asset.
-
-    Returns:
-        {
-            filename,
-            filepath,
-            image_url,
-            asset_type,
-            image_plan,
-        }
-
-    Raises:
-        ValueError / RuntimeError / provider exceptions
-        which are handled by the calling route.
-    """
 
     options = (
         image_options
@@ -2089,17 +2101,9 @@ def generate_image_asset(
         else {}
     )
 
-    # -----------------------------------------------------
-    # Plan
-    # -----------------------------------------------------
-
     image_plan = build_image_prompt(
         message
     )
-
-    # -----------------------------------------------------
-    # Overrides
-    # -----------------------------------------------------
 
     requested_aspect_ratio = (
         options.get(
@@ -2148,10 +2152,6 @@ def generate_image_asset(
         )
     )
 
-    # -----------------------------------------------------
-    # Log
-    # -----------------------------------------------------
-
     app.logger.info(
         "IMAGE PROMPT PLANNED | "
         "request_id=%s | kind=%s | engine=%s | "
@@ -2182,10 +2182,6 @@ def generate_image_asset(
         height,
     )
 
-    # =====================================================
-    # STRUCTURED SVG
-    # =====================================================
-
     if image_plan.get(
         "engine"
     ) == "svg":
@@ -2204,10 +2200,6 @@ def generate_image_asset(
         )
 
         asset_type = "svg"
-
-    # =====================================================
-    # RASTER IMAGE
-    # =====================================================
 
     else:
 
@@ -2242,10 +2234,6 @@ def generate_image_asset(
         )
 
         asset_type = "png"
-
-    # -----------------------------------------------------
-    # Public URL
-    # -----------------------------------------------------
 
     image_url = (
         request.host_url.rstrip("/")
@@ -2284,7 +2272,7 @@ def generate_image_asset(
 
 
 # =========================================================
-# IMAGE RESPONSE HELPER
+# IMAGE RESPONSE
 # =========================================================
 
 def generate_image_response(
@@ -2292,10 +2280,6 @@ def generate_image_response(
     *,
     image_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """
-    Generate a Canva-style image asset and return the
-    canonical RevelaAI JSON response.
-    """
 
     app.logger.info(
         "IMAGE GENERATION BRANCH | "
@@ -2566,6 +2550,8 @@ def root():
         "app": APP_NAME,
         "environment": ENVIRONMENT,
         "build_id": REVELAAI_BUILD_ID,
+        "text_provider": get_active_text_provider(),
+        "text_model": get_active_text_model(),
         "message": (
             "RevelaAI is live."
         ),
@@ -2620,24 +2606,77 @@ def capabilities():
 
         pdf_available = False
 
+    text_status = (
+        get_revelaai_text_status()
+    )
+
+    active_text_provider = (
+        get_active_text_provider()
+    )
+
+    active_text_model = (
+        get_active_text_model()
+    )
+
     return jsonify({
         "status": "success",
         "service": "revelaai",
         "build_id": REVELAAI_BUILD_ID,
 
         "capabilities": {
+
+            # =================================================
+            # TEXT
+            # =================================================
+
             "text": {
-                "enabled": True,
-                "provider": "huggingface",
-                "model": os.getenv(
-                    "HF_MODEL",
-                    "openai/gpt-oss-120b:cheapest",
+                "enabled": (
+                    active_text_provider
+                    != "none"
                 ),
+                "provider": (
+                    active_text_provider
+                ),
+                "model": active_text_model,
+                "fallback_available": bool(
+                    isinstance(
+                        text_status.get(
+                            "providers",
+                            {}
+                        ),
+                        dict,
+                    )
+                    and isinstance(
+                        text_status.get(
+                            "providers",
+                            {},
+                        ).get(
+                            "gemini",
+                            {}
+                        ),
+                        dict,
+                    )
+                    and text_status.get(
+                        "providers",
+                        {},
+                    ).get(
+                        "gemini",
+                        {},
+                    ).get(
+                        "fallback_model",
+                    )
+                ),
+                "providers": text_status,
             },
+
+            # =================================================
+            # IMAGE
+            # =================================================
 
             "image_generation": {
                 "enabled": bool(
                     hf_configured()
+                    or configured_image_model()
                 ),
                 "provider": "huggingface",
                 "routing": {
@@ -2669,17 +2708,29 @@ def capabilities():
                 },
             },
 
+            # =================================================
+            # RESEARCH
+            # =================================================
+
             "online_research": {
                 "enabled": True,
                 "available": online_available,
                 "provider": "services.scraper",
             },
 
+            # =================================================
+            # PDF
+            # =================================================
+
             "pdf": {
                 "enabled": True,
                 "available": pdf_available,
                 "processor": "PyMuPDF",
             },
+
+            # =================================================
+            # VOICE
+            # =================================================
 
             "voice": {
                 "enabled": bool(
@@ -2694,12 +2745,27 @@ def capabilities():
                     "HF_TTS_MODEL",
                     "hexgrad/Kokoro-82M",
                 ),
-                "tts_enabled": REVELAAI_ENABLE_HF_TTS,
+                "tts_enabled": (
+                    REVELAAI_ENABLE_HF_TTS
+                ),
             },
+
+            # =================================================
+            # ECOSYSTEM
+            # =================================================
 
             "ecosystem": {
                 "enabled": True,
                 "provider": "RevelaCode Backend",
+                "gateway": "services.ai_service",
+                "user_identity": "RevelaCode JWT",
+                "domains": [
+                    "theology",
+                    "elimu",
+                    "shamba",
+                    "biashara",
+                    "community",
+                ],
             },
         },
     })
@@ -2750,10 +2816,6 @@ def ai_assistant():
         )
 
         if uploaded:
-
-            # -------------------------------------------------
-            # MULTIPART REQUEST
-            # -------------------------------------------------
 
             raw_client_context = (
                 request.form.get(
@@ -2817,10 +2879,6 @@ def ai_assistant():
                 ), 502
 
         else:
-
-            # -------------------------------------------------
-            # JSON REQUEST
-            # -------------------------------------------------
 
             payload = (
                 request.get_json(
@@ -2935,14 +2993,6 @@ def ai_assistant():
             message.lower()
         )
 
-        # -------------------------------------------------
-        # CONVERSATION CONTINUITY
-        # -------------------------------------------------
-        #
-        # Intent is the CURRENT request.
-        # Intent is NOT the conversation identity.
-        # -------------------------------------------------
-
         session[
             "topic"
         ] = intent
@@ -2959,10 +3009,6 @@ def ai_assistant():
                     image_options=image_options,
                 )
             )
-
-            # -------------------------------------------------
-            # SAVE IMAGE CONVERSATION
-            # -------------------------------------------------
 
             session[
                 "messages"
@@ -3044,6 +3090,21 @@ def ai_assistant():
         # -------------------------------------------------
         # CENTRAL REVELAAI PIPELINE
         # -------------------------------------------------
+        #
+        # IMPORTANT:
+        #
+        # process_message() remains the central gateway.
+        # It receives:
+        #
+        #   message
+        #   conversation context
+        #   intent
+        #   session_id
+        #   authenticated user_id
+        #
+        # The provider swap therefore does not remove
+        # RevelaCode ecosystem intelligence.
+        #
 
         ai_result = process_message(
             message=message,
@@ -3150,7 +3211,7 @@ def ai_assistant():
 
             "provider": ai_result.get(
                 "provider",
-                "huggingface",
+                get_active_text_provider(),
             ),
 
             "memory": {
@@ -3209,6 +3270,18 @@ def ai_assistant():
             "agriculture": (
                 orchestrator_data.get(
                     "agriculture",
+                    {},
+                )
+                if isinstance(
+                    orchestrator_data,
+                    dict,
+                )
+                else {}
+            ),
+
+            "ecosystem": (
+                orchestrator_data.get(
+                    "ecosystem",
                     {},
                 )
                 if isinstance(
@@ -3419,10 +3492,6 @@ def ai_stream():
         session_id
     )
 
-    # -----------------------------------------------------
-    # CONVERSATION MEMORY
-    # -----------------------------------------------------
-
     raw_client_context = (
         payload.get(
             "context",
@@ -3454,10 +3523,6 @@ def ai_stream():
         ),
     )
 
-    # -----------------------------------------------------
-    # INTENT
-    # -----------------------------------------------------
-
     intent = classify_intent(
         message
     )
@@ -3476,7 +3541,8 @@ def ai_stream():
 
     app.logger.info(
         "STREAM ROUTING | "
-        "request_id=%s | image=%s | intent=%s | build=%s",
+        "request_id=%s | image=%s | intent=%s | build=%s | "
+        "text_provider=%s | text_model=%s",
         getattr(
             g,
             "request_id",
@@ -3485,6 +3551,8 @@ def ai_stream():
         image_request,
         intent,
         REVELAAI_BUILD_ID,
+        get_active_text_provider(),
+        get_active_text_model(),
     )
 
     session[
@@ -3506,10 +3574,6 @@ def ai_stream():
                     message,
                     image_options=image_options,
                 )
-
-                # -------------------------------------------------
-                # SAVE IMAGE CONVERSATION
-                # -------------------------------------------------
 
                 session[
                     "messages"
@@ -3778,6 +3842,20 @@ def ai_stream():
                     )
                 ),
 
+                "provider": (
+                    ai_result.get(
+                        "provider",
+                        get_active_text_provider(),
+                    )
+                ),
+
+                "model": (
+                    ai_result.get(
+                        "model",
+                        get_active_text_model(),
+                    )
+                ),
+
                 "build_id": REVELAAI_BUILD_ID,
 
                 "memory": {
@@ -3982,10 +4060,6 @@ def voice():
             "build_id": REVELAAI_BUILD_ID,
         }), 400
 
-    # -----------------------------------------------------
-    # NORMAL REVELAAI PIPELINE
-    # -----------------------------------------------------
-
     session_id = (
         get_session_id()
     )
@@ -3997,10 +4071,6 @@ def voice():
     session = get_session(
         session_id
     )
-
-    # -----------------------------------------------------
-    # VOICE CONVERSATION MEMORY
-    # -----------------------------------------------------
 
     previous_context = (
         build_server_context(
@@ -4025,9 +4095,6 @@ def voice():
     intent = classify_intent(
         heard
     )
-
-    # Image requests through voice must also route to the
-    # image planner and visual engine.
 
     if is_image_generation_request(
         heard
@@ -4152,7 +4219,6 @@ def voice():
                             "engine"
                         )
                     ),
-
                     "memory": {
                         "enabled": True,
                         "type": "conversation",
@@ -4308,6 +4374,14 @@ def voice():
                     "domain",
                     "general",
                 ),
+                "provider": ai_result.get(
+                    "provider",
+                    get_active_text_provider(),
+                ),
+                "model": ai_result.get(
+                    "model",
+                    get_active_text_model(),
+                ),
                 "build_id": REVELAAI_BUILD_ID,
 
                 "memory": {
@@ -4366,6 +4440,14 @@ def voice():
                     "domain",
                     "general",
                 ),
+                "provider": ai_result.get(
+                    "provider",
+                    get_active_text_provider(),
+                ),
+                "model": ai_result.get(
+                    "model",
+                    get_active_text_model(),
+                ),
                 "build_id": REVELAAI_BUILD_ID,
 
                 "memory": {
@@ -4404,6 +4486,14 @@ def voice():
                 "domain": ai_result.get(
                     "domain",
                     "general",
+                ),
+                "provider": ai_result.get(
+                    "provider",
+                    get_active_text_provider(),
+                ),
+                "model": ai_result.get(
+                    "model",
+                    get_active_text_model(),
                 ),
                 "build_id": REVELAAI_BUILD_ID,
 
@@ -4492,6 +4582,14 @@ def voice():
                     "domain",
                     "general",
                 ),
+                "provider": ai_result.get(
+                    "provider",
+                    get_active_text_provider(),
+                ),
+                "model": ai_result.get(
+                    "model",
+                    get_active_text_model(),
+                ),
                 "build_id": REVELAAI_BUILD_ID,
 
                 "memory": {
@@ -4548,6 +4646,14 @@ def voice():
             "domain": ai_result.get(
                 "domain",
                 "general",
+            ),
+            "provider": ai_result.get(
+                "provider",
+                get_active_text_provider(),
+            ),
+            "model": ai_result.get(
+                "model",
+                get_active_text_model(),
             ),
             "build_id": REVELAAI_BUILD_ID,
 
@@ -4692,33 +4798,62 @@ def health():
 
         pdf_available = False
 
+    text_status = (
+        get_revelaai_text_status()
+    )
+
+    active_text_provider = (
+        get_active_text_provider()
+    )
+
+    active_text_model = (
+        get_active_text_model()
+    )
+
     return jsonify({
         "status": "ok",
         "service": "revelaai",
-
         "environment": ENVIRONMENT,
 
         "build": {
             "id": REVELAAI_BUILD_ID,
             "image_routing": "ai-client-managed",
-            "image_engine": REVELAAI_IMAGE_ENGINE_VERSION,
-            "conversation_memory": "client-context-plus-session",
+            "image_engine": (
+                REVELAAI_IMAGE_ENGINE_VERSION
+            ),
+            "conversation_memory": (
+                "client-context-plus-session"
+            ),
         },
 
         "providers": {
+
+            # =================================================
+            # TEXT
+            # =================================================
+
             "text": {
-                "provider": "huggingface",
-                "configured": hf_configured(),
-                "model": os.getenv(
-                    "HF_MODEL",
-                    "openai/gpt-oss-120b:cheapest",
+                "provider": (
+                    active_text_provider
                 ),
+                "configured": (
+                    active_text_provider
+                    != "none"
+                ),
+                "model": active_text_model,
+                "status": text_status,
             },
+
+            # =================================================
+            # IMAGE
+            # =================================================
 
             "image": {
                 "provider": "huggingface",
                 "configured": hf_configured(),
-                "primary_model": configured_image_model(),
+                "primary_model": (
+                    configured_image_model()
+                ),
                 "routing": {
                     "owner": "ai_client",
                     "text_aware": True,
@@ -4727,6 +4862,10 @@ def health():
                 },
                 "structured_svg": True,
             },
+
+            # =================================================
+            # VOICE
+            # =================================================
 
             "voice": {
                 "provider": "huggingface",
@@ -4739,7 +4878,9 @@ def health():
                     "HF_TTS_MODEL",
                     "hexgrad/Kokoro-82M",
                 ),
-                "tts_enabled": REVELAAI_ENABLE_HF_TTS,
+                "tts_enabled": (
+                    REVELAAI_ENABLE_HF_TTS
+                ),
             },
         },
 
@@ -4749,6 +4890,21 @@ def health():
 
         "pdf": {
             "available": pdf_available,
+        },
+
+        "ecosystem": {
+            "enabled": True,
+            "gateway": "services.ai_service",
+            "authenticated_user_bridge": (
+                "RevelaCode JWT -> user_id"
+            ),
+            "domains": [
+                "theology",
+                "elimu",
+                "shamba",
+                "biashara",
+                "community",
+            ],
         },
 
         "features_loaded": len(
@@ -4778,7 +4934,36 @@ def health():
 )
 def ready():
 
-    checks: dict[str, bool] = {}
+    text_provider = (
+        get_active_text_provider()
+    )
+
+    text_model = (
+        get_active_text_model()
+    )
+
+    checks: dict[str, Any] = {}
+
+    # -----------------------------------------------------
+    # TEXT
+    # -----------------------------------------------------
+
+    checks[
+        "text_provider"
+    ] = (
+        text_provider
+        != "none"
+    )
+
+    checks[
+        "text_model"
+    ] = bool(
+        text_model
+    )
+
+    # -----------------------------------------------------
+    # HUGGING FACE MULTIMODAL
+    # -----------------------------------------------------
 
     checks[
         "huggingface"
@@ -4789,6 +4974,10 @@ def ready():
     ] = bool(
         configured_image_model()
     )
+
+    # -----------------------------------------------------
+    # ONLINE RESEARCH
+    # -----------------------------------------------------
 
     try:
 
@@ -4814,6 +5003,10 @@ def ready():
             "online_research"
         ] = False
 
+    # -----------------------------------------------------
+    # PDF
+    # -----------------------------------------------------
+
     try:
 
         from ai.pdf_processor import (
@@ -4833,7 +5026,10 @@ def ready():
         ] = False
 
     ready_status = all(
-        checks.values()
+        bool(
+            value
+        )
+        for value in checks.values()
     )
 
     return jsonify({
@@ -4842,8 +5038,16 @@ def ready():
             if ready_status
             else "degraded"
         ),
+
         "service": "revelaai",
+
         "build_id": REVELAAI_BUILD_ID,
+
+        "text": {
+            "provider": text_provider,
+            "model": text_model,
+        },
+
         "checks": checks,
     }), (
         200
@@ -4855,9 +5059,6 @@ def ready():
 # =========================================================
 # BLUEPRINT REGISTRATION
 # =========================================================
-
-# Keep the existing application architecture intact.
-# These blueprints expose the project's established routes.
 
 try:
 
@@ -4948,9 +5149,6 @@ except Exception as exc:
 # =========================================================
 
 if __name__ == "__main__":
-
-    # This block is for local development only.
-    # Render production uses Gunicorn.
 
     app.run(
         host="0.0.0.0",
