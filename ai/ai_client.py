@@ -21,26 +21,55 @@ Architecture
           +------------+-------------+
           |            |             |
           v            v             v
-        MVI AI       HuggingFace   Local/Deterministic
-        Engine        Providers       Fallbacks
+      OpenRouter      MVI         Hugging Face
+       Text AI      Optional      Images/Voice
           |
-          +--> Text intelligence
+          +--> Primary:
+          |      DeepSeek V4.1 Flash
+          |
+          +--> Model fallback:
+                 GLM 5.3 Flash
+
+
+TEXT
+----
+
+Primary text provider:
+    OpenRouter
+
+Primary model:
+    deepseek/deepseek-v4.1-flash
+
+Fallback model:
+    z-ai/glm-5.3-flash
+
+MVI is NOT the default text provider.
+
+MVI remains available through:
+    ask_mvi()
+
+and can optionally be inserted into the provider order
+through:
+
+    REVELAAI_TEXT_PROVIDERS=openrouter,mvi,huggingface
+
+
+HUGGING FACE
+------------
 
 Hugging Face remains available for:
 
-    - Text
     - Images
     - ASR
     - TTS
-
-IMPORTANT
----------
 
 HF_TOKEN must remain server-side.
 
 Never expose HF_TOKEN to the frontend.
 
-Text providers are intentionally configurable.
+
+IMPORTANT
+---------
 
 The previous hard-coded models:
 
@@ -49,9 +78,9 @@ The previous hard-coded models:
 
 are NOT used anymore.
 
-A Hugging Face HTTP 402 response means the provider has no
-available inference credits/subscription and is therefore not
-treated as a useful fallback.
+OpenRouter is used through its OpenAI-compatible HTTP API.
+
+Secrets are never logged.
 
 Existing public APIs are preserved:
 
@@ -86,37 +115,139 @@ load_dotenv()
 # GENERAL CONFIGURATION
 # =========================================================
 
-REQUEST_USER_AGENT = os.getenv(
-    "REVELAAI_USER_AGENT",
-    "RevelaAI/2.0",
-).strip() or "RevelaAI/2.0"
+REQUEST_USER_AGENT = (
+    os.getenv(
+        "REVELAAI_USER_AGENT",
+        "RevelaAI/3.0",
+    ).strip()
+    or "RevelaAI/3.0"
+)
+
+
+# =========================================================
+# OPENROUTER CONFIGURATION
+# =========================================================
+#
+# OpenRouter is the PRIMARY text provider.
+#
+# Current model strategy:
+#
+#     primary  -> DeepSeek V4.1 Flash
+#     fallback -> GLM 5.3 Flash
+#
+# Both are configurable in Render without changing code.
+#
+
+OPENROUTER_API_KEY = (
+    os.getenv(
+        "OPENROUTER_API_KEY",
+        "",
+    ).strip()
+)
+
+OPENROUTER_API_URL = (
+    os.getenv(
+        "OPENROUTER_API_URL",
+        "https://openrouter.ai/api/v1/chat/completions",
+    ).strip()
+)
+
+OPENROUTER_MODEL = (
+    os.getenv(
+        "OPENROUTER_MODEL",
+        "deepseek/deepseek-v4.1-flash",
+    ).strip()
+)
+
+OPENROUTER_FALLBACK_MODEL = (
+    os.getenv(
+        "OPENROUTER_FALLBACK_MODEL",
+        "z-ai/glm-5.3-flash",
+    ).strip()
+)
+
+OPENROUTER_TIMEOUT = float(
+    os.getenv(
+        "OPENROUTER_TIMEOUT",
+        "120",
+    )
+)
+
+OPENROUTER_MAX_TOKENS = int(
+    os.getenv(
+        "OPENROUTER_MAX_TOKENS",
+        "4096",
+    )
+)
+
+OPENROUTER_TEMPERATURE = float(
+    os.getenv(
+        "OPENROUTER_TEMPERATURE",
+        "0.7",
+    )
+)
+
+OPENROUTER_REFERER = (
+    os.getenv(
+        "OPENROUTER_REFERER",
+        "https://revelacode-frontend.onrender.com",
+    ).strip()
+)
+
+OPENROUTER_TITLE = (
+    os.getenv(
+        "OPENROUTER_TITLE",
+        "RevelaAI",
+    ).strip()
+    or "RevelaAI"
+)
+
+OPENROUTER_CATEGORIES = (
+    os.getenv(
+        "OPENROUTER_CATEGORIES",
+        "cloud-agent,coding",
+    ).strip()
+)
+
+OPENROUTER_ENABLED = (
+    os.getenv(
+        "OPENROUTER_ENABLED",
+        "true",
+    ).strip().lower()
+    not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+)
 
 
 # =========================================================
 # MVI AI ENGINE
 # =========================================================
 #
-# MVI is treated as an independent intelligence provider.
+# MVI is now OPTIONAL.
 #
-# Expected architecture:
+# It is intentionally NOT the default text provider.
 #
-#     RevelaAI
-#         |
-#         +--> MVI AI Engine
-#
-# The endpoint can be overridden through Render environment
-# variables without changing this source file.
+# Use ask_mvi() for direct access, or explicitly add MVI
+# to REVELAAI_TEXT_PROVIDERS.
 #
 
-MVI_API_URL = os.getenv(
-    "MVI_API_URL",
-    "https://Musombi-mvi-ai-engine.hf.space/ask",
-).strip()
+MVI_API_URL = (
+    os.getenv(
+        "MVI_API_URL",
+        "https://Musombi-mvi-ai-engine.hf.space/ask",
+    ).strip()
+)
 
-MVI_API_KEY = os.getenv(
-    "MVI_API_KEY",
-    "",
-).strip()
+MVI_API_KEY = (
+    os.getenv(
+        "MVI_API_KEY",
+        "",
+    ).strip()
+)
 
 MVI_TIMEOUT = float(
     os.getenv(
@@ -143,76 +274,74 @@ MVI_ENABLED = (
 # HUGGING FACE CONFIGURATION
 # =========================================================
 
-HF_TOKEN = os.getenv(
-    "HF_TOKEN",
-    "",
-).strip()
+HF_TOKEN = (
+    os.getenv(
+        "HF_TOKEN",
+        "",
+    ).strip()
+)
 
-HF_API_URL = os.getenv(
-    "HF_API_URL",
-    "https://router.huggingface.co/v1/chat/completions",
-).strip()
+HF_API_URL = (
+    os.getenv(
+        "HF_API_URL",
+        "https://router.huggingface.co/v1/chat/completions",
+    ).strip()
+)
+
+# Optional HF text model.
+#
+# We do NOT assign a default model here because the HF
+# account may not have text inference credits configured.
+#
+
+HF_MODEL = (
+    os.getenv(
+        "HF_MODEL",
+        "",
+    ).strip()
+)
+
+HF_FALLBACK_MODEL = (
+    os.getenv(
+        "HF_FALLBACK_MODEL",
+        "",
+    ).strip()
+)
 
 
 # =========================================================
-# TEXT PROVIDER CONFIGURATION
+# TEXT PROVIDER ORDER
 # =========================================================
 #
-# IMPORTANT:
+# Default:
 #
-# There are intentionally NO hard-coded paid/cheapest models
-# here anymore.
+#     openrouter
 #
-# HF_MODEL may be configured in Render when HF text generation
-# is actually available.
+# Optional examples:
 #
-# Example:
+#     openrouter,mvi
 #
-#     HF_MODEL=<your-supported-hf-model>
+#     openrouter,huggingface
 #
-# HF_FALLBACK_MODEL is optional.
+#     openrouter,mvi,huggingface
 #
-
-HF_MODEL = os.getenv(
-    "HF_MODEL",
-    "",
-).strip()
-
-HF_FALLBACK_MODEL = os.getenv(
-    "HF_FALLBACK_MODEL",
-    "",
-).strip()
-
-
-# ---------------------------------------------------------
-# Text provider routing
-# ---------------------------------------------------------
-#
-# Valid:
-#
-#     mvi
-#     huggingface
-#
-# Multiple providers may be supplied:
-#
-#     MVI,HUGGINGFACE
-#
-# The first available provider is attempted first.
+# OpenRouter itself already supports model-level fallback
+# from OPENROUTER_MODEL to OPENROUTER_FALLBACK_MODEL.
 #
 
 TEXT_PROVIDER_ORDER = [
     item.strip().lower()
     for item in os.getenv(
         "REVELAAI_TEXT_PROVIDERS",
-        "mvi,huggingface",
+        "openrouter",
     ).split(",")
     if item.strip()
 ]
 
 if not TEXT_PROVIDER_ORDER:
+
     TEXT_PROVIDER_ORDER = [
-        "mvi",
-        "huggingface",
+        "openrouter",
     ]
 
 
@@ -220,34 +349,40 @@ if not TEXT_PROVIDER_ORDER:
 # IMAGE MODEL CONFIGURATION
 # =========================================================
 
-HF_IMAGE_MODEL = os.getenv(
-    "HF_IMAGE_MODEL",
-    "black-forest-labs/FLUX.1-dev",
-).strip()
+HF_IMAGE_MODEL = (
+    os.getenv(
+        "HF_IMAGE_MODEL",
+        "black-forest-labs/FLUX.1-dev",
+    ).strip()
+)
 
+HF_IMAGE_TEXT_MODEL = (
+    os.getenv(
+        "HF_IMAGE_TEXT_MODEL",
+        "",
+    ).strip()
+)
 
-HF_IMAGE_TEXT_MODEL = os.getenv(
-    "HF_IMAGE_TEXT_MODEL",
-    "",
-).strip()
+HF_IMAGE_FALLBACK_MODEL = (
+    os.getenv(
+        "HF_IMAGE_FALLBACK_MODEL",
+        "black-forest-labs/FLUX.1-schnell",
+    ).strip()
+)
 
+HF_IMAGE_PROVIDER = (
+    os.getenv(
+        "HF_IMAGE_PROVIDER",
+        "",
+    ).strip()
+)
 
-HF_IMAGE_FALLBACK_MODEL = os.getenv(
-    "HF_IMAGE_FALLBACK_MODEL",
-    "black-forest-labs/FLUX.1-schnell",
-).strip()
-
-
-HF_IMAGE_PROVIDER = os.getenv(
-    "HF_IMAGE_PROVIDER",
-    "",
-).strip()
-
-
-HF_IMAGE_TEXT_PROVIDER = os.getenv(
-    "HF_IMAGE_TEXT_PROVIDER",
-    "",
-).strip()
+HF_IMAGE_TEXT_PROVIDER = (
+    os.getenv(
+        "HF_IMAGE_TEXT_PROVIDER",
+        "",
+    ).strip()
+)
 
 
 # =========================================================
@@ -255,52 +390,42 @@ HF_IMAGE_TEXT_PROVIDER = os.getenv(
 # =========================================================
 
 IMAGE_SIZE_PRESETS: dict[str, tuple[int, int]] = {
-
     "square": (
         1024,
         1024,
     ),
-
     "portrait": (
         832,
         1216,
     ),
-
     "landscape": (
         1216,
         832,
     ),
-
     "wide": (
         1536,
         864,
     ),
-
     "story": (
         864,
         1536,
     ),
-
     "banner": (
         1536,
         512,
     ),
-
     "social_portrait": (
         1088,
         1360,
     ),
-
     "social_landscape": (
         1360,
         768,
     ),
-
     "presentation": (
         1280,
         720,
     ),
-
     "phone": (
         768,
         1365,
@@ -331,10 +456,12 @@ HF_IMAGE_DEFAULT_HEIGHT = int(
 # IMAGE DEFAULT STEPS
 # =========================================================
 
-_steps_env = os.getenv(
-    "HF_IMAGE_DEFAULT_STEPS",
-    "",
-).strip()
+_steps_env = (
+    os.getenv(
+        "HF_IMAGE_DEFAULT_STEPS",
+        "",
+    ).strip()
+)
 
 HF_IMAGE_DEFAULT_STEPS = (
     int(_steps_env)
@@ -347,17 +474,19 @@ HF_IMAGE_DEFAULT_STEPS = (
 # VOICE MODEL CONFIGURATION
 # =========================================================
 
-HF_ASR_MODEL = os.getenv(
-    "HF_ASR_MODEL",
-    "openai/whisper-large-v3",
-).strip()
+HF_ASR_MODEL = (
+    os.getenv(
+        "HF_ASR_MODEL",
+        "openai/whisper-large-v3",
+    ).strip()
+)
 
-
-HF_TTS_MODEL = os.getenv(
-    "HF_TTS_MODEL",
-    "hexgrad/Kokoro-82M",
-).strip()
-
+HF_TTS_MODEL = (
+    os.getenv(
+        "HF_TTS_MODEL",
+        "hexgrad/Kokoro-82M",
+    ).strip()
+)
 
 HF_TTS_MIME_TYPE = (
     os.getenv(
@@ -455,7 +584,20 @@ def _provider_enabled(
         provider or ""
     ).strip().lower()
 
+    if provider in {
+        "openrouter",
+        "or",
+    }:
+
+        return bool(
+            OPENROUTER_ENABLED
+            and OPENROUTER_API_KEY
+            and OPENROUTER_API_URL
+            and OPENROUTER_MODEL
+        )
+
     if provider == "mvi":
+
         return bool(
             MVI_ENABLED
             and MVI_API_URL
@@ -465,6 +607,7 @@ def _provider_enabled(
         "huggingface",
         "hf",
     }:
+
         return bool(
             HF_TOKEN
             and HF_MODEL
@@ -482,47 +625,57 @@ def get_text_provider_status() -> dict[str, Any]:
 
     providers: dict[str, Any] = {}
 
-    for provider in (
-        "mvi",
-        "huggingface",
-    ):
+    providers["openrouter"] = {
+        "enabled": bool(
+            OPENROUTER_ENABLED
+            and OPENROUTER_API_KEY
+            and OPENROUTER_API_URL
+            and OPENROUTER_MODEL
+        ),
+        "configured": bool(
+            OPENROUTER_API_KEY
+            and OPENROUTER_API_URL
+            and OPENROUTER_MODEL
+        ),
+        "api_key_configured": bool(
+            OPENROUTER_API_KEY
+        ),
+        "primary_model": OPENROUTER_MODEL,
+        "fallback_model": OPENROUTER_FALLBACK_MODEL,
+    }
 
-        if provider == "mvi":
+    providers["mvi"] = {
+        "enabled": bool(
+            MVI_ENABLED
+            and MVI_API_URL
+        ),
+        "configured": bool(
+            MVI_API_URL
+        ),
+        "url_configured": bool(
+            MVI_API_URL
+        ),
+    }
 
-            providers[provider] = {
-                "enabled": bool(
-                    MVI_ENABLED
-                    and MVI_API_URL
-                ),
-                "configured": bool(
-                    MVI_API_URL
-                ),
-                "url_configured": bool(
-                    MVI_API_URL
-                ),
-            }
-
-        else:
-
-            providers[provider] = {
-                "enabled": bool(
-                    HF_TOKEN
-                    and HF_MODEL
-                ),
-                "configured": bool(
-                    HF_TOKEN
-                    and HF_MODEL
-                ),
-                "token_configured": bool(
-                    HF_TOKEN
-                ),
-                "model_configured": bool(
-                    HF_MODEL
-                ),
-                "fallback_model_configured": bool(
-                    HF_FALLBACK_MODEL
-                ),
-            }
+    providers["huggingface"] = {
+        "enabled": bool(
+            HF_TOKEN
+            and HF_MODEL
+        ),
+        "configured": bool(
+            HF_TOKEN
+            and HF_MODEL
+        ),
+        "token_configured": bool(
+            HF_TOKEN
+        ),
+        "model_configured": bool(
+            HF_MODEL
+        ),
+        "fallback_model_configured": bool(
+            HF_FALLBACK_MODEL
+        ),
+    }
 
     return {
         "provider_order": list(
@@ -545,7 +698,59 @@ def hf_configured() -> bool:
     credits.
     """
 
-    return bool(HF_TOKEN)
+    return bool(
+        HF_TOKEN
+    )
+
+
+# =========================================================
+# OPENROUTER HEADERS
+# =========================================================
+
+
+def get_openrouter_headers() -> dict[str, str]:
+    """
+    Build OpenRouter authorization headers.
+
+    Secrets are intentionally never logged.
+    """
+
+    if not OPENROUTER_API_KEY:
+
+        raise AIClientError(
+            "OPENROUTER_API_KEY is not configured.",
+            provider="openrouter",
+            error_code="openrouter_api_key_missing",
+        )
+
+    headers = {
+        "Authorization": (
+            f"Bearer {OPENROUTER_API_KEY}"
+        ),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": REQUEST_USER_AGENT,
+    }
+
+    if OPENROUTER_REFERER:
+
+        headers[
+            "HTTP-Referer"
+        ] = OPENROUTER_REFERER
+
+    if OPENROUTER_TITLE:
+
+        headers[
+            "X-OpenRouter-Title"
+        ] = OPENROUTER_TITLE
+
+    if OPENROUTER_CATEGORIES:
+
+        headers[
+            "X-OpenRouter-Categories"
+        ] = OPENROUTER_CATEGORIES
+
+    return headers
 
 
 # =========================================================
@@ -569,7 +774,9 @@ def get_hf_headers() -> dict[str, str]:
         )
 
     return {
-        "Authorization": f"Bearer {HF_TOKEN}",
+        "Authorization": (
+            f"Bearer {HF_TOKEN}"
+        ),
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": REQUEST_USER_AGENT,
@@ -586,15 +793,19 @@ def _normalize_message_content(
 ) -> str:
 
     if value is None:
+
         return ""
 
     if isinstance(
         value,
         str,
     ):
+
         return value
 
-    return str(value)
+    return str(
+        value
+    )
 
 
 # =========================================================
@@ -634,6 +845,7 @@ def build_messages(
                 item,
                 dict,
             ):
+
                 continue
 
             role = str(
@@ -652,8 +864,12 @@ def build_messages(
                 role = "user"
 
             content = (
-                item.get("content")
-                or item.get("text")
+                item.get(
+                    "content"
+                )
+                or item.get(
+                    "text"
+                )
                 or ""
             )
 
@@ -664,6 +880,7 @@ def build_messages(
             )
 
             if not content:
+
                 continue
 
             messages.append(
@@ -698,32 +915,27 @@ def _extract_mvi_response(
     """
     Extract text from several common FastAPI/AI response
     shapes.
-
-    Supported examples:
-
-        {"response": "..."}
-        {"text": "..."}
-        {"answer": "..."}
-        {"message": "..."}
-        {"content": "..."}
-        {"result": "..."}
-        {"data": {"response": "..."}}
     """
 
     if data is None:
+
         return ""
 
     if isinstance(
         data,
         str,
     ):
+
         return data.strip()
 
     if not isinstance(
         data,
         dict,
     ):
-        return str(data).strip()
+
+        return str(
+            data
+        ).strip()
 
     keys = (
         "response",
@@ -764,6 +976,7 @@ def _extract_mvi_response(
         )
 
         if result_text:
+
             return result_text
 
     nested = data.get(
@@ -782,6 +995,7 @@ def _extract_mvi_response(
         )
 
         if result_text:
+
             return result_text
 
     choices = data.get(
@@ -846,9 +1060,6 @@ def _request_mvi(
 ) -> dict[str, Any]:
     """
     Request text generation from MVI AI Engine.
-
-    The request intentionally sends a conservative payload
-    that can be handled by a lightweight FastAPI /ask endpoint.
     """
 
     if not MVI_ENABLED:
@@ -868,7 +1079,9 @@ def _request_mvi(
         )
 
     payload: dict[str, Any] = {
-        "prompt": str(text),
+        "prompt": str(
+            text
+        ),
     }
 
     if system_prompt.strip():
@@ -899,7 +1112,9 @@ def _request_mvi(
 
         headers[
             "Authorization"
-        ] = f"Bearer {MVI_API_KEY}"
+        ] = (
+            f"Bearer {MVI_API_KEY}"
+        )
 
     started = time.time()
 
@@ -946,7 +1161,9 @@ def _request_mvi(
 
         try:
 
-            error_data = response.json()
+            error_data = (
+                response.json()
+            )
 
         except ValueError:
 
@@ -1025,6 +1242,7 @@ def _request_mvi(
         "response": response_text,
         "provider": "mvi",
         "model": "mvi-ai-engine",
+        "fallback_used": False,
         "session_id": session_id,
         "raw": data,
     }
@@ -1076,10 +1294,16 @@ def _get_inference_client(
     }
 
     if provider:
-        options["provider"] = provider
+
+        options["provider"] = (
+            provider
+        )
 
     if timeout:
-        options["timeout"] = timeout
+
+        options["timeout"] = (
+            timeout
+        )
 
     return InferenceClient(
         **options
@@ -1217,10 +1441,16 @@ def resolve_image_dimensions(
     ):
 
         if width is None:
-            width = HF_IMAGE_DEFAULT_WIDTH
+
+            width = (
+                HF_IMAGE_DEFAULT_WIDTH
+            )
 
         if height is None:
-            height = HF_IMAGE_DEFAULT_HEIGHT
+
+            height = (
+                HF_IMAGE_DEFAULT_HEIGHT
+            )
 
     elif aspect_ratio:
 
@@ -1251,13 +1481,23 @@ def resolve_image_dimensions(
 
     else:
 
-        width = HF_IMAGE_DEFAULT_WIDTH
-        height = HF_IMAGE_DEFAULT_HEIGHT
+        width = (
+            HF_IMAGE_DEFAULT_WIDTH
+        )
+
+        height = (
+            HF_IMAGE_DEFAULT_HEIGHT
+        )
 
     try:
 
-        width = int(width)
-        height = int(height)
+        width = int(
+            width
+        )
+
+        height = int(
+            height
+        )
 
     except (
         TypeError,
@@ -1297,7 +1537,10 @@ def resolve_image_dimensions(
             error_code="invalid_image_height",
         )
 
-    return width, height
+    return (
+        width,
+        height,
+    )
 
 
 # =========================================================
@@ -1373,7 +1616,9 @@ def _text_to_image_once(
 
         params[
             "seed"
-        ] = int(seed)
+        ] = int(
+            seed
+        )
 
     negative = str(
         negative_prompt or ""
@@ -1655,11 +1900,25 @@ def _inspect_wav_audio(
             "rb",
         ) as wav:
 
-            channels = wav.getnchannels()
-            sample_width = wav.getsampwidth()
-            sample_rate = wav.getframerate()
-            frame_count = wav.getnframes()
-            compression = wav.getcomptype()
+            channels = (
+                wav.getnchannels()
+            )
+
+            sample_width = (
+                wav.getsampwidth()
+            )
+
+            sample_rate = (
+                wav.getframerate()
+            )
+
+            frame_count = (
+                wav.getnframes()
+            )
+
+            compression = (
+                wav.getcomptype()
+            )
 
             duration = (
                 frame_count / sample_rate
@@ -1780,7 +2039,9 @@ def transcribe_hf_audio(
         )
 
     selected_model = (
-        str(model).strip()
+        str(
+            model
+        ).strip()
         if model
         else HF_ASR_MODEL
     )
@@ -1870,8 +2131,10 @@ def transcribe_hf_audio(
         )
     ):
 
-        transcript = result.get(
-            "text"
+        transcript = (
+            result.get(
+                "text"
+            )
         )
 
     transcript = str(
@@ -1946,7 +2209,9 @@ def generate_hf_speech(
         )
 
     selected_model = (
-        str(model).strip()
+        str(
+            model
+        ).strip()
         if model
         else HF_TTS_MODEL
     )
@@ -2066,13 +2331,27 @@ def generate_hf_speech(
 
 
 # =========================================================
-# RESPONSE EXTRACTION
+# OPENROUTER RESPONSE EXTRACTION
 # =========================================================
 
 
-def _extract_hf_response(
-    data: dict,
+def _extract_openrouter_response(
+    data: Any,
 ) -> str:
+    """
+    Extract assistant text from an OpenAI-compatible response.
+    """
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        raise AIClientError(
+            "OpenRouter returned an invalid response.",
+            provider="openrouter",
+            error_code="invalid_response",
+        )
 
     choices = data.get(
         "choices"
@@ -2087,8 +2366,8 @@ def _extract_hf_response(
     ):
 
         raise AIClientError(
-            "Hugging Face returned no choices.",
-            provider="huggingface",
+            "OpenRouter returned no choices.",
+            provider="openrouter",
             error_code=(
                 "empty_model_response"
             ),
@@ -2103,10 +2382,10 @@ def _extract_hf_response(
 
         raise AIClientError(
             (
-                "Hugging Face returned "
+                "OpenRouter returned "
                 "an invalid choice."
             ),
-            provider="huggingface",
+            provider="openrouter",
             error_code=(
                 "invalid_model_response"
             ),
@@ -2123,10 +2402,10 @@ def _extract_hf_response(
 
         raise AIClientError(
             (
-                "Hugging Face returned "
+                "OpenRouter returned "
                 "no assistant message."
             ),
-            provider="huggingface",
+            provider="openrouter",
             error_code=(
                 "missing_assistant_message"
             ),
@@ -2137,6 +2416,7 @@ def _extract_hf_response(
     )
 
     if content is None:
+
         content = ""
 
     if isinstance(
@@ -2183,10 +2463,10 @@ def _extract_hf_response(
 
         raise AIClientError(
             (
-                "Hugging Face returned "
+                "OpenRouter returned "
                 "an empty response."
             ),
-            provider="huggingface",
+            provider="openrouter",
             error_code=(
                 "empty_response"
             ),
@@ -2196,11 +2476,11 @@ def _extract_hf_response(
 
 
 # =========================================================
-# HF ERROR EXTRACTION
+# GENERIC PROVIDER ERROR EXTRACTION
 # =========================================================
 
 
-def _extract_provider_error(
+def _extract_openrouter_error(
     response: requests.Response,
 ) -> tuple[str, str]:
 
@@ -2212,7 +2492,7 @@ def _extract_provider_error(
 
         return (
             (
-                "Hugging Face returned "
+                "OpenRouter returned "
                 "an invalid error response."
             ),
             "invalid_error_response",
@@ -2233,26 +2513,40 @@ def _extract_provider_error(
         ):
 
             message = (
-                error.get("message")
-                or error.get("type")
-                or "Hugging Face request failed."
+                error.get(
+                    "message"
+                )
+                or error.get(
+                    "type"
+                )
+                or "OpenRouter request failed."
             )
 
             code = (
-                error.get("code")
-                or error.get("type")
+                error.get(
+                    "code"
+                )
+                or error.get(
+                    "type"
+                )
                 or "provider_error"
             )
 
             return (
-                str(message),
-                str(code),
+                str(
+                    message
+                ),
+                str(
+                    code
+                ),
             )
 
         if error:
 
             return (
-                str(error),
+                str(
+                    error
+                ),
                 "provider_error",
             )
 
@@ -2263,14 +2557,373 @@ def _extract_provider_error(
         if message:
 
             return (
-                str(message),
+                str(
+                    message
+                ),
                 "provider_error",
             )
 
     return (
-        "Hugging Face request failed.",
+        "OpenRouter request failed.",
         "provider_error",
     )
+
+
+# =========================================================
+# OPENROUTER CHAT REQUEST
+# =========================================================
+
+
+def _request_openrouter(
+    *,
+    model: str,
+    messages: list[dict[str, str]],
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """
+    Perform one OpenRouter chat request.
+    """
+
+    if not OPENROUTER_ENABLED:
+
+        raise AIClientError(
+            "OpenRouter provider is disabled.",
+            provider="openrouter",
+            error_code="openrouter_disabled",
+        )
+
+    if not OPENROUTER_API_KEY:
+
+        raise AIClientError(
+            "OPENROUTER_API_KEY is not configured.",
+            provider="openrouter",
+            error_code="openrouter_api_key_missing",
+        )
+
+    if not model:
+
+        raise AIClientError(
+            "No OpenRouter model is configured.",
+            provider="openrouter",
+            error_code="openrouter_model_missing",
+        )
+
+    if not OPENROUTER_API_URL:
+
+        raise AIClientError(
+            "OPENROUTER_API_URL is not configured.",
+            provider="openrouter",
+            error_code="openrouter_url_missing",
+        )
+
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": OPENROUTER_TEMPERATURE,
+        "max_tokens": OPENROUTER_MAX_TOKENS,
+        "stream": False,
+    }
+
+    if session_id:
+
+        payload[
+            "session_id"
+        ] = str(
+            session_id
+        )
+
+    headers = (
+        get_openrouter_headers()
+    )
+
+    started = time.time()
+
+    try:
+
+        response = requests.post(
+            OPENROUTER_API_URL,
+            headers=headers,
+            json=payload,
+            timeout=OPENROUTER_TIMEOUT,
+        )
+
+    except requests.Timeout as exc:
+
+        raise AIClientError(
+            "OpenRouter request timed out.",
+            provider="openrouter",
+            error_code="openrouter_timeout",
+        ) from exc
+
+    except requests.ConnectionError as exc:
+
+        raise AIClientError(
+            "Could not connect to OpenRouter.",
+            provider="openrouter",
+            error_code=(
+                "openrouter_connection_error"
+            ),
+        ) from exc
+
+    except requests.RequestException as exc:
+
+        raise AIClientError(
+            "OpenRouter request failed.",
+            provider="openrouter",
+            error_code=(
+                "openrouter_request_error"
+            ),
+        ) from exc
+
+    print(
+        "OPENROUTER response | "
+        f"model={model} | "
+        f"status={response.status_code} | "
+        f"time={time.time() - started:.2f}s"
+    )
+
+    if not response.ok:
+
+        message, error_code = (
+            _extract_openrouter_error(
+                response
+            )
+        )
+
+        raise AIClientError(
+            message,
+            provider="openrouter",
+            status_code=(
+                response.status_code
+            ),
+            error_code=error_code,
+        )
+
+    try:
+
+        data = response.json()
+
+    except ValueError as exc:
+
+        raise AIClientError(
+            "OpenRouter returned invalid JSON.",
+            provider="openrouter",
+            status_code=(
+                response.status_code
+            ),
+            error_code="openrouter_invalid_json",
+        ) from exc
+
+    return data
+
+
+# =========================================================
+# OPENROUTER TEXT PROVIDER
+# =========================================================
+
+
+def _ask_openrouter_text(
+    *,
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    OpenRouter text provider.
+
+    Primary model:
+        OPENROUTER_MODEL
+
+    Fallback model:
+        OPENROUTER_FALLBACK_MODEL
+    """
+
+    if not OPENROUTER_ENABLED:
+
+        raise AIClientError(
+            "OpenRouter provider is disabled.",
+            provider="openrouter",
+            error_code="openrouter_disabled",
+        )
+
+    if not OPENROUTER_API_KEY:
+
+        raise AIClientError(
+            "OPENROUTER_API_KEY is not configured.",
+            provider="openrouter",
+            error_code="openrouter_api_key_missing",
+        )
+
+    if not OPENROUTER_MODEL:
+
+        raise AIClientError(
+            "OPENROUTER_MODEL is not configured.",
+            provider="openrouter",
+            error_code="openrouter_model_missing",
+        )
+
+    messages = build_messages(
+        text=str(text),
+        system_prompt=str(
+            system_prompt or ""
+        ),
+        context=context,
+    )
+
+    candidates: list[str] = []
+
+    for candidate in (
+        OPENROUTER_MODEL,
+        OPENROUTER_FALLBACK_MODEL,
+    ):
+
+        candidate = str(
+            candidate or ""
+        ).strip()
+
+        if (
+            candidate
+            and candidate
+            not in candidates
+        ):
+
+            candidates.append(
+                candidate
+            )
+
+    if not candidates:
+
+        raise AIClientError(
+            "No OpenRouter text model is configured.",
+            provider="openrouter",
+            error_code="openrouter_text_models_missing",
+        )
+
+    attempted_models: list[str] = []
+
+    last_error: AIClientError | None = None
+
+    for index, model in enumerate(
+        candidates
+    ):
+
+        attempted_models.append(
+            model
+        )
+
+        try:
+
+            data = _request_openrouter(
+                model=model,
+                messages=messages,
+                session_id=session_id,
+            )
+
+            response_text = (
+                _extract_openrouter_response(
+                    data
+                )
+            )
+
+            response_model = (
+                data.get(
+                    "model"
+                )
+                or model
+            )
+
+            return {
+                "success": True,
+                "response": response_text,
+                "provider": "openrouter",
+                "model": response_model,
+                "requested_model": model,
+                "fallback_used": (
+                    index > 0
+                ),
+                "attempted_models": attempted_models,
+                "session_id": session_id,
+                "usage": data.get(
+                    "usage",
+                    {},
+                ),
+                "id": data.get(
+                    "id"
+                ),
+                "finish_reason": (
+                    (
+                        data.get(
+                            "choices"
+                        )[0].get(
+                            "finish_reason"
+                        )
+                    )
+                    if isinstance(
+                        data.get(
+                            "choices"
+                        ),
+                        list,
+                    )
+                    and data.get(
+                        "choices"
+                    )
+                    and isinstance(
+                        data.get(
+                            "choices"
+                        )[0],
+                        dict,
+                    )
+                    else None
+                ),
+            }
+
+        except AIClientError as exc:
+
+            last_error = exc
+
+            # -------------------------------------------------
+            # Authentication / billing failures.
+            #
+            # Changing models will not fix a broken API key or
+            # an account without usable balance.
+            # -------------------------------------------------
+
+            if exc.status_code in {
+                401,
+                402,
+                403,
+            }:
+
+                print(
+                    "OPENROUTER text provider unavailable | "
+                    f"model={model} | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code}"
+                )
+
+                break
+
+            print(
+                "OPENROUTER text model failed | "
+                f"model={model} | "
+                f"status={exc.status_code} | "
+                f"error_code={exc.error_code}"
+            )
+
+            # 429, 5xx and model-specific errors will continue
+            # to the fallback model.
+            continue
+
+    if last_error is None:
+
+        last_error = AIClientError(
+            "OpenRouter text generation failed.",
+            provider="openrouter",
+            error_code="openrouter_text_failed",
+        )
+
+    raise last_error
 
 
 # =========================================================
@@ -2292,7 +2945,9 @@ def _request_hf(
             error_code="hf_text_model_missing",
         )
 
-    headers = get_hf_headers()
+    headers = (
+        get_hf_headers()
+    )
 
     payload = {
         "model": model,
@@ -2402,7 +3057,7 @@ def _request_hf(
 
 
 # =========================================================
-# HUGGING FACE TEXT PROVIDER
+# HF TEXT PROVIDER
 # =========================================================
 
 
@@ -2416,13 +3071,7 @@ def _ask_hf_text(
     """
     Hugging Face text provider.
 
-    Primary model:
-        HF_MODEL
-
-    Optional fallback:
-        HF_FALLBACK_MODEL
-
-    There are intentionally no hard-coded model names.
+    Only active when HF_MODEL is explicitly configured.
     """
 
     if not HF_TOKEN:
@@ -2448,8 +3097,6 @@ def _ask_hf_text(
         ),
         context=context,
     )
-
-    attempted_models: list[str] = []
 
     candidates: list[str] = []
 
@@ -2478,10 +3125,6 @@ def _ask_hf_text(
         candidates
     ):
 
-        attempted_models.append(
-            model
-        )
-
         try:
 
             data = _request_hf(
@@ -2500,7 +3143,9 @@ def _ask_hf_text(
                 "response": response_text,
                 "provider": "huggingface",
                 "model": model,
-                "fallback_used": index > 0,
+                "fallback_used": (
+                    index > 0
+                ),
                 "session_id": session_id,
                 "usage": data.get(
                     "usage",
@@ -2512,19 +3157,16 @@ def _ask_hf_text(
 
             last_error = exc
 
-            # -------------------------------------------------
-            # 402 = no provider credits.
-            #
-            # Trying another model on the same paid provider
-            # is normally pointless.
-            # -------------------------------------------------
-
-            if exc.status_code == 402:
+            if exc.status_code in {
+                401,
+                402,
+                403,
+            }:
 
                 print(
-                    "HF text provider unavailable due to "
-                    "credits/billing | "
-                    f"model={model}"
+                    "HF text provider unavailable | "
+                    f"model={model} | "
+                    f"status={exc.status_code}"
                 )
 
                 break
@@ -2544,11 +3186,6 @@ def _ask_hf_text(
             error_code="hf_text_failed",
         )
 
-    last_error.args = (
-        str(last_error)
-        or "Hugging Face text generation failed.",
-    )
-
     raise last_error
 
 
@@ -2566,21 +3203,22 @@ def ask_hf(
     """
     Main RevelaAI text-generation entry point.
 
-    Provider order is controlled by:
-
-        REVELAAI_TEXT_PROVIDERS
-
-    Default:
-
-        mvi,huggingface
-
-    Example:
-
-        REVELAAI_TEXT_PROVIDERS=mvi,huggingface
-
     The function name remains ask_hf() for backward
-    compatibility even though the underlying provider may
-    now be MVI.
+    compatibility with the existing RevelaAI codebase.
+
+    By default:
+
+        OpenRouter
+            |
+            +--> DeepSeek V4.1 Flash
+            |
+            +--> GLM 5.3 Flash
+
+    Optional provider order:
+
+        openrouter,mvi
+        openrouter,huggingface
+        openrouter,mvi,huggingface
     """
 
     if not str(
@@ -2597,13 +3235,107 @@ def ask_hf(
             "provider": "revelaai",
         }
 
-    provider_errors: list[dict[str, Any]] = []
+    provider_errors: list[
+        dict[str, Any]
+    ] = []
 
     for provider in TEXT_PROVIDER_ORDER:
 
         provider = str(
             provider or ""
         ).strip().lower()
+
+        # =================================================
+        # OPENROUTER
+        # =================================================
+
+        if provider in {
+            "openrouter",
+            "or",
+        }:
+
+            if not _provider_enabled(
+                "openrouter"
+            ):
+
+                provider_errors.append(
+                    {
+                        "provider": "openrouter",
+                        "error": (
+                            "OpenRouter text provider "
+                            "is not configured."
+                        ),
+                        "error_code": (
+                            "openrouter_not_configured"
+                        ),
+                    }
+                )
+
+                continue
+
+            started = time.time()
+
+            try:
+
+                result = (
+                    _ask_openrouter_text(
+                        text=str(
+                            text
+                        ),
+                        system_prompt=(
+                            str(
+                                system_prompt
+                                or ""
+                            )
+                        ),
+                        session_id=(
+                            session_id
+                        ),
+                        context=context,
+                    )
+                )
+
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=openrouter | "
+                    f"model={result.get('model')} | "
+                    f"fallback={result.get('fallback_used')} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                return result
+
+            except AIClientError as exc:
+
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=openrouter | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+
+                provider_errors.append(
+                    {
+                        "provider": "openrouter",
+                        "error": str(
+                            exc
+                        ),
+                        "error_code": (
+                            exc.error_code
+                            or "openrouter_error"
+                        ),
+                        "status_code": (
+                            exc.status_code
+                        ),
+                    }
+                )
+
+                continue
+
+        # =================================================
+        # MVI
+        # =================================================
 
         if provider in {
             "mvi",
@@ -2634,10 +3366,13 @@ def ask_hf(
             try:
 
                 result = _request_mvi(
-                    text=str(text),
+                    text=str(
+                        text
+                    ),
                     system_prompt=(
                         str(
-                            system_prompt or ""
+                            system_prompt
+                            or ""
                         )
                     ),
                     context=context,
@@ -2665,7 +3400,9 @@ def ask_hf(
                 provider_errors.append(
                     {
                         "provider": "mvi",
-                        "error": str(exc),
+                        "error": str(
+                            exc
+                        ),
                         "error_code": (
                             exc.error_code
                             or "mvi_error"
@@ -2677,6 +3414,10 @@ def ask_hf(
                 )
 
                 continue
+
+        # =================================================
+        # HUGGING FACE
+        # =================================================
 
         if provider in {
             "huggingface",
@@ -2707,13 +3448,18 @@ def ask_hf(
             try:
 
                 result = _ask_hf_text(
-                    text=str(text),
+                    text=str(
+                        text
+                    ),
                     system_prompt=(
                         str(
-                            system_prompt or ""
+                            system_prompt
+                            or ""
                         )
                     ),
-                    session_id=session_id,
+                    session_id=(
+                        session_id
+                    ),
                     context=context,
                 )
 
@@ -2738,7 +3484,9 @@ def ask_hf(
                 provider_errors.append(
                     {
                         "provider": "huggingface",
-                        "error": str(exc),
+                        "error": str(
+                            exc
+                        ),
                         "error_code": (
                             exc.error_code
                             or "hf_error"
@@ -2751,9 +3499,25 @@ def ask_hf(
 
                 continue
 
+        # =================================================
+        # UNKNOWN PROVIDER
+        # =================================================
+
         print(
             "TEXT PROVIDER UNKNOWN | "
             f"provider={provider}"
+        )
+
+        provider_errors.append(
+            {
+                "provider": provider,
+                "error": (
+                    "Unknown text provider."
+                ),
+                "error_code": (
+                    "unknown_text_provider"
+                ),
+            }
         )
 
     # =====================================================
@@ -2798,15 +3562,19 @@ def ask_hf(
     return {
         "success": False,
         "response": "",
-        "error": "No text provider is available.",
-        "error_code": "no_text_provider",
+        "error": (
+            "No text provider is available."
+        ),
+        "error_code": (
+            "no_text_provider"
+        ),
         "provider": "revelaai",
         "session_id": session_id,
     }
 
 
 # =========================================================
-# MVI PUBLIC CLIENT
+# DIRECT MVI CLIENT
 # =========================================================
 
 
@@ -2817,10 +3585,10 @@ def ask_mvi(
     context: list[dict[str, Any]] | None = None,
 ):
     """
-    Public MVI client.
+    Public direct MVI client.
 
-    Unlike the old compatibility alias, this function now
-    actually targets MVI directly.
+    MVI is deliberately kept separate from the primary
+    external-model path.
     """
 
     if not str(
@@ -2840,9 +3608,12 @@ def ask_mvi(
     try:
 
         return _request_mvi(
-            text=str(text),
+            text=str(
+                text
+            ),
             system_prompt=str(
-                system_prompt or ""
+                system_prompt
+                or ""
             ),
             context=context,
             session_id=session_id,
@@ -2853,7 +3624,9 @@ def ask_mvi(
         return {
             "success": False,
             "response": "",
-            "error": str(exc),
+            "error": str(
+                exc
+            ),
             "error_code": (
                 exc.error_code
                 or "mvi_error"
@@ -2873,18 +3646,30 @@ def ask_mvi(
 __all__ = [
     "AIClientError",
 
-    # Configuration
+    # OpenRouter
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_API_URL",
+    "OPENROUTER_MODEL",
+    "OPENROUTER_FALLBACK_MODEL",
+    "OPENROUTER_ENABLED",
+
+    # Hugging Face
     "HF_TOKEN",
     "HF_API_URL",
     "HF_MODEL",
     "HF_FALLBACK_MODEL",
+
+    # MVI
     "MVI_API_URL",
     "MVI_ENABLED",
+
+    # Text routing
     "TEXT_PROVIDER_ORDER",
 
     # Diagnostics
     "hf_configured",
     "get_text_provider_status",
+    "get_openrouter_headers",
     "get_hf_headers",
 
     # Messages
