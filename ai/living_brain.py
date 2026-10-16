@@ -30,7 +30,7 @@ HUBS: dict[str, dict[str, Any]] = {
     "mahubiri": {
         "label": "Mahubiri",
         "description": "Sermons, Bible study, theology, Scripture and pastoral reflection.",
-        "keywords": re.compile(r"\b(bible|biblical|scripture|verse|jesus|christ|god|sermon|preach|preaching|theolog|mah ubiri|mahubiri|prayer|pray|sabbath|prophecy|prophetic|kjv|n iv|psalm|gospel|church|faith)\b", re.I),
+        "keywords": re.compile(r"\b(bible|biblical|scripture|verse|jesus|christ|god|sermon|preach|preaching|theolog|mahubiri|prayer|pray|sabbath|prophecy|prophetic|kjv|niv|psalm|gospel|church|faith)\b", re.I),
         "method": "Read the passage in context, identify genre and historical setting, compare related passages, distinguish text from interpretation, then draw a responsible practical application.",
     },
     "general": {
