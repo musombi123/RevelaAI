@@ -1001,6 +1001,12 @@ def get_session_id() -> str:
                 uuid.uuid4().hex
             )
 
+    # Namespace server-side conversation sessions by the verified JWT
+    # subject so a reused/guessed client session ID cannot cross accounts.
+    authenticated_user_id = resolve_revelacode_user_id()
+    if authenticated_user_id:
+        session_id = f"{authenticated_user_id}:{session_id}"[:128]
+
     g.revelaai_session_id = (
         session_id
     )
