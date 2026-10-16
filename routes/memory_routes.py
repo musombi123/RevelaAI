@@ -354,9 +354,9 @@ def _record_messages(
         )
 
     extracted = _remember_best_things(user_oid, user_text) if isBestThing(user_text, recent) else 0
-    idea = _detect_and_store_idea(user_oid, user_text, assistant_text, session_id, hub) if (
+    created_ideas = _detect_and_store_ideas(user_oid, user_text, assistant_text, session_id, hub) if (
         isBestThing(user_text, recent) or isBestThing(assistant_text, recent)
-    ) else None
+    ) else []
 
     if useful_messages:
         try:
@@ -366,7 +366,7 @@ def _record_messages(
                 "hub": hub[:40],
                 "usefulMessageCount": len(useful_messages),
                 "learnedFactCount": extracted,
-                "ideaCreated": bool(idea),
+                "ideaCreated": bool(created_ideas),
                 "createdAt": _now(),
             })
         except PyMongoError:
@@ -376,50 +376,58 @@ def _record_messages(
         "storedMessages": len(useful_messages),
         "filteredMessages": len(candidates) - len(useful_messages),
         "learnedFacts": extracted,
-        "idea": idea,
+        "idea": created_ideas[0] if created_ideas else None,
+        "ideas": created_ideas,
     }
 
 
-def _detect_and_store_idea(
+def _detect_and_store_ideas(
     user_oid: ObjectId,
     user_text: str,
     assistant_text: str,
     session_id: str,
     hub: str,
-) -> dict[str, Any] | None:
+) -> list[dict[str, Any]]:
+    """Persist distinct useful ideas from the user and assistant without duplicates."""
+    created: list[dict[str, Any]] = []
+    seen_this_turn: set[str] = set()
     for source, text in (("user", user_text), ("assistant", assistant_text)):
-        match = IDEA_SENTENCE.search(str(text or ""))
-        if not match:
-            continue
-        idea_text = re.sub(r"\s+", " ", match.group(0)).strip(" -,:;")
-        if len(idea_text) < 20 or not isBestThing(idea_text):
-            continue
-        normalized_key = _normalize(idea_text)[:240]
-        try:
-            result = ideas().update_one(
-                {"userId": user_oid, "normalizedKey": normalized_key},
-                {"$setOnInsert": {
-                    "userId": user_oid,
-                    "ideaText": idea_text[:1200],
-                    "normalizedKey": normalized_key,
-                    "isNew": True,
-                    "isUseful": True,
-                    "status": "new",
-                    "implementationCode": None,
-                    "sourceConversationId": session_id,
-                    "source": source,
-                    "hub": hub[:40],
-                    "createdAt": _now(),
-                }},
-                upsert=True,
-            )
-            if result.upserted_id:
-                return {"id": str(result.upserted_id), "status": "new", "ideaText": idea_text[:240]}
-        except PyMongoError:
-            logger.exception("Idea persistence failed")
-            return None
-    return None
-
+        for match in IDEA_SENTENCE.finditer(str(text or "")):
+            idea_text = re.sub(r"\s+", " ", match.group(0)).strip(" -,:;")
+            if len(idea_text) < 20 or not isBestThing(idea_text):
+                continue
+            normalized_key = _normalize(idea_text)[:240]
+            if not normalized_key or normalized_key in seen_this_turn:
+                continue
+            seen_this_turn.add(normalized_key)
+            try:
+                result = ideas().update_one(
+                    {"userId": user_oid, "normalizedKey": normalized_key},
+                    {"$setOnInsert": {
+                        "userId": user_oid,
+                        "ideaText": idea_text[:1200],
+                        "normalizedKey": normalized_key,
+                        "isNew": True,
+                        "isUseful": True,
+                        "status": "new",
+                        "implementationCode": None,
+                        "sourceConversationId": session_id,
+                        "source": source,
+                        "hub": hub[:40],
+                        "createdAt": _now(),
+                    }},
+                    upsert=True,
+                )
+                if result.upserted_id:
+                    created.append({
+                        "id": str(result.upserted_id),
+                        "status": "new",
+                        "source": source,
+                        "ideaText": idea_text[:240],
+                    })
+            except PyMongoError:
+                logger.exception("Idea persistence failed")
+    return created
 
 def _json_safe(doc: dict | None) -> dict | None:
     if not doc:
