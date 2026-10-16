@@ -476,6 +476,7 @@ def smart_memory_chat():
             filteredMessages=result["filteredMessages"],
             learnedFacts=result["learnedFacts"],
             idea=result["idea"],
+            ideas=result["ideas"],
         ), 200
     except Exception:
         logger.exception("Smart memory write failed")
@@ -537,6 +538,45 @@ def create_idea():
         return jsonify(status="success", created=True, data=_json_safe(doc)), 201
     except Exception:
         logger.exception("Idea creation failed")
+        return jsonify(status="error", code="ideas_unavailable"), 503
+
+
+@memory_bp.route("/ideas/<idea_id>/implementation", methods=["POST"])
+def record_idea_implementation(idea_id: str):
+    """Record a reviewed implementation artifact; never execute submitted code."""
+    identity, user_id, error = _require_identity()
+    if error:
+        return error
+    payload = request.get_json(silent=True) or {}
+    implementation_code = str(payload.get("implementationCode") or "").strip()
+    implementation_ref = str(payload.get("implementationRef") or "").strip()
+
+    if not implementation_code or len(implementation_code) > 20000:
+        return jsonify(status="error", code="implementation_code_required_or_too_large"), 400
+    if not implementation_ref or len(implementation_ref) > 500:
+        return jsonify(status="error", code="implementation_ref_required"), 400
+
+    try:
+        idea_oid = ObjectId(idea_id)
+    except (InvalidId, TypeError, ValueError):
+        return jsonify(status="error", code="invalid_idea_id"), 400
+
+    try:
+        result = ideas().update_one(
+            {"_id": idea_oid, "userId": identity},
+            {"$set": {
+                "status": "implemented",
+                "implementationCode": implementation_code,
+                "implementationRef": implementation_ref,
+                "implementedAt": _now(),
+                "updatedAt": _now(),
+            }},
+        )
+        if result.matched_count == 0:
+            return jsonify(status="error", code="idea_not_found"), 404
+        return jsonify(status="success", userId=user_id, statusValue="implemented"), 200
+    except Exception:
+        logger.exception("Idea implementation record update failed")
         return jsonify(status="error", code="ideas_unavailable"), 503
 
 
