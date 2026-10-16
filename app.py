@@ -293,6 +293,10 @@ from routes.users_routes import (
     users_bp,
 )
 
+from routes.hub_routes import (
+    hub_bp,
+)
+
 from whatsapp_webhook import (
     whatsapp_bp,
 )
@@ -5695,6 +5699,20 @@ except Exception as exc:
 
     app.logger.warning(
         "whatsapp_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        hub_bp
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "hub_bp registration failed | error=%s",
         exc,
     )
 
