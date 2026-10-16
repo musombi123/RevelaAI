@@ -37,6 +37,11 @@ class HubPersonaTests(unittest.TestCase):
         self.assertIn("ROMANS 8:28", result["reply"])
         self.assertIn("dark", result["reply"].lower())
 
+    def test_explicit_follow_up_uses_recent_hub_memory(self):
+        hub_personas.respond("How do I price this?", "biashara", "session-1")
+        follow_up = hub_personas.respond("continue", "biashara", "session-1")
+        self.assertIn("How do I price this?", follow_up["reply"])
+
     def test_memory_is_scoped_by_user_and_hub(self):
         hub_personas.respond("How do I price this?", "biashara", "user-a")
         self.assertTrue((Path(self.temp.name) / "hub_memory.json").exists())
