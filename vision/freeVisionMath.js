@@ -33,7 +33,7 @@ export function scanPixelMath(imageData) {
   };
 }
 
-export function analyzeCanvas(canvas, { detector = null, cv = globalThis.cv || null } = {}) {
+export async function analyzeCanvas(canvas, { detector = null, cv = globalThis.cv || null, ocrWorker = null } = {}) {
   const context = canvas?.getContext?.("2d", { willReadFrequently: true });
   if (!context) throw new Error("Canvas is unavailable.");
   const math = scanPixelMath(context.getImageData(0, 0, canvas.width, canvas.height));
@@ -55,9 +55,21 @@ export function analyzeCanvas(canvas, { detector = null, cv = globalThis.cv || n
     } catch { /* Pixel gradient count remains a valid fallback measurement. */ }
     finally { [src, gray, edges, contours, hierarchy].forEach((mat) => mat?.delete?.()); }
   }
-  const predictions = detector ? [] : [];
-  const result = { ...math, contourCount, objects: predictions, text: "" };
-  result.description = `Brightness ${result.brightness}/255 (${result.light}); ${result.contourCount} edge/contour regions estimated; ${result.focus}. ${cv?.Mat ? "OpenCV contour analysis ran locally." : "Using pixel-gradient fallback."}`;
+  let objects = [];
+  if (detector?.detect) {
+    try {
+      objects = (await detector.detect(canvas, 10, 0.45)).map((item) => ({
+        class: item.class, score: Number(item.score.toFixed(3)), bbox: item.bbox.map(Math.round),
+      }));
+    } catch { /* Keep math-only results if the model fails. */ }
+  }
+  let text = "";
+  if (ocrWorker?.recognize) {
+    try { text = String((await ocrWorker.recognize(canvas))?.data?.text || "").replace(/\\s+/g, " ").trim().slice(0, 500); }
+    catch { /* OCR is optional. */ }
+  }
+  const result = { ...math, contourCount, objects, text };
+  result.description = `Brightness ${result.brightness}/255 (${result.light}); ${result.contourCount} edge/contour regions estimated; ${result.focus}.`;
   return result;
 }
 
