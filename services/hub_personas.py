@@ -139,6 +139,11 @@ def _respond(hub: str, message: str, vision_text: str, memory: list[dict[str, An
     low = msg.lower()
     guidance = HUB_GUIDANCE[hub]
     context = f"\n\nCamera scan supplied by the device: {vision_text}" if vision_text else ""
+    if memory and not vision_text and re.search(r"\b(continue|what next|remember|as we discussed|previous topic|endelea|tuliendelea)\b", low):
+        previous = str(memory[-1].get("user") or "").strip()
+        if previous and previous.lower() != low:
+            label = HUBS[hub]["label"]
+            return f"Let’s continue from our recent {label} thread: you were working on “{previous[:180]}”. What has changed since then? {guidance}"
     if vision_text:
         object_terms = re.findall(r"(?:Detected labels:|objects?:)\s*([^.!?\n]+)", vision_text, flags=re.I)
         labels = object_terms[0].strip() if object_terms else ""
