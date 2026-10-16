@@ -1,0 +1,37 @@
+name: RevelaAI smart memory checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, "feat/memory-v2-coordinated-ai-team"]
+
+jobs:
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile backend modules
+        run: python -m compileall -q app.py ai routes
+      - name: Install memory-route test dependencies
+        run: python -m pip install Flask PyJWT pymongo requests
+      - name: Verify smart filter rules
+        env:
+          JWT_SECRET: "test-only-secret"
+        run: |
+          python - <<'PY'
+          from routes.memory_routes import isBestThing
+
+          assert not isBestThing("hi")
+          assert not isBestThing("thanks")
+          assert not isBestThing("ok")
+          assert isBestThing("My farm grows maize in Kilifi")
+          assert isBestThing("I want to build a school fee calculator")
+          assert not isBestThing("I want to build a school fee calculator", [
+              "I want to build a school fee calculator"
+          ])
+          print("Smart memory filter checks passed.")
+          PY
