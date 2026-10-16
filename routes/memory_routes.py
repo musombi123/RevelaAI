@@ -296,7 +296,6 @@ def _remember_best_things(user_oid: ObjectId, text: str) -> int:
                     "uselessFiltered": [],
                     "learnScore": 0,
                 },
-                "$inc": {"learnScore": 1},
                 "$currentDate": {"lastLearnedAt": True},
             },
             upsert=True,
@@ -337,11 +336,40 @@ def _record_messages(
             },
             upsert=True,
         )
+        memories().update_one(
+            {"userId": user_oid},
+            {
+                "$setOnInsert": {
+                    "userId": user_oid,
+                    "bestThings": {},
+                    "uselessFiltered": [],
+                    "createdAt": _now(),
+                },
+                "$inc": {"learnScore": 1},
+                "$currentDate": {"lastLearnedAt": True},
+            },
+            upsert=True,
+        )
 
     extracted = _remember_best_things(user_oid, user_text) if isBestThing(user_text, recent) else 0
     idea = _detect_and_store_idea(user_oid, user_text, assistant_text, session_id, hub) if (
         isBestThing(user_text, recent) or isBestThing(assistant_text, recent)
     ) else None
+
+    if useful_messages:
+        try:
+            learnings().insert_one({
+                "userId": user_oid,
+                "sessionId": session_id,
+                "hub": hub[:40],
+                "usefulMessageCount": len(useful_messages),
+                "learnedFactCount": extracted,
+                "ideaCreated": bool(idea),
+                "createdAt": _now(),
+            })
+        except PyMongoError:
+            logger.warning("Learning telemetry could not be persisted")
+
     return {
         "storedMessages": len(useful_messages),
         "filteredMessages": len(candidates) - len(useful_messages),
