@@ -33,7 +33,9 @@ def hub_respond():
     vision_description = str(payload.get("visionDescription") or payload.get("vision_description") or "").strip()
     vision = payload.get("vision")
     hub = str(payload.get("hub") or "general").strip().lower()
-    user_id = str(payload.get("userId") or payload.get("user_id") or payload.get("sessionId") or "anonymous").strip()
+    # Use the conversation/session id as the default memory scope; a client-supplied
+# account id alone is not an authentication credential.
+user_id = str(payload.get("sessionId") or payload.get("session_id") or payload.get("userId") or payload.get("user_id") or "anonymous").strip()
 
     if not message and not vision_description and not vision:
         return jsonify({"ok": False, "error": "Provide a message or a camera vision description."}), 400
