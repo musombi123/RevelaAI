@@ -217,7 +217,9 @@ def _recent_messages(user_oid: ObjectId, limit: int = 5) -> list[str]:
             ).sort("updatedAt", DESCENDING).limit(5)
         )
         values: list[str] = []
-        for doc in docs:
+        # The query is newest-session-first; reverse sessions to evaluate
+        # duplicate detection against the true chronological tail.
+        for doc in reversed(docs):
             for message in doc.get("messages", []):
                 if isinstance(message, dict):
                     values.append(str(message.get("content") or ""))
