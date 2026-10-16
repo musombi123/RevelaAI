@@ -97,3 +97,27 @@ Full-Stack Developer | Tech-Faith Innovator
 
 📧 [musombiwilliam769@gmail.com](mailto:musombiwilliam769@gmail.com)
 🔗
+
+ 
+## RevelaAI Smart Memory v2 — deployment configuration
+
+RevelaAI stores filtered conversation memory in the separate MongoDB database `revelai`. It does not read or write `revelacode.users`; user existence is verified through the protected RevelaCode endpoint.
+
+Configure these server-side environment variables in the RevelaAI deployment (never commit secrets):
+
+- `MONGO_URI`: the same MongoDB Atlas Cluster0 connection string used by RevelaCode.
+- `JWT_SECRET`: the same JWT signing secret as RevelaCode so incoming Bearer tokens can be validated.
+- `REVELACODE_BACKEND_URL=https://revelacode-backend.onrender.com`
+- `REVELACODE_VERIFY_KEY`: a long, random shared service secret; configure the exact same value as `REVELAAI_VERIFY_KEY` in RevelaCode-Backend.
+- Optional: `REVELACODE_VERIFY_TIMEOUT_SECONDS=4`.
+
+RevelaCode-Backend remains the source of identity. RevelaAI validates the signed JWT, checks that its subject matches the requested user ID, and calls `GET /api/auth/verify/:userId` using the service key. Memory requests fail closed if identity verification is unavailable.
+
+Memory API (all user-specific requests require a valid Bearer JWT):
+
+- `POST /api/memory/chat` — filters and saves useful conversation turns.
+- `GET /api/memory/:userId` — returns the authenticated user's bestThings.
+- `POST /api/memory/ideas` and `GET /api/memory/ideas/:userId` — deduplicated ideas.
+- `DELETE /api/memory/useless/:userId` — prunes legacy noise from stored conversation messages.
+
+Noise is discarded before persistence. Idea records are proposals with status `new`; generated chat text is not executed as code or written into production files automatically. Implementation should be tested and reviewed before being marked implemented.
