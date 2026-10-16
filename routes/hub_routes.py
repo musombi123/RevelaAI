@@ -33,10 +33,12 @@ def hub_respond():
     vision_description = str(payload.get("visionDescription") or payload.get("vision_description") or "").strip()
     vision = payload.get("vision")
     hub = str(payload.get("hub") or "general").strip().lower()
-    # Use the conversation/session id as the default memory scope; a client-supplied
-# account id alone is not an authentication credential.
-user_id = str(payload.get("sessionId") or payload.get("session_id") or payload.get("userId") or payload.get("user_id") or "anonymous").strip()
-
+    # Require an unguessable chat session identifier; an account ID from the
+    # request body is not authentication and must not unlock another session memory.
+    session_id = str(payload.get("sessionId") or payload.get("session_id") or "").strip()
+    if not session_id:
+        return jsonify({"ok": False, "error": "sessionId is required."}), 400
+    user_id = session_id
     if not message and not vision_description and not vision:
         return jsonify({"ok": False, "error": "Provide a message or a camera vision description."}), 400
     if len(message) > MAX_MESSAGE_CHARS or len(vision_description) > MAX_VISION_CHARS:
