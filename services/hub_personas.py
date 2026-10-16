@@ -213,7 +213,7 @@ def respond(message: str, hub: str = "general", user_id: str = "", vision: Any =
     hub = normalize_hub(hub, message)
     vision_text = _vision_summary(vision, vision_description)
     user_id = str(user_id or "anonymous")[:256]
-    cache_key = hashlib.sha256(json.dumps([hub, message.lower(), vision_text], ensure_ascii=False).encode("utf-8")).hexdigest()
+    cache_key = hashlib.sha256(json.dumps([_safe_key(user_id), hub, message.lower(), vision_text], ensure_ascii=False).encode("utf-8")).hexdigest()
     now = time.time()
     with LOCK:
         cached = CACHE.get(cache_key)
