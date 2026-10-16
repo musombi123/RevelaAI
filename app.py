@@ -277,6 +277,10 @@ from routes.chat_routes import (
     chat_bp,
 )
 
+from routes.living_brain_routes import (
+    living_brain_bp,
+)
+
 from routes.explain_routes import (
     explain_bp,
 )
@@ -5625,6 +5629,21 @@ except Exception as exc:
 
     app.logger.warning(
         "chat_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        living_brain_bp,
+        url_prefix="/api/revelaai/v2",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "living_brain_bp registration failed | error=%s",
         exc,
     )
 
