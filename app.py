@@ -5669,7 +5669,8 @@ except Exception as exc:
 try:
 
     app.register_blueprint(
-        memory_bp
+        memory_bp,
+        url_prefix="/api/memory",
     )
 
 except Exception as exc:
