@@ -118,6 +118,7 @@ Memory API (all user-specific requests require a valid Bearer JWT):
 - `POST /api/memory/chat` — filters and saves useful conversation turns.
 - `GET /api/memory/:userId` — returns the authenticated user's bestThings.
 - `POST /api/memory/ideas` and `GET /api/memory/ideas/:userId` — deduplicated ideas.
+- `POST /api/memory/ideas/:ideaId/implementation` — records a reviewed implementation artifact and reference; submitted code is never executed by this endpoint.
 - `DELETE /api/memory/useless/:userId` — prunes legacy noise from stored conversation messages.
 
 Noise is discarded before persistence. Idea records are proposals with status `new`; generated chat text is not executed as code or written into production files automatically. Implementation should be tested and reviewed before being marked implemented.
