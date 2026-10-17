@@ -1,6 +1,8 @@
 name: Brain OS isolated candidate validation
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       candidate_ref:
@@ -13,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: brain-os-candidate-${{ github.run_id }}
+  group: brain-os-candidate-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -26,16 +28,22 @@ jobs:
       - name: Checkout candidate without persistent credentials
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.candidate_ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_ref || github.event.pull_request.head.sha }}
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install fixed test tooling
         run: python -m pip install --disable-pip-version-check pytest psutil pymongo flask requests
       - name: Check candidate diff formatting
-        run: git diff --check HEAD^ HEAD
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE="${BASE_SHA:-$(git rev-parse HEAD^)}"
+          git diff --check "${BASE}...HEAD"
       - name: Compile candidate modules
         run: python -m compileall -q meta_engineer routes/meta_engineer_routes.py revelai/sci_core revelai/routers/sci_core.py revelai/core/agi_manifest.py revelai/core/brain_os.py revelai/routers/agi_router.py tests/test_meta_engineer.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py
       - name: Run isolated candidate tests
@@ -47,7 +55,8 @@ jobs:
       - name: Create candidate evidence metadata
         if: always()
         env:
-          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          CANDIDATE_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_ref || github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
           TEST_OUTCOME: ${{ steps.tests.outcome }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -57,10 +66,12 @@ jobs:
           from datetime import datetime, timezone
           def git(*args):
               return subprocess.check_output(["git", *args], text=True).strip()
+          base = os.getenv("BASE_SHA") or git("rev-parse", "HEAD^")
           metadata = {
               "candidate_ref_requested": os.getenv("CANDIDATE_REF", ""),
               "candidate_commit": git("rev-parse", "HEAD"),
-              "changed_files_summary": git("show", "--format=", "--stat", "HEAD"),
+              "base_commit": base,
+              "changed_files_summary": git("diff", "--stat", base + "...HEAD"),
               "test_step_outcome": os.getenv("TEST_OUTCOME", "unknown"),
               "workflow_run_id": os.getenv("RUN_ID", ""),
               "workflow_run_attempt": os.getenv("RUN_ATTEMPT", ""),
