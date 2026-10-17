@@ -108,10 +108,10 @@ Configure these server-side environment variables in the RevelaAI deployment (ne
 - `MONGO_URI`: the same MongoDB Atlas Cluster0 connection string used by RevelaCode.
 - `JWT_SECRET`: the same JWT signing secret as RevelaCode so incoming Bearer tokens can be validated.
 - `REVELACODE_BACKEND_URL=https://revelacode-backend.onrender.com`
-- `REVELACODE_VERIFY_KEY`: a long, random shared service secret; configure the exact same value as `REVELAAI_VERIFY_KEY` in RevelaCode-Backend.
+- `REVELAAI_SERVICE_KEY`: a long, random shared service secret; configure the exact same value in both RevelaAI and RevelaCode-Backend. Never expose it to the browser or commit it.
 - Optional: `REVELACODE_VERIFY_TIMEOUT_SECONDS=4`.
 
-RevelaCode-Backend remains the source of identity. RevelaAI validates the signed JWT, checks that its subject matches the requested user ID, and calls `GET /api/auth/verify/:userId` using the service key. Memory requests fail closed if identity verification is unavailable.
+RevelaCode-Backend remains the source of identity. The frontend can use `GET /api/auth/me` with its existing Bearer JWT to retrieve the canonical `userId`. RevelaAI validates the signed JWT, checks that its subject matches the requested user ID, and calls `GET /api/auth/verify/:userId` using `X-REVELAAI-SERVICE-KEY`. Memory requests fail closed if identity verification is unavailable.
 
 Memory API (all user-specific requests require a valid Bearer JWT):
 
