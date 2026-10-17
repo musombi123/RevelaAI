@@ -135,8 +135,23 @@ def isBestThing(text: str, recent_messages: list[str] | None = None) -> bool:
         value,
         re.IGNORECASE,
     )
-    if len(normalized.split()) < 3 and not short_fact:
+    word_count = len(normalized.split())
+    if word_count < 2:
         return False
+    if word_count == 2 and not short_fact:
+        # Keep concise but meaningful preference/identity fragments and
+        # two-word proper names/locations; discard generic two-word chatter.
+        explicit_preference = re.search(
+            r"\\b(?:no|avoid|prefer|use|remember|farm|business|goal)\\b",
+            value,
+            re.IGNORECASE,
+        )
+        words = [word.strip(".,!?;:()[]{}") for word in value.split()]
+        proper_name_or_place = bool(words) and all(
+            word and word[0].isupper() for word in words
+        )
+        if not explicit_preference and not proper_name_or_place:
+            return False
     for prior in (recent_messages or [])[-5:]:
         prior_normalized = _normalize(prior)
         if prior_normalized and normalized == prior_normalized:
