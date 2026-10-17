@@ -16,8 +16,11 @@ MEMORY_LIMIT_MB = 150
 def _memory_mb(pid: int) -> float:
     """Measure pytest RSS; psutil is a required dependency for this module."""
     import psutil
-    process = psutil.Process(pid)
-    total = process.memory_info().rss
+    try:
+        process = psutil.Process(pid)
+        total = process.memory_info().rss
+    except psutil.NoSuchProcess:
+        return 0.0
     for child in process.children(recursive=True):
         try:
             total += child.memory_info().rss
