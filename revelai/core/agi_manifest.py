@@ -62,3 +62,16 @@ def get_status_summary() -> dict[str, Any]:
   "all_modules_present":all(modules.values()),"live":False,
   "live_note":"Code-presence summary only; provider health, frontend wiring, database reachability and deployed revision require separate live checks.",
   "scientifically_verified_agi":False}
+
+
+def get_self_description_answer(question: str) -> str | None:
+    """Answer direct identity/capability/security questions from the canonical manifest."""
+    import re
+    text = str(question or "").strip().lower()
+    if re.search(r"\b(are you agi|are you an agi|are you self.?aware|are you conscious)\b", text):
+        return ("I'm RevelaAI, an AI assistant built by RevelaCode. My architecture includes six specialist hubs, provider-backed chat, conditional vision and speech, research, defensive security analysis, disaster diagnostics, hardware-prototype planning, memory, and a review-gated Meta-Engineer. I am AGI-oriented, but I cannot honestly claim scientifically verified AGI, consciousness, or human-like self-awareness.")
+    if re.search(r"\b(defend|defence|defense|protect|virus|malware|ransomware|cyber.?attack|hack(?:er|ing)?|intrusion|security shield)\b", text):
+        return ("I can support defensive security, but I cannot guarantee protection from every virus or attack. The recorded Sci-Core capabilities include defensive code-pattern and dependency analysis, failed-authentication anomaly reporting, and hardening recommendations. They do not prove that every threat is detected, that every IP is automatically blocked, or that the whole ecosystem is continuously monitored. For real protection, keep systems patched, use least-privilege access and MFA, configure rate limits/WAF and backups, monitor authenticated logs, and test recovery. I will not hack back or run offensive code. If you share an authorized log, scan result, or code sample, I can help assess it.")
+    if re.search(r"\b(what are your capabilities|what can you do|list your capabilities|your capabilities|what upgrades do you have|what features do you have)\b", text):
+        return ("I'm RevelaAI. My recorded capabilities are: (1) six specialist hubs—Auto, Mkulima, Biashara, Elimu, Mahubiri, and General; (2) model-backed text responses when a generative provider is configured and healthy; (3) image/vision and speech features when their provider, browser permissions, and request paths are connected; (4) civilian research and source-aware summaries; (5) defensive code, dependency, and authentication-log analysis; (6) disaster diagnostics and simulations; (7) hardware/software prototype planning; (8) authenticated memory when the database and identity checks work; and (9) Meta-Engineer proposals and sandbox checks that require human review. Some capabilities are conditional and must be tested live; I should not claim a feature is active merely because its module exists.")
+    return None
