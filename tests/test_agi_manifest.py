@@ -1,5 +1,5 @@
 import unittest
-from revelai.core.agi_manifest import AGI_MANIFEST, get_manifest, get_status_summary
+from revelai.core.agi_manifest import AGI_MANIFEST, get_manifest, get_status_summary, get_self_description_answer
 from revelai.routers.agi_router import agi_router
 
 class AGIManifestTests(unittest.TestCase):
@@ -17,4 +17,14 @@ class AGIManifestTests(unittest.TestCase):
   self.assertFalse(status["live"])
  def test_router_declares_routes(self):
   self.assertGreaterEqual(len(agi_router.deferred_functions),2)
+ def test_capabilities_question_uses_manifest_answer(self):
+  answer=get_self_description_answer("What are your capabilities?")
+  self.assertIn("six specialist hubs",answer)
+  self.assertIn("conditional",answer.lower())
+ def test_defensive_question_does_not_claim_total_protection(self):
+  answer=get_self_description_answer("Can you defend the ecosystem from any virus or attack?")
+  self.assertIn("cannot guarantee protection from every virus or attack",answer)
+  self.assertIn("will not hack back",answer)
+ def test_unrelated_request_is_not_intercepted(self):
+  self.assertIsNone(get_self_description_answer("I want to build something"))
 if __name__=="__main__": unittest.main()
