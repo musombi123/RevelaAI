@@ -314,6 +314,7 @@ from routes.meta_engineer_routes import (
 )
 
 from revelai.routers.sci_core import sci_router
+from revelai.routers.agi_router import agi_router
 
 from whatsapp_webhook import (
     whatsapp_bp,
@@ -5911,6 +5912,21 @@ except Exception as exc:
 
     app.logger.warning(
         "sci_router registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        agi_router,
+        url_prefix="/api/agi",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "agi_router registration failed | error=%s",
         exc,
     )
 
