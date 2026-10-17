@@ -18,8 +18,8 @@ jobs:
     timeout-minutes: 10
     env:
       REVELAAI_ALERT_WEBHOOK_URL: ${{ secrets.REVELAAI_ALERT_WEBHOOK_URL }}
-    REVELAAI_MONITOR_TARGETS_JSON: ${{ vars.REVELAAI_MONITOR_TARGETS_JSON }}
-    REVELAAI_MONITOR_ALLOWED_HOSTS: ${{ vars.REVELAAI_MONITOR_ALLOWED_HOSTS }}
+      REVELAAI_MONITOR_TARGETS_JSON: ${{ vars.REVELAAI_MONITOR_TARGETS_JSON }}
+      REVELAAI_MONITOR_ALLOWED_HOSTS: ${{ vars.REVELAAI_MONITOR_ALLOWED_HOSTS }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
