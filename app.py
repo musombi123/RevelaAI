@@ -765,6 +765,8 @@ CORS(
     allow_headers=[
         "Content-Type",
         "Authorization",
+        "userId",
+        "X-User-ID",
         "X-Session-ID",
         "X-Request-ID",
     ],
