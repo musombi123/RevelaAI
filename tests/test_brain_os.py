@@ -129,6 +129,9 @@ def test_outcome_summary_separates_delivery_quality_feedback_and_provider_metric
         result = outcome_summary()
     coding = result["categories"]["coding"]
     assert coding["sample_size"] == 3
+    assert coding["freshness_window_hours"] == 72
+    assert coding["stale_sample_size"] == 3
+    assert coding["latest_observation_at"] is not None
     assert coding["delivery_sample_size"] == 3
     assert coding["delivery_success_rate"] == round(2 / 3, 3)
     assert coding["success_rate"] == coding["delivery_success_rate"]

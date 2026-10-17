@@ -452,8 +452,23 @@ def outcome_summary() -> dict[str, Any]:
             return result
 
         delivery_rate = _rate(delivery_rows, "_delivery_value")
+        observed_times = [
+            parsed for row in rows
+            if (parsed := _parse_outcome_time(row.get("created_at"))) is not None
+        ]
+        summary_now = datetime.now(timezone.utc)
+        stale_sample_size = sum(
+            1 for row in rows
+            if (parsed := _parse_outcome_time(row.get("created_at"))) is None
+            or parsed > summary_now
+            or (summary_now - parsed).total_seconds() > 72 * 3600
+        )
+        latest_observation = max(observed_times, default=None)
         return {
             "sample_size": len(rows),
+            "latest_observation_at": latest_observation.isoformat() if latest_observation else None,
+            "freshness_window_hours": 72,
+            "stale_sample_size": stale_sample_size,
             "delivery_sample_size": len(delivery_rows),
             "delivery_success_rate": delivery_rate,
             # Backward-compatible alias; success_rate always describes delivery.
