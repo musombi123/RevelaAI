@@ -192,19 +192,25 @@ def _authenticate() -> tuple[ObjectId | None, str | None, tuple | None]:
     except (InvalidId, TypeError, ValueError):
         return None, None, (jsonify(status="error", code="invalid_user_identity"), 401)
 
-    # Identity hints are accepted only when they match the signed JWT.
-    # The header never establishes identity on its own.
-    requested_id = str(
-        request.headers.get("userId")
-        or request.headers.get("X-User-ID")
-        or (
-            request.view_args.get("user_id")
-            if request.view_args and request.view_args.get("user_id")
-            else (request.get_json(silent=True) or {}).get("userId", "")
+    # Identity hints are accepted only when every supplied value matches
+    # the signed JWT. No header, URL parameter, or body field establishes identity.
+    body_user_id = (request.get_json(silent=True) or {}).get("userId", "")
+    path_user_id = (
+        request.view_args.get("user_id", "")
+        if request.view_args
+        else ""
+    )
+    identity_hints = [
+        str(value).strip()
+        for value in (
+            request.headers.get("userId", ""),
+            request.headers.get("X-User-ID", ""),
+            path_user_id,
+            body_user_id,
         )
-        or ""
-    ).strip()
-    if requested_id and requested_id != str(user_oid):
+        if value is not None and str(value).strip()
+    ]
+    if any(value != str(user_oid) for value in identity_hints):
         return None, None, (jsonify(status="error", code="user_identity_mismatch"), 403)
 
     return user_oid, str(user_oid), None
