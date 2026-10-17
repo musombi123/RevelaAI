@@ -675,10 +675,7 @@ def simulate_recovery_action(
     else:
         decision = "ready_for_approval_simulation"
 
-    attempt_consumed = (
-        preconditions_met and not retry_exhausted and not cooldown_active
-        and simulated_verification != "not_run"
-    )
+    attempt_consumed = preconditions_met and not retry_exhausted and not cooldown_active
     audit_event = {
         "schema_version": "1.1",
         "incident_ref": incident_ref,
@@ -687,6 +684,7 @@ def simulate_recovery_action(
         "severity": action["severity"],
         "mode": "simulation_only",
         "policy_decision": decision,
+        "simulation_result": "preconditions_met" if preconditions_met else "preconditions_not_met",
         "preconditions_met": preconditions_met,
         "unmet_preconditions": unmet,
         "attempt_count": len(previous_attempts) + int(attempt_consumed),
