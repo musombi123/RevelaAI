@@ -19,7 +19,9 @@ def build_prototype(domain, spec):
         "bom.json":json.dumps([{"item":"ESP32-C3 dev board","purpose":"controller","source_search":"Jumia Kenya or AliExpress; verify seller and specifications"},{"item":"Capacitive soil moisture sensor","purpose":"soil measurement","source_search":"Jumia Kenya or AliExpress; compare shipping and calibration"},{"item":"Fused protected low-voltage supply","purpose":"power","source_search":"local certified electronics supplier"},{"item":"IP-rated enclosure and cable glands","purpose":"weather protection","source_search":"local hardware/electronics supplier"}],indent=2),
         "safety.md":"# Electrical safety\nUse low-voltage DC only in the prototype. Never expose mains terminals. Have a qualified electrician install mains-powered pumps. Size wires, fuses, connectors, drivers and power supply to the load. Keep water away from electronics. Test with a current-limited supply and independent cutoff. Do not connect a relay directly to a GPIO.\n"}
     record={"domain":domain,"spec":spec,"name":slug,"artifacts":artifacts,"status":"prototype_generated_review_required","createdAt":datetime.now(timezone.utc).isoformat(),"executed":False,"defensive_only":True}
-    col = collection("hardware_lab")\n    col.insert_one(record.copy())\n    record["storage_backend"] = getattr(col, "backend", "mongodb")
+    col = collection("hardware_lab")
+    col.insert_one(record.copy())
+    record["storage_backend"] = getattr(col, "backend", "mongodb")
     return record
 
 def register_routes(bp):
