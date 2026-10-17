@@ -129,9 +129,9 @@ def isBestThing(text: str, recent_messages: list[str] | None = None) -> bool:
     # Most fragments are not useful memories, but short explicit facts and
     # preferences must not be discarded just because they contain few words.
     short_fact = re.search(
-        r"\\b(?:my name is|call me|i live in|i am based in|i'm based in|"
+        r"\b(?:my name is|call me|i live in|i am based in|i'm based in|"
         r"i prefer|my goal is|my business is|my farm is|i grow|i raise|"
-        r"my preferred language is|my preferred hub is)\\b",
+        r"my preferred language is|my preferred hub is)\b",
         value,
         re.IGNORECASE,
     )
