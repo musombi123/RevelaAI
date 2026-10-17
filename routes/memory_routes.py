@@ -178,7 +178,8 @@ def _authenticate() -> tuple[ObjectId | None, str | None, tuple | None]:
             token,
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
+            # The existing RevelaCode signer uses "user_id" (not "sub").
+            options={"require": ["iat", "exp"]},
         )
     except jwt.ExpiredSignatureError:
         return None, None, (jsonify(status="error", code="token_expired"), 401)
