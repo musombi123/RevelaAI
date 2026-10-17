@@ -81,3 +81,67 @@ def test_release_gate_requires_health_evidence_and_valid_refs():
             approved=True,
             health_check_passed=True,
         )
+
+def test_connector_contract_rejects_undeclared_capabilities_and_connectors():
+    import pytest
+    from revelai.sci_core.connector_contract import (
+        ConnectorManifest, ConnectorRegistry, MockSecurityConnector, validate_manifest,
+    )
+
+    with pytest.raises(ValueError):
+        validate_manifest(ConnectorManifest(
+            connector_id="lab-gateway",
+            connector_type="hardware_simulator",
+            capabilities=("run_arbitrary_command",),
+            permissions=("read_telemetry",),
+            target_scope="company-lab",
+        ))
+    registry = ConnectorRegistry(allowed_connector_ids={"approved-lab"})
+    with pytest.raises(PermissionError):
+        registry.register(MockSecurityConnector(connector_id="unapproved-lab"))
+
+
+def test_connector_contract_retries_transient_reads_with_a_bounded_limit():
+    from revelai.sci_core.connector_contract import ConnectorRegistry, MockSecurityConnector
+
+    adapter = MockSecurityConnector(connector_id="approved-lab", fail_reads_remaining=1)
+    registry = ConnectorRegistry(allowed_connector_ids={"approved-lab"})
+    registry.register(adapter)
+    result = registry.read_telemetry("approved-lab")
+    assert result["ok"] is True
+    assert result["data"]["device_status"] == "simulated"
+    assert adapter.read_attempts == 2
+
+
+def test_connector_contract_enforces_timeout_and_requires_action_allowlist():
+    import pytest
+    from revelai.sci_core.connector_contract import (
+        ConnectorRegistry, ConnectorTimeout, MockSecurityConnector,
+    )
+
+    slow = MockSecurityConnector(connector_id="slow-lab", simulated_latency_ms=5000, request_timeout_seconds=0.01)
+    registry = ConnectorRegistry(allowed_connector_ids={"slow-lab"})
+    registry.register(slow)
+    with pytest.raises(ConnectorTimeout):
+        registry.read_telemetry("slow-lab")
+
+    adapter = MockSecurityConnector(connector_id="approved-lab", action_ids=("pulse_test",))
+    registry = ConnectorRegistry(allowed_connector_ids={"approved-lab"})
+    registry.register(adapter)
+    with pytest.raises(PermissionError):
+        registry.simulate_action("approved-lab", "unlock_door", {}, "idem-001")
+
+
+def test_connector_contract_simulated_actions_are_idempotent_and_never_actuate():
+    from revelai.sci_core.connector_contract import ConnectorRegistry, MockSecurityConnector
+
+    adapter = MockSecurityConnector(connector_id="approved-lab", action_ids=("pulse_test",))
+    registry = ConnectorRegistry(allowed_connector_ids={"approved-lab"})
+    registry.register(adapter)
+    first = registry.simulate_action("approved-lab", "pulse_test", {"duration_ms": 50}, "idem-002")
+    second = registry.simulate_action("approved-lab", "pulse_test", {"duration_ms": 50}, "idem-002")
+    assert first == second
+    assert first["simulated"] is True
+    assert first["external_side_effects"] is False
+    assert first["executed"] is False
+    assert adapter.simulated_action_count == 1
