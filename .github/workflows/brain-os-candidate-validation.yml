@@ -1,0 +1,86 @@
+name: Brain OS isolated candidate validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: Branch, tag, or commit ref to validate
+        required: true
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-os-candidate-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  candidate-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout candidate without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_ref }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install fixed test tooling
+        run: python -m pip install --disable-pip-version-check pytest psutil pymongo flask requests
+      - name: Check candidate diff formatting
+        run: git diff --check HEAD^ HEAD
+      - name: Compile candidate modules
+        run: python -m compileall -q meta_engineer routes/meta_engineer_routes.py revelai/sci_core revelai/routers/sci_core.py revelai/core/agi_manifest.py revelai/core/brain_os.py revelai/routers/agi_router.py tests/test_meta_engineer.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py
+      - name: Run isolated candidate tests
+        id: tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/test_meta_engineer.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py 2>&1 | tee test-results.txt
+      - name: Create candidate evidence metadata
+        if: always()
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from datetime import datetime, timezone
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          metadata = {
+              "candidate_ref_requested": os.getenv("CANDIDATE_REF", ""),
+              "candidate_commit": git("rev-parse", "HEAD"),
+              "changed_files_summary": git("show", "--format=", "--stat", "HEAD"),
+              "test_step_outcome": os.getenv("TEST_OUTCOME", "unknown"),
+              "workflow_run_id": os.getenv("RUN_ID", ""),
+              "workflow_run_attempt": os.getenv("RUN_ATTEMPT", ""),
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "execution_mode": "isolated_ci_no_production_secrets",
+              "deployment_performed": False,
+          }
+          with open("candidate-evidence.json", "w", encoding="utf-8") as f:
+              json.dump(metadata, f, indent=2)
+          with open("candidate-diff-summary.txt", "w", encoding="utf-8") as f:
+              f.write(metadata["changed_files_summary"] + "\n")
+          PY
+      - name: Publish test evidence and diff metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brain-os-candidate-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            candidate-evidence.json
+            candidate-diff-summary.txt
+            test-results.txt
+          if-no-files-found: warn
+          retention-days: 14
