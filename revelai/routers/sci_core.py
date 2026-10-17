@@ -2,7 +2,7 @@
 DEFENSIVE_ONLY = True
 from flask import Blueprint, jsonify
 from routes.meta_engineer_routes import _authenticated_admin
-from . import research_engine, defensive_shield, disaster_manager, hardware_lab
+from ..sci_core import research_engine, defensive_shield, disaster_manager, hardware_lab
 from ..sci_core.storage import collection
 sci_router=Blueprint("sci_core",__name__)
 
