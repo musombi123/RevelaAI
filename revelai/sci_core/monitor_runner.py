@@ -56,11 +56,173 @@ def _public_finding(finding: dict[str, Any]) -> dict[str, Any]:
     severity = str(finding.get("severity") or "medium").lower()
     if severity not in SEVERITY_ORDER:
         severity = "medium"
-    allowed = ("type", "file", "line", "package", "version_constraint", "id", "count", "fix_suggestion", "check")
+    allowed = ("type", "file", "line", "package", "version_constraint", "id", "count", "fix_suggestion", "check", "target_id", "status_code")
     public = {key: finding[key] for key in allowed if key in finding and isinstance(finding[key], (str, int, float, bool))}
     public["severity"] = severity
     public["fingerprint"] = _fingerprint(finding)
     return public
+
+
+
+_TARGET_ID_PATTERN = __import__("re").compile(r"^[a-z][a-z0-9-]{1,39}$")
+
+
+def collect_runtime_endpoint_checks(
+    targets_json: str | None = None,
+    allowed_hosts: str | None = None,
+) -> list[dict[str, Any]]:
+    """Probe explicitly allowlisted HTTPS health endpoints without following redirects.
+
+    Target URLs are configuration, not model input. Request bodies and complete
+    URLs are never stored in findings; only the configured target ID is emitted.
+    """
+    from urllib.parse import urlsplit
+    import ipaddress
+    import re
+
+    raw_targets = targets_json if targets_json is not None else os.getenv("REVELAAI_MONITOR_TARGETS_JSON", "")
+    raw_hosts = allowed_hosts if allowed_hosts is not None else os.getenv("REVELAAI_MONITOR_ALLOWED_HOSTS", "")
+    hosts = {host.strip().lower().rstrip(".") for host in str(raw_hosts).split(",") if host.strip()}
+    if not str(raw_targets).strip() or not hosts:
+        return [{
+            "type": "monitor_check_failed",
+            "severity": "high",
+            "check": "runtime_endpoints",
+            "fix_suggestion": (
+                "Configure REVELAAI_MONITOR_TARGETS_JSON and REVELAAI_MONITOR_ALLOWED_HOSTS "
+                "with owned, public HTTPS health endpoints."
+            ),
+        }]
+
+    try:
+        targets = json.loads(raw_targets)
+    except (TypeError, ValueError):
+        targets = None
+    if not isinstance(targets, list) or not 1 <= len(targets) <= 25:
+        return [{
+            "type": "monitor_check_failed",
+            "severity": "high",
+            "check": "runtime_endpoints",
+            "fix_suggestion": "Targets config must be a JSON array with 1–25 target objects.",
+        }]
+
+    normalized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for target in targets:
+        if not isinstance(target, dict) or set(target) - {"id", "url", "expected_statuses"}:
+            return [{
+                "type": "monitor_check_failed",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "fix_suggestion": "Each target may only declare id, url and expected_statuses.",
+            }]
+        target_id = target.get("id")
+        target_url = target.get("url")
+        statuses = target.get("expected_statuses", [200])
+        if not isinstance(target_id, str) or not _TARGET_ID_PATTERN.fullmatch(target_id):
+            return [{
+                "type": "monitor_check_failed",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "fix_suggestion": "Every target requires a short lowercase id.",
+            }]
+        if target_id in seen_ids:
+            return [{
+                "type": "monitor_check_failed",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "fix_suggestion": "Target IDs must be unique.",
+            }]
+        seen_ids.add(target_id)
+        if not isinstance(target_url, str):
+            return [{
+                "type": "monitor_check_failed",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "fix_suggestion": "Each target requires a URL string.",
+            }]
+        try:
+            parsed = urlsplit(target_url)
+            host = (parsed.hostname or "").lower().rstrip(".")
+            port = parsed.port
+            host_is_ip = False
+            try:
+                ipaddress.ip_address(host)
+                host_is_ip = True
+            except ValueError:
+                pass
+        except ValueError:
+            parsed, host, port, host_is_ip = None, "", None, True
+        if (
+            parsed is None
+            or parsed.scheme.lower() != "https"
+            or not host
+            or host not in hosts
+            or host_is_ip
+            or port not in (None, 443)
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            return [{
+                "type": "monitor_check_failed",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "fix_suggestion": (
+                    "Target must use HTTPS on port 443, an exact configured hostname, "
+                    "and no credentials, query string or fragment."
+                ),
+            }]
+        if (
+            not isinstance(statuses, list)
+            or not statuses
+            or any(type(status) is not int or not 200 <= status <= 299 for status in statuses)
+        ):
+            return [{
+                "type": "monitor_check_failed",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "fix_suggestion": "expected_statuses must be a non-empty list of HTTP 2xx integers.",
+            }]
+        normalized.append({"id": target_id, "url": target_url, "expected_statuses": statuses})
+
+    findings: list[dict[str, Any]] = []
+    for target in normalized:
+        try:
+            response = requests.get(
+                target["url"],
+                timeout=5,
+                allow_redirects=False,
+                headers={"User-Agent": "RevelaAI-Defensive-Monitor/1.0", "Accept": "application/json,text/plain,*/*"},
+            )
+            if response.status_code in target["expected_statuses"]:
+                findings.append({
+                    "type": "runtime_endpoint_healthy",
+                    "severity": "info",
+                    "check": "runtime_endpoints",
+                    "target_id": target["id"],
+                    "status_code": response.status_code,
+                })
+            else:
+                severity = "critical" if response.status_code >= 500 else "high"
+                findings.append({
+                    "type": "runtime_endpoint_unhealthy",
+                    "severity": severity,
+                    "check": "runtime_endpoints",
+                    "target_id": target["id"],
+                    "status_code": response.status_code,
+                    "fix_suggestion": "Inspect the service health endpoint and application logs; the monitor did not follow redirects.",
+                })
+        except requests.RequestException:
+            findings.append({
+                "type": "runtime_endpoint_unreachable",
+                "severity": "high",
+                "check": "runtime_endpoints",
+                "target_id": target["id"],
+                "fix_suggestion": "The configured HTTPS health endpoint did not respond within the bounded timeout.",
+            })
+    return findings
 
 
 def _collect_checks() -> dict[str, list[dict[str, Any]]]:
@@ -71,6 +233,7 @@ def _collect_checks() -> dict[str, list[dict[str, Any]]]:
         "code": defensive_shield.scan_codebase,
         "auth": defensive_shield.scan_auth_logs,
         "dependencies": defensive_shield.dependency_scan,
+        "runtime_endpoints": collect_runtime_endpoint_checks,
     }
     for name, function in functions.items():
         try:
@@ -194,9 +357,21 @@ def monitor_once(
         alert_status = "no_new_incidents"
 
     status = "ok" if alert_status in {"sent", "no_new_incidents"} and not check_failures else "degraded"
+    runtime_checks = check_results.get("runtime_endpoints", [])
+    runtime_config_errors = [item for item in runtime_checks if item.get("type") == "monitor_check_failed"]
+    runtime_health_checks = [item for item in runtime_checks if str(item.get("type", "")).startswith("runtime_endpoint_")]
+    runtime_summary = {
+        "configured": not runtime_config_errors,
+        "target_count": len(runtime_health_checks),
+        "healthy_count": sum(1 for item in runtime_health_checks if item.get("type") == "runtime_endpoint_healthy"),
+        "unhealthy_count": sum(1 for item in runtime_health_checks if item.get("type") in {"runtime_endpoint_unhealthy", "runtime_endpoint_unreachable"}),
+        "redirects_followed": False,
+        "response_bodies_stored": False,
+    }
     return {
         "status": status,
         "checks_run": sorted(check_results.keys()),
+        "runtime_endpoints": runtime_summary,
         "findings_count": len(findings),
         "alerts_sent": len(new_incidents) if alert_status == "sent" else 0,
         "duplicates_suppressed": suppressed,
