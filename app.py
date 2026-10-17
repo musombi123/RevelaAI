@@ -315,6 +315,7 @@ from routes.meta_engineer_routes import (
 
 from revelai.routers.sci_core import sci_router
 from revelai.routers.agi_router import agi_router
+from revelai.core.agi_manifest import get_self_description_answer
 
 from whatsapp_webhook import (
     whatsapp_bp,
@@ -3427,11 +3428,15 @@ def ai_assistant():
         # -------------------------------------------------
 
         identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
-        if identity_reply:
+        self_description_reply = get_self_description_answer(message)
+        if identity_reply or self_description_reply:
+            direct_reply = identity_reply or self_description_reply
+            direct_intent = "identity" if identity_reply else "self_description"
             ai_result = {
-                "response": identity_reply, "confidence": "high", "intent": "identity",
-                "domain": interaction.get("hub", "auto"), "provider": "revelaai-hub-identity",
-                "model": "hub-identity-policy",
+                "response": direct_reply, "confidence": "high", "intent": direct_intent,
+                "domain": interaction.get("hub", "auto"),
+                "provider": "revelaai-manifest" if self_description_reply else "revelaai-hub-identity",
+                "model": "agi-manifest-policy" if self_description_reply else "hub-identity-policy",
             }
         else:
             ai_result = process_message(
