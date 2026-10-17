@@ -119,7 +119,7 @@ def test_connector_contract_enforces_timeout_and_requires_action_allowlist():
         ConnectorRegistry, ConnectorTimeout, MockSecurityConnector,
     )
 
-    slow = MockSecurityConnector(connector_id="slow-lab", simulated_latency_ms=5000, request_timeout_seconds=0.01)
+    slow = MockSecurityConnector(connector_id="slow-lab", simulated_latency_ms=5000, request_timeout_seconds=0.05)
     registry = ConnectorRegistry(allowed_connector_ids={"slow-lab"})
     registry.register(slow)
     with pytest.raises(ConnectorTimeout):
