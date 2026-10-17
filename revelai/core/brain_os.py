@@ -130,8 +130,11 @@ def diagnose_and_recover() -> dict[str, Any]:
     try:
         from ai.ai_client import get_text_provider_status
         provider = get_text_provider_status()
-        checks.append({"component": "text_provider", "status": "configured_unverified",
-                       "evidence": provider if isinstance(provider, (dict, list, str, bool, int, float, type(None))) else type(provider).__name__})
+        # Never echo provider configuration payloads: they may grow to include
+        # environment-derived details. Report only the provider-status shape.
+        provider_configured = bool(provider)
+        checks.append({"component": "text_provider", "status": "configured_unverified" if provider_configured else "degraded",
+                       "evidence": "provider_status_available" if provider_configured else "provider_not_confirmed"})
     except Exception as exc:
         checks.append({"component": "text_provider", "status": "degraded", "evidence": type(exc).__name__})
     overall = "healthy" if checks and all(item["status"] == "healthy" for item in checks) else "degraded_or_unverified"
