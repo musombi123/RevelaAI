@@ -43,7 +43,7 @@ class FakeCollection:
 
 def test_capability_inventory_distinguishes_presence_from_runtime_health():
     result = capability_inventory()
-    assert "brain_os" not in result["capabilities"]  # the inventory reports modules it can assess
+    assert result["capabilities"]["brain_os"]["implemented_in_source"] is True
     assert result["capabilities"]["meta_engineer"]["runtime_healthy"] is None
     assert "interpretation" in result
 
