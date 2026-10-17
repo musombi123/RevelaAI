@@ -36,12 +36,16 @@ def _authenticated_admin():
         candidates = [body]
         for key in ("data", "user", "profile"):
             if isinstance(body.get(key), dict): candidates.append(body[key])
-        role = next((str(item.get("role", "")).lower() for item in candidates if item.get("role")), "")
-        backend_id = next((str(item.get("userId") or item.get("id") or item.get("_id") or "")
-                           for item in candidates if item.get("userId") or item.get("id") or item.get("_id")), "")
-        if backend_id and backend_id != str(user_id):
+        backend_id = str(body.get("userId") or body.get("id") or "")
+        if backend_id != str(user_id):
             return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
-        if role != "admin":
+        # The existing /api/auth/me endpoint confirms identity but deliberately
+        # does not expose role. Require a server-side allowlist of known admins.
+        # Never trust a caller-supplied userId or role field.
+        allowed_admins = {item.strip() for item in os.getenv("META_ENGINEER_ADMIN_USER_IDS", "").split(",") if item.strip()}
+        if not allowed_admins:
+            return None, (jsonify({"status": "error", "code": "admin_allowlist_not_configured"}), 503)
+        if str(user_id) not in allowed_admins:
             return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
         return str(user_id), None
     except (requests.RequestException, ValueError):
