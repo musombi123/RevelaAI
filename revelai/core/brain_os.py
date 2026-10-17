@@ -89,7 +89,7 @@ def _normalize_dimension(value: Any, field: str) -> str | None:
         raise ValueError(f"{field} must contain only safe identifier characters (max 100)")
     # Display names may contain spaces; normalize them to stable IDs. Symbols
     # such as @ are rejected to avoid persisting arbitrary identifiers.
-    return re.sub(r"\\s+", "-", clean).lower()
+    return re.sub(r"\s+", "-", clean).lower()
 
 
 def _safe_actor(actor: str | None) -> str:
