@@ -10,6 +10,8 @@ from revelai.core.brain_os import (
     outcome_summary,
     record_outcome,
     record_chat_outcome,
+    recovery_action_catalog,
+    simulate_recovery_action,
 )
 from revelai.routers.agi_router import agi_router
 
@@ -147,6 +149,69 @@ def test_outcome_recording_rejects_invalid_quality_and_dimensions():
         record_outcome("coding", True, provider="email@example.com")
     with pytest.raises(ValueError):
         record_outcome("coding", True, outcome_source="untrusted-arbitrary-source")
+
+
+def test_recovery_catalog_is_simulation_only_and_has_no_executable_handlers():
+    catalog = recovery_action_catalog()
+    assert catalog["mode"] == "simulation_only"
+    assert catalog["execution_enabled"] is False
+    assert len(catalog["actions"]) >= 3
+    assert all(action["execution_enabled"] is False for action in catalog["actions"].values())
+    assert all(action["human_approval_required_for_real_action"] is True for action in catalog["actions"].values())
+
+
+def test_recovery_simulation_checks_preconditions_and_writes_privacy_safe_audit():
+    fake = FakeCollection()
+    evidence = {
+        "component": "text_provider",
+        "status": "degraded",
+        "retry_budget_available": True,
+    }
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = simulate_recovery_action("retry_provider_once", "INC-123", evidence)
+    assert result["status"] == "simulated"
+    assert result["preconditions_met"] is True
+    assert result["simulation_result"] == "preconditions_met"
+    assert result["executed"] is False
+    assert result["external_side_effects"] is False
+    assert result["execution_enabled"] is False
+    assert result["audit_recorded"] is True
+    assert len(fake.rows) == 1
+    audit = fake.rows[0]
+    assert audit["action_id"] == "retry_provider_once"
+    assert audit["executed"] is False
+    assert "INC-123" not in str(audit)
+    assert audit["incident_ref"] == result["incident_ref"]
+
+
+def test_recovery_simulation_blocks_unmet_preconditions_and_unknown_actions():
+    fake = FakeCollection()
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = simulate_recovery_action(
+            "retry_provider_once",
+            "INC-124",
+            {"component": "text_provider", "status": "healthy", "retry_budget_available": False},
+        )
+    assert result["preconditions_met"] is False
+    assert result["executed"] is False
+    assert "status" in result["unmet_preconditions"]
+    assert "retry_budget_available" in result["unmet_preconditions"]
+    assert fake.rows[0]["simulation_result"] == "preconditions_not_met"
+    with pytest.raises(ValueError):
+        simulate_recovery_action("run_shell_command", "INC-125", {})
+
+
+def test_recovery_simulation_rejects_unbounded_input_and_fails_closed_on_audit_error():
+    with pytest.raises(ValueError):
+        simulate_recovery_action("retry_provider_once", "incident with spaces", {})
+    with pytest.raises(ValueError):
+        simulate_recovery_action("retry_provider_once", "INC-126", {"raw_prompt": "do something"})
+    with patch("revelai.sci_core.storage.collection", side_effect=OSError("audit unavailable")):
+        with pytest.raises(OSError):
+            simulate_recovery_action(
+                "retry_provider_once", "INC-127",
+                {"component": "text_provider", "status": "degraded", "retry_budget_available": True},
+            )
 
 
 def test_engineering_guardrails_keep_production_mutation_disabled():
