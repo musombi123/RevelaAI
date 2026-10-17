@@ -1,9 +1,17 @@
 """Sci-Core route registration and administrator-only oversight dashboard."""
 DEFENSIVE_ONLY = True
 from flask import Blueprint, jsonify
+from routes.meta_engineer_routes import _authenticated_admin
 from . import research_engine, defensive_shield, disaster_manager, hardware_lab
 from ..sci_core.storage import collection
 sci_router=Blueprint("sci_core",__name__)
+
+@sci_router.before_request
+def require_admin_for_sci_core():
+    actor, error = _authenticated_admin()
+    if error:
+        return error
+    return None
 research_engine.register_routes(sci_router)
 defensive_shield.register_routes(sci_router)
 disaster_manager.register_routes(sci_router)
