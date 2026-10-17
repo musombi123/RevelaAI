@@ -232,8 +232,16 @@ def test_brain_os_routes_are_registered():
     assert len(agi_router.deferred_functions) >= 6
 
 def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails():
+    import sys
+    import types
     from flask import Flask
-    from routes import chat_routes
+
+    # The lightweight safety-test job does not install python-dotenv; stub only
+    # its environment loader while importing the route under test.
+    dotenv_stub = types.ModuleType("dotenv")
+    dotenv_stub.load_dotenv = lambda *args, **kwargs: False
+    with patch.dict(sys.modules, {"dotenv": dotenv_stub}):
+        from routes import chat_routes
 
     app = Flask(__name__)
     app.register_blueprint(chat_routes.chat_bp, url_prefix="/api/chat")
