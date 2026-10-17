@@ -708,6 +708,7 @@ def simulate_recovery_action(
         "severity": action["severity"],
         "mode": "simulation_only",
         "policy_decision": decision,
+        "simulation_result": audit_event["simulation_result"],
         "preconditions_met": preconditions_met,
         "unmet_preconditions": unmet,
         "attempt_count": audit_event["attempt_count"],
