@@ -142,6 +142,8 @@ def monitor_once(
                 continue
             value = dict(item)
             value.setdefault("check", check_name)
+            if value.get("type") == "monitor_check_failed":
+                check_failures.append(check_name)
             normalized = _public_finding(value)
             if SEVERITY_ORDER[normalized["severity"]] >= SEVERITY_ORDER["medium"]:
                 findings.append({**normalized, "_fingerprint": normalized["fingerprint"]})
