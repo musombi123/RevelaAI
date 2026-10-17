@@ -56,6 +56,33 @@ class GeminiRoutingTests(unittest.TestCase):
         # This CI test runs without production environment variables.
         self.assertEqual(ai_client.TEXT_PROVIDER_ORDER[0], "gemini")
 
+    def test_known_mvi_rule_engine_answer_is_rejected(self):
+        fallback = (
+            "This is a transparent on-device rule engine rather than "
+            "a generative language model, so I won't invent detailed facts."
+        )
+        self.assertTrue(ai_client._is_non_generative_fallback(fallback))
+        self.assertFalse(ai_client._is_non_generative_fallback(
+            "I can help assess your security controls and incident response plan."
+        ))
+
+    def test_configured_gemini_precedes_mvi_even_if_env_lists_mvi_first(self):
+        with (
+            patch.object(ai_client, "TEXT_PROVIDER_ORDER", ["mvi", "gemini"]),
+            patch.object(ai_client, "_provider_enabled", side_effect=lambda name: name == "gemini"),
+            patch.object(
+                ai_client,
+                "_ask_gemini_text",
+                return_value={"success": True, "response": "Generative answer", "provider": "gemini", "model": "test"},
+            ) as ask_gemini,
+            patch.object(ai_client, "_request_mvi") as ask_mvi,
+        ):
+            result = ai_client.ask_hf("What are your capabilities?")
+
+        self.assertEqual(result["provider"], "gemini")
+        ask_gemini.assert_called_once()
+        ask_mvi.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
