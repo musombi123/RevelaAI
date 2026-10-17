@@ -2008,14 +2008,21 @@ def _request_mvi(
     )
 
     if not response_text:
-
         raise AIClientError(
             "MVI AI Engine returned an empty response.",
             provider="mvi",
-            status_code=(
-                response.status_code
-            ),
+            status_code=response.status_code,
             error_code="mvi_empty_response",
+        )
+
+    # The MVI service may disclose that it is serving a rule-engine fallback
+    # instead of generated language. Never pass that text off as model output.
+    if _is_non_generative_fallback(response_text):
+        raise AIClientError(
+            "MVI returned its non-generative rule-engine fallback, not a model answer.",
+            provider="mvi",
+            status_code=response.status_code,
+            error_code="mvi_rule_engine_fallback",
         )
 
     return {
@@ -4021,6 +4028,23 @@ def _ask_hf_text(
 
 
 # =========================================================
+# NON-GENERATIVE FALLBACK DETECTION
+# =========================================================
+
+def _is_non_generative_fallback(response_text: str) -> bool:
+    """Detect known MVI rule-engine fallback disclosures, not ordinary refusals."""
+    normalized = " ".join(str(response_text or "").lower().split())
+    markers = (
+        "transparent on-device rule engine rather than a generative language model",
+        "rather than a generative language model",
+        "i am running without a language model or network request",
+        "this offline rule engine uses templates rather than a language model",
+        "local reasoning checklist",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+# =========================================================
 # MAIN REVELAAI TEXT CLIENT
 # =========================================================
 
@@ -4064,7 +4088,18 @@ def ask_hf(
         dict[str, Any]
     ] = []
 
-    for provider in TEXT_PROVIDER_ORDER:
+    # Gemini is the canonical generative provider. If configured, always try
+    # it first even if an older Render environment variable lists MVI first.
+    providers_to_try = list(TEXT_PROVIDER_ORDER)
+    if _provider_enabled("gemini"):
+        providers_to_try = ["gemini"] + [
+            item for item in providers_to_try
+            if str(item or "").strip().lower() not in {
+                "gemini", "google", "google-ai", "googleai"
+            }
+        ]
+
+    for provider in providers_to_try:
 
         provider = (
             str(
