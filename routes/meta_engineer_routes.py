@@ -56,6 +56,32 @@ def meta_health():
     return jsonify({"status": "ok", "module": "meta-engineer", "mode": "proposal-only",
                     "auto_deploy": False, "auto_delete": False})
 
+@meta_engineer_bp.get("/scan")
+def scan():
+    """Return a read-only architecture map for the authenticated platform admin."""
+    actor, error = _authenticated_admin()
+    if error: return error
+    try:
+        result = scan_architecture()
+        module_count = sum(len(paths) for paths in result.get("structure", {}).values())
+        scanned_at = datetime.now(timezone.utc).isoformat()
+        return jsonify({
+            "status": "ok",
+            "scanned_at": scanned_at,
+            "module_count": module_count,
+            "free_slots": result.get("free_slots", []),
+            "architecture": result,
+            "metrics": {
+                "last_scan": scanned_at,
+                "module_count": module_count,
+                "free_slots": len(result.get("free_slots", [])),
+            },
+            "read_only": True,
+        })
+    except Exception:
+        return jsonify({"status": "error", "code": "architecture_scan_failed"}), 503
+
+
 @meta_engineer_bp.post("/propose")
 def propose():
     actor, error = _authenticated_admin()
@@ -139,6 +165,33 @@ def approve(idea_id):
             "message": "Approval recorded. No live code or router registration was changed."})
     except Exception:
         return jsonify({"status": "error", "code": "approval_failed"}), 503
+
+@meta_engineer_bp.get("/audit/<idea_id>/status")
+def idea_status(idea_id):
+    """Return the persisted proposal and its real sandbox state for live UI polling."""
+    actor, error = _authenticated_admin()
+    if error: return error
+    try:
+        idea = get_idea(idea_id)
+        if not idea:
+            return jsonify({"status": "error", "code": "idea_not_found"}), 404
+        if str(idea.get("actor") or "") != actor:
+            return jsonify({"status": "error", "code": "idea_not_found"}), 404
+        def clean(value):
+            from bson import ObjectId
+            if isinstance(value, ObjectId): return str(value)
+            if isinstance(value, dict): return {str(k): clean(v) for k, v in value.items()}
+            if isinstance(value, list): return [clean(v) for v in value]
+            if hasattr(value, "isoformat"): return value.isoformat()
+            return value
+        payload = clean(dict(idea))
+        payload["ideaId"] = str(payload.pop("_id", idea_id))
+        payload["test_logs"] = (idea.get("test_result") or {}).get("logs", "")
+        payload["test_status"] = "passed" if (idea.get("test_result") or {}).get("passed") else "failed"
+        return jsonify({"status": "ok", "idea": payload})
+    except Exception:
+        return jsonify({"status": "error", "code": "idea_status_unavailable"}), 503
+
 
 @meta_engineer_bp.get("/audit")
 def list_audit():
