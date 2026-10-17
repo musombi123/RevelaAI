@@ -12,7 +12,7 @@ from typing import Any
 HUB_ALIASES = {
     "mkulima": "mkulima", "shamba": "mkulima", "farm": "mkulima",
     "farming": "mkulima", "agriculture": "mkulima",
-    "biashara": "biashara", "business": "biashara", " biashara": "biashara",
+    "biashara": "biashara", "business": "biashara",
     "elimu": "elimu", "education": "elimu", "teacher": "elimu", "school": "elimu",
     "mahubiri": "mahubiri", "theology": "mahubiri", "faith": "mahubiri",
     "scripture": "mahubiri", "bible": "mahubiri",
