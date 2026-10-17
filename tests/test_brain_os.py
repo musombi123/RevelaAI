@@ -294,6 +294,88 @@ def test_routing_shadow_rejects_same_or_invalid_providers():
         evaluate_routing_shadow("not-a-category", "baseline", "candidate")
 
 
+def test_defensive_monitor_deduplicates_sent_incidents_and_uses_alert_sink():
+    from unittest.mock import Mock
+    from revelai.sci_core import monitor_runner
+
+    fake = FakeCollection()
+    alert_response = Mock()
+    alert_response.raise_for_status.return_value = None
+    post = Mock(return_value=alert_response)
+    finding = {
+        "type": "vulnerable_pattern",
+        "severity": "high",
+        "file": "revelai/example.py",
+        "line": 12,
+        "fix_suggestion": "Review the pattern.",
+    }
+    with (
+        patch("revelai.sci_core.storage.collection", return_value=fake),
+        patch.object(monitor_runner.requests, "post", post),
+    ):
+        first = monitor_runner.monitor_once(
+            alert_url="https://alerts.example.test/webhook",
+            checks={"code": [finding], "auth": [], "dependencies": []},
+        )
+        second = monitor_runner.monitor_once(
+            alert_url="https://alerts.example.test/webhook",
+            checks={"code": [finding], "auth": [], "dependencies": []},
+        )
+    assert first["status"] == "ok"
+    assert first["alerts_sent"] == 1
+    assert second["alerts_sent"] == 0
+    assert second["duplicates_suppressed"] == 1
+    assert post.call_count == 1
+    payload = post.call_args.kwargs["json"]
+    assert payload["incidents"][0]["severity"] == "high"
+    assert "raw_prompt" not in str(payload)
+    assert len(fake.rows) == 1
+
+
+def test_defensive_monitor_fails_clearly_when_alert_adapter_is_unconfigured():
+    from revelai.sci_core import monitor_runner
+
+    fake = FakeCollection()
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = monitor_runner.monitor_once(
+            alert_url="",
+            checks={"code": [], "auth": [], "dependencies": []},
+        )
+    assert result["status"] == "misconfigured"
+    assert result["alert_adapter"]["configured"] is False
+    assert result["alert_adapter"]["delivery_status"] == "not_configured"
+
+
+def test_defensive_monitor_controlled_incident_maps_severity_and_hashes_source():
+    from revelai.sci_core import monitor_runner
+    fake = FakeCollection()
+    with (
+        patch("revelai.sci_core.storage.collection", return_value=fake),
+        patch.object(monitor_runner.requests, "post") as post,
+    ):
+        post.return_value.raise_for_status.return_value = None
+        result = monitor_runner.monitor_once(
+            alert_url="https://alerts.example.test/webhook",
+            checks={
+                "code": [],
+                "auth": [{
+                    "type": "brute_force_attempt",
+                    "severity": "high",
+                    "ip": "192.0.2.10",
+                    "count": 75,
+                    "action": "blocklist_recommendation_only",
+                }],
+                "dependencies": [],
+            },
+        )
+    assert result["status"] == "ok"
+    sent_payload = post.call_args.kwargs["json"]
+    incident = sent_payload["incidents"][0]
+    assert incident["severity"] == "high"
+    assert "192.0.2.10" not in str(sent_payload)
+    assert fake.rows[0]["fingerprint"]
+
+
 def test_engineering_guardrails_keep_production_mutation_disabled():
     result = engineering_guardrails()
     assert result["production_write_enabled"] is False
