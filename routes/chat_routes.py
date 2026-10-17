@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from flask import Blueprint, jsonify, request
 
@@ -59,6 +60,27 @@ def _load_personalization_context(user_oid) -> dict | None:
         return None
 
 
+def _record_brain_outcome(hub: str, success: bool, started_at: float) -> None:
+    """Record reliability telemetry only; never store prompts, replies, or user IDs."""
+    aliases = {
+        "mkulima": "shamba", "farm": "shamba", "agriculture": "shamba",
+        "mahubiri": "scripture", "faith": "scripture", "theology": "scripture",
+        "business": "biashara", "education": "elimu", "social": "community",
+    }
+    category = str(hub or "general").strip().lower()
+    category = aliases.get(category, category)
+    if category not in {"general", "coding", "research", "community", "biashara",
+                        "shamba", "elimu", "scripture", "security", "engineering"}:
+        category = "general"
+    try:
+        from revelai.core.brain_os import record_outcome
+        latency_ms = max(0, min(600000, int((time.monotonic() - started_at) * 1000)))
+        record_outcome(category, bool(success), latency_ms, None, "chat_api")
+    except Exception:
+        # Observability must never break user-facing chat.
+        logger.debug("Brain OS outcome telemetry unavailable", exc_info=True)
+
+
 def _persist_turn(user_oid, session_id: str, hub: str, message: str, reply: str) -> None:
     """Persist filtered user/assistant content without affecting the response."""
     try:
@@ -98,6 +120,7 @@ def chat():
     if len(message) > 8000:
         return jsonify({"status": "error", "message": "message must be 8,000 characters or fewer"}), 413
 
+    started_at = time.monotonic()
     context = payload.get("context") if isinstance(payload.get("context"), list) else []
     session_id = str(payload.get("sessionId") or payload.get("conversationId") or "default")[:128]
     requested_hub = payload.get("hub") or payload.get("domain") or "auto"
@@ -150,6 +173,7 @@ def chat():
             hub = str(interaction.get("hub") or result.get("domain") or "general")
             if interaction.get("hubRequested") == "auto" and hub != "auto" and not reply.startswith("[Auto →"):
                 reply = f"[Auto → {HUB_LABELS.get(hub, hub.title())}]\n\n{reply}"
+            _record_brain_outcome(hub, True, started_at)
             _persist_turn(user_oid, session_id, hub, message, reply)
             return jsonify({
                 "status": "success",
@@ -175,6 +199,7 @@ def chat():
     except Exception:
         logger.exception("Coordinated AI provider pipeline failed; using local fallback")
 
+    _record_brain_outcome(str(interaction.get("hub") or "general"), False, started_at)
     logger.error("MODEL RESPONSE UNAVAILABLE | hub_used=%s | session=%s", interaction.get("hub"), session_id)
     return jsonify({
         "status": "error", "code": "MODEL_UNAVAILABLE",
