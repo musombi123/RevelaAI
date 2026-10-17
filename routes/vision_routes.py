@@ -143,10 +143,10 @@ def analyze_camera_frame():
                 }},
             ],
         }],
+        # Gemini 3.6+ models deprecate sampling parameters; omit temperature/topP/topK.
+        # candidateCount also defaults to 1, so keep the request model-compatible.
         "generationConfig": {
-            "temperature": 0.2,
             "maxOutputTokens": 768,
-            "candidateCount": 1,
         },
     }
 
@@ -169,12 +169,46 @@ def analyze_camera_frame():
         }), 503
 
     if not response.ok:
-        logger.warning("Live Vision provider returned HTTP %s", response.status_code)
-        status = 503 if response.status_code in {429, 500, 502, 503, 504} else 502
+        provider_status = int(response.status_code)
+        try:
+            provider_body = response.json()
+            provider_error = provider_body.get("error", {}) if isinstance(provider_body, dict) else {}
+            provider_code = str(provider_error.get("status") or provider_error.get("code") or "")[:80]
+        except (ValueError, TypeError, AttributeError):
+            provider_code = ""
+
+        # Log only upstream status/code, never request bodies, image bytes, or credentials.
+        logger.warning(
+            "Live Vision provider rejected request | http_status=%s | provider_code=%s",
+            provider_status,
+            provider_code or "unreported",
+        )
+
+        if provider_status in {401, 403}:
+            error_code = "vision_provider_auth_failed"
+            message = "The vision provider rejected its server credentials. Check GEMINI_API_KEY and project access in the backend deployment."
+        elif provider_status == 404:
+            error_code = "vision_model_not_found"
+            message = "The configured Gemini model was not found or is unavailable to this API project. Check GEMINI_MODEL in the backend deployment."
+        elif provider_status == 429:
+            error_code = "vision_rate_limited"
+            message = "The vision model is rate-limited or its quota is exhausted. Check Gemini API quota and retry shortly."
+        elif provider_status in {400, 422}:
+            error_code = "vision_provider_request_rejected"
+            message = "Gemini rejected the Live Vision request. The endpoint now omits deprecated sampling settings; verify model access and retry."
+        elif provider_status in {500, 502, 503, 504}:
+            error_code = "vision_provider_unavailable"
+            message = "The Gemini vision service is temporarily unavailable. Please retry shortly."
+        else:
+            error_code = "vision_provider_error"
+            message = "The Gemini vision provider could not analyze this frame. Check the backend provider configuration."
+
+        status = 503 if provider_status in {429, 500, 502, 503, 504} else 502
         return jsonify({
             "status": "error",
-            "code": "vision_provider_error",
-            "message": "The vision model could not analyze this frame. Please try again.",
+            "code": error_code,
+            "message": message,
+            "providerStatus": provider_status,
         }), status
 
     try:
