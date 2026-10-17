@@ -25,7 +25,7 @@ QUALITY_LABELS = {"correct", "incorrect"}
 RESOLUTION_LABELS = {"resolved", "unresolved"}
 OUTCOME_SOURCES = {"manual", "chat_delivery", "admin_review", "validator", "user_feedback", "security_monitor", "scheduler", "system"}
 ACTOR_TYPES = {"system", "chat_api", "admin_api", "validator", "admin_review", "user_feedback", "scheduler", "security_monitor", "test"}
-DIMENSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,99}$")
+DIMENSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/ -]{0,99}$")
 
 
 def _now() -> str:
@@ -85,9 +85,11 @@ def _normalize_dimension(value: Any, field: str) -> str | None:
     clean = str(value).strip()
     if not clean:
         return None
-    if not DIMENSION_PATTERN.fullmatch(clean):
+    if len(clean) > 100 or not DIMENSION_PATTERN.fullmatch(clean):
         raise ValueError(f"{field} must contain only safe identifier characters (max 100)")
-    return clean.lower()
+    # Display names may contain spaces; normalize them to stable IDs. Symbols
+    # such as @ are rejected to avoid persisting arbitrary identifiers.
+    return re.sub(r"\\s+", "-", clean).lower()
 
 
 def _safe_actor(actor: str | None) -> str:
