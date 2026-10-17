@@ -12,6 +12,7 @@ from revelai.core.brain_os import (
     record_chat_outcome,
     recovery_action_catalog,
     simulate_recovery_action,
+    evaluate_routing_shadow,
 )
 from revelai.routers.agi_router import agi_router
 
@@ -212,6 +213,82 @@ def test_recovery_simulation_rejects_unbounded_input_and_fails_closed_on_audit_e
                 "retry_provider_once", "INC-127",
                 {"component": "text_provider", "status": "degraded", "retry_budget_available": True},
             )
+
+
+def _routing_fixture(provider, task_successes, delivery_successes=None, age_hours=1, source="validator"):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc) - timedelta(hours=age_hours)
+    rows = []
+    delivery_successes = delivery_successes if delivery_successes is not None else task_successes
+    for index, outcome in enumerate(task_successes):
+        delivery = delivery_successes[index] if index < len(delivery_successes) else True
+        rows.append({
+            "category": "coding",
+            "provider": provider,
+            "task_success": bool(outcome),
+            "delivery_success": bool(delivery),
+            "success": bool(delivery),
+            "outcome_source": source,
+            "created_at": (now + timedelta(seconds=index)).isoformat(),
+        })
+    return rows
+
+
+def test_routing_shadow_requires_minimum_recent_trusted_quality_samples():
+    fake = FakeCollection()
+    fake.rows.extend(_routing_fixture("baseline", [True] * 5))
+    fake.rows.extend(_routing_fixture("candidate", [True] * 5))
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = evaluate_routing_shadow("coding", "baseline", "candidate")
+    assert result["mode"] == "shadow_only"
+    assert result["live_route_changed"] is False
+    assert result["recommendation"] == "insufficient_evidence"
+    assert result["baseline"]["task_sample_size"] == 5
+
+
+def test_routing_shadow_ignores_delivery_only_unknown_and_stale_labels():
+    fake = FakeCollection()
+    fake.rows.extend(_routing_fixture("baseline", [True] * 25, age_hours=120))
+    fake.rows.extend(_routing_fixture("candidate", [True] * 25, age_hours=120))
+    fake.rows.extend(_routing_fixture("baseline", [True] * 25, source="chat_delivery"))
+    fake.rows.extend(_routing_fixture("candidate", [True] * 25, source="chat_delivery"))
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = evaluate_routing_shadow("coding", "baseline", "candidate")
+    assert result["recommendation"] == "insufficient_evidence"
+    assert result["baseline"]["task_sample_size"] == 0
+    assert result["baseline"]["stale_or_unparseable_sample_size"] == 25
+
+
+def test_routing_shadow_reports_conflicting_delivery_and_task_quality():
+    fake = FakeCollection()
+    fake.rows.extend(_routing_fixture("baseline", [False] * 25, [True] * 25))
+    fake.rows.extend(_routing_fixture("candidate", [True] * 25, [False] * 25))
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = evaluate_routing_shadow("coding", "baseline", "candidate")
+    assert result["baseline_delta_task_success_rate"] == 1.0
+    assert result["recommendation"] == "conflicting_evidence"
+    assert result["live_route_changed"] is False
+    assert result["canary_or_live_changes_enabled"] is False
+
+
+def test_routing_shadow_can_favor_candidate_only_for_further_offline_evaluation():
+    fake = FakeCollection()
+    fake.rows.extend(_routing_fixture("baseline", [False] * 25, [True] * 25))
+    fake.rows.extend(_routing_fixture("candidate", [True] * 25, [True] * 25))
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = evaluate_routing_shadow("coding", "baseline", "candidate")
+    assert result["recommendation"] == "candidate_favored_for_further_offline_evaluation"
+    assert result["policy_version"] == "routing-shadow-v1"
+    assert result["candidate"]["task_sample_size"] == 25
+    assert result["candidate"]["task_success_interval_95"]["lower"] > result["baseline"]["task_success_interval_95"]["upper"]
+    assert result["live_route_changed"] is False
+
+
+def test_routing_shadow_rejects_same_or_invalid_providers():
+    with pytest.raises(ValueError):
+        evaluate_routing_shadow("coding", "baseline", "baseline")
+    with pytest.raises(ValueError):
+        evaluate_routing_shadow("not-a-category", "baseline", "candidate")
 
 
 def test_engineering_guardrails_keep_production_mutation_disabled():
