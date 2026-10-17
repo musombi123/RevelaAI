@@ -33,33 +33,48 @@ RECOVERY_ACTIONS = {
     "retry_provider_once": {
         "component": "text_provider",
         "risk": "low",
+        "severity": "medium",
         "description": "Plan one bounded provider retry for a confirmed transient failure.",
         "required_evidence": {
             "component": "text_provider",
             "status": "degraded",
             "retry_budget_available": True,
         },
+        "allowed_authorities": {"admin_api", "scheduler", "security_monitor", "test"},
+        "cooldown_seconds": 300,
+        "max_attempts": 2,
+        "verification_required": True,
         "future_auto_candidate": True,
     },
     "open_provider_circuit": {
         "component": "text_provider",
         "risk": "medium",
+        "severity": "high",
         "description": "Plan temporary traffic isolation after a confirmed provider failure threshold.",
         "required_evidence": {
             "component": "text_provider",
             "status": "degraded",
             "failure_threshold_exceeded": True,
         },
+        "allowed_authorities": {"admin_api", "test"},
+        "cooldown_seconds": 900,
+        "max_attempts": 1,
+        "verification_required": True,
         "future_auto_candidate": False,
     },
     "refresh_disposable_cache": {
         "component": "transient_cache",
         "risk": "low",
+        "severity": "low",
         "description": "Plan a refresh of a disposable cache after staleness is confirmed.",
         "required_evidence": {
             "component": "transient_cache",
             "status": "stale",
         },
+        "allowed_authorities": {"admin_api", "scheduler", "test"},
+        "cooldown_seconds": 300,
+        "max_attempts": 2,
+        "verification_required": True,
         "future_auto_candidate": True,
     },
 }
@@ -553,8 +568,13 @@ def recovery_action_catalog() -> dict[str, Any]:
                 "action_id": action_id,
                 "component": action["component"],
                 "risk": action["risk"],
+                "severity": action["severity"],
                 "description": action["description"],
                 "required_evidence": dict(action["required_evidence"]),
+                "allowed_authorities": sorted(action["allowed_authorities"]),
+                "cooldown_seconds": action["cooldown_seconds"],
+                "max_attempts": action["max_attempts"],
+                "verification_required": action["verification_required"],
                 "future_auto_candidate": action["future_auto_candidate"],
                 "execution_enabled": False,
                 "human_approval_required_for_real_action": True,
@@ -568,8 +588,16 @@ def simulate_recovery_action(
     action_id: str,
     incident_id: str,
     evidence: dict[str, Any] | None = None,
+    *,
+    authority: str = "admin_api",
+    now: datetime | None = None,
+    simulated_verification: str = "not_run",
 ) -> dict[str, Any]:
-    """Validate and audit a recovery plan without executing external side effects."""
+    """Validate, rate-limit and audit a recovery plan without external side effects.
+
+    The authority argument is an internal policy dimension, not authentication.
+    External callers must pass through the administrator-gated route.
+    """
     if not isinstance(action_id, str) or action_id not in RECOVERY_ACTIONS:
         raise ValueError("unknown recovery action")
     if not isinstance(incident_id, str):
@@ -577,6 +605,10 @@ def simulate_recovery_action(
     incident_id = incident_id.strip()
     if not INCIDENT_PATTERN.fullmatch(incident_id):
         raise ValueError("incident_id must contain only safe identifier characters (max 100)")
+    if not isinstance(authority, str) or authority not in ACTOR_TYPES:
+        raise ValueError("unsupported authority class")
+    if simulated_verification not in {"not_run", "passed", "failed", "unknown"}:
+        raise ValueError("simulated_verification must be not_run, passed, failed or unknown")
     if evidence is None:
         evidence = {}
     if not isinstance(evidence, dict):
@@ -596,35 +628,97 @@ def simulate_recovery_action(
             clean_evidence[key] = value.strip().lower()
 
     action = RECOVERY_ACTIONS[action_id]
+    if authority not in action["allowed_authorities"]:
+        raise PermissionError("authority is not allowed for this recovery action")
     required = action["required_evidence"]
     unmet = [key for key, expected in required.items() if clean_evidence.get(key) != expected]
     preconditions_met = not unmet
-    created_at = _now()
+    now_dt = now or datetime.now(timezone.utc)
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+    now_dt = now_dt.astimezone(timezone.utc)
+    created_at = now_dt.isoformat()
     incident_ref = hashlib.sha256(incident_id.encode("utf-8")).hexdigest()[:24]
+
+    from revelai.sci_core.storage import collection
+    col = collection("brain_recovery_runs")
+    previous = list(col.find({"action_id": action_id, "incident_ref": incident_ref}).limit(100))
+    previous_attempts = [
+        row for row in previous
+        if row.get("attempt_consumed") is True
+    ]
+    last_attempt = None
+    for row in previous_attempts:
+        parsed = _parse_outcome_time(row.get("created_at"))
+        if parsed and (last_attempt is None or parsed > last_attempt):
+            last_attempt = parsed
+    elapsed_since_last = (
+        (now_dt - last_attempt).total_seconds() if last_attempt is not None else None
+    )
+    cooldown_active = (
+        elapsed_since_last is not None
+        and 0 <= elapsed_since_last < action["cooldown_seconds"]
+    )
+    retry_exhausted = len(previous_attempts) >= action["max_attempts"]
+    if not preconditions_met:
+        decision = "preconditions_not_met"
+    elif retry_exhausted:
+        decision = "retry_exhausted"
+    elif cooldown_active:
+        decision = "cooldown_active"
+    elif simulated_verification == "failed":
+        decision = "verification_failed_escalate"
+    elif simulated_verification == "unknown":
+        decision = "verification_unknown_escalate"
+    elif simulated_verification == "passed":
+        decision = "verification_passed_simulated"
+    else:
+        decision = "ready_for_approval_simulation"
+
+    attempt_consumed = (
+        preconditions_met and not retry_exhausted and not cooldown_active
+        and simulated_verification != "not_run"
+    )
     audit_event = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "incident_ref": incident_ref,
         "action_id": action_id,
+        "authority": authority,
+        "severity": action["severity"],
         "mode": "simulation_only",
+        "policy_decision": decision,
         "preconditions_met": preconditions_met,
         "unmet_preconditions": unmet,
-        "simulation_result": "preconditions_met" if preconditions_met else "preconditions_not_met",
+        "attempt_count": len(previous_attempts) + int(attempt_consumed),
+        "attempt_consumed": attempt_consumed,
+        "cooldown_seconds": action["cooldown_seconds"],
+        "max_attempts": action["max_attempts"],
+        "simulated_verification": simulated_verification,
+        "verification_required": action["verification_required"],
+        "escalation_required": decision in {"verification_failed_escalate", "verification_unknown_escalate", "retry_exhausted"},
         "executed": False,
         "external_side_effects": False,
         "created_at": created_at,
     }
-    # Fail closed: no simulated plan is reported as recorded if the audit write fails.
-    from revelai.sci_core.storage import collection
-    collection("brain_recovery_runs").insert_one(audit_event.copy())
+    # Fail closed: do not report a successful audit if persistence fails.
+    col.insert_one(audit_event.copy())
     return {
         "status": "simulated",
         "action_id": action_id,
         "component": action["component"],
         "risk": action["risk"],
+        "severity": action["severity"],
         "mode": "simulation_only",
+        "policy_decision": decision,
         "preconditions_met": preconditions_met,
         "unmet_preconditions": unmet,
-        "simulation_result": audit_event["simulation_result"],
+        "attempt_count": audit_event["attempt_count"],
+        "attempt_consumed": attempt_consumed,
+        "cooldown_seconds": action["cooldown_seconds"],
+        "max_attempts": action["max_attempts"],
+        "simulated_verification": simulated_verification,
+        "verification_required": action["verification_required"],
+        "escalation_required": audit_event["escalation_required"],
         "executed": False,
         "external_side_effects": False,
         "execution_enabled": False,
