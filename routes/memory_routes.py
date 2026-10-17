@@ -677,7 +677,11 @@ def get_history(user_id: str):
     if authenticated_id != user_id:
         return jsonify(status="error", code="user_identity_mismatch"), 403
     try:
-        docs = list(conversations().find({"userId": identity}).sort("updatedAt", DESCENDING).limit(30))
+        query = {"userId": identity}
+        requested_hub = str(request.args.get("hub") or "auto").strip().lower()
+        if requested_hub in {"mkulima", "biashara", "elimu", "mahubiri", "general"}:
+            query["hub"] = requested_hub
+        docs = list(conversations().find(query).sort("updatedAt", DESCENDING).limit(30))
         return jsonify(status="success", data=[_json_safe(doc) for doc in docs]), 200
     except Exception:
         logger.exception("Conversation history read failed")

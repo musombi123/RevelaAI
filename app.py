@@ -227,11 +227,8 @@ from ai.intent_router import (
     classify_intent,
 )
 
-from ai.living_brain import (
-    respond_local,
-)
-
 from ai.global_brain_adapter import build_global_context
+from ai.hub_prompts import HUB_LABELS, get_identity_answer
 
 from ai.image_prompt import (
     build_image_prompt,
@@ -3262,8 +3259,12 @@ def ai_assistant():
         # It shapes instructions and capability metadata; it adds no model.
         brain_context, interaction = build_global_context(
             message=message,
-            hub=brain_payload.get("hub") or "general",
+            hub=brain_payload.get("hub") or "auto",
             payload=brain_payload,
+        )
+        app.logger.info(
+            "HUB INTELLIGENCE | requested=%s | hub_used=%s | hub_detected=%s",
+            interaction.get("hubRequested"), interaction.get("hub"), interaction.get("hubDetected"),
         )
         previous_context = (previous_context + [brain_context])[-MAX_HISTORY:]
 
@@ -3424,13 +3425,18 @@ def ai_assistant():
         # CENTRAL PIPELINE
         # -------------------------------------------------
 
-        ai_result = process_message(
-            message=message,
-            context=previous_context,
-            intent=intent,
-            session_id=session_id,
-            user_id=user_id,
-        )
+        identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
+        if identity_reply:
+            ai_result = {
+                "response": identity_reply, "confidence": "high", "intent": "identity",
+                "domain": interaction.get("hub", "auto"), "provider": "revelaai-hub-identity",
+                "model": "hub-identity-policy",
+            }
+        else:
+            ai_result = process_message(
+                message=message, context=previous_context, intent=intent,
+                session_id=session_id, user_id=user_id,
+            )
 
         # -------------------------------------------------
         # DEFENSIVE EXECUTABLE ACTION HANDLING
@@ -3460,36 +3466,23 @@ def ai_assistant():
             or ""
         ).strip()
 
-        # Keep the local brain as a genuine last-resort fallback when
-        # Gemini and its configured Gemini fallback model both fail.
+        # Never mask a failed model call with canned deterministic chat text.
         if ai_result.get("error") or not assistant_text:
-            app.logger.warning(
-                "Hosted text provider failed; using local fallback | request_id=%s",
-                getattr(g, "request_id", None),
+            app.logger.error(
+                "MODEL RESPONSE UNAVAILABLE | hub_used=%s | request_id=%s",
+                interaction.get("hub"), getattr(g, "request_id", None),
             )
-            local_result = respond_local(
-                message=message,
-                preferred_hub=intent or "auto",
-                context=previous_context,
-            )
-            assistant_text = str(
-                local_result.get("reply") or ""
-            ).strip()
-            ai_result = dict(ai_result)
-            ai_result.update({
-                "provider": None,
-                "model": None,
-                "confidence": "fallback",
-                "intent": local_result.get("intent", intent),
-                "domain": local_result.get("hub", "general"),
-                "error": None,
-                "fallback": True,
-            })
+            return jsonify(error_response(
+                "MODEL_UNAVAILABLE",
+                "RevelaAI's configured text model did not return a usable answer. Please try again shortly.",
+            )), 503
 
-        if not assistant_text:
-            raise RuntimeError(
-                "RevelaAI and its local fallback returned no usable response."
-            )
+        requested_hub = interaction.get("hubRequested", "auto")
+        selected_hub = interaction.get("hub", "general")
+        if requested_hub == "auto" and selected_hub != "auto":
+            route_tag = f"[Auto → {HUB_LABELS.get(selected_hub, selected_hub.title())}]"
+            if not assistant_text.startswith("[Auto →"):
+                assistant_text = route_tag + "\n\n" + assistant_text
 
         # -------------------------------------------------
         # SAVE ASSISTANT RESPONSE
@@ -3506,7 +3499,7 @@ def ai_assistant():
             _persist_turn(
                 memory_user_oid,
                 session_id,
-                str(ai_result.get("domain") or intent or "general"),
+                str(interaction.get("hub") or ai_result.get("domain") or intent or "general"),
                 message,
                 assistant_text,
             )
@@ -3625,10 +3618,15 @@ def ai_assistant():
                 intent,
             ),
 
-            "domain": ai_result.get(
+            "domain": interaction.get("hub") or ai_result.get(
                 "domain",
                 "general",
             ),
+
+            "hub": interaction.get("hub", "general"),
+            "hub_used": interaction.get("hub", "general"),
+            "hub_requested": interaction.get("hubRequested", "auto"),
+            "hub_detected": interaction.get("hubDetected", "general"),
 
             "domains": ai_result.get(
                 "domains",
@@ -5775,7 +5773,8 @@ def ready():
 try:
 
     app.register_blueprint(
-        chat_bp
+        chat_bp,
+        url_prefix="/api/chat",
     )
 
 except Exception as exc:

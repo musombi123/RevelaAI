@@ -97,7 +97,13 @@ def respond_local(message: str, preferred_hub: str = "auto", context: list | Non
         reply = "Tell me what you are trying to achieve, what you have already tried, and any constraints I should respect."
         intent = "clarification"
     elif re.search(r"\b(hi|hello|hey|habari|jambo|mambo|good morning|good evening)\b", lowered):
-        reply = "Hi — I'm here with you. We can reason through a practical problem, build an idea, challenge assumptions, or plan the next move. What matters most to you right now?"
+        reply = {
+            "mkulima": "Habari! Mimi ni RevelaAI - Mkulima Hub. Niambie unalima nini ili nikusaidie kwa hatua zilizo wazi.",
+            "biashara": "Habari! Mimi ni RevelaAI - Biashara Hub. Tuanze na biashara, mteja, gharama na faida unayolenga.",
+            "elimu": "Karibu! Mimi ni RevelaAI - Elimu Hub. Ni somo gani au ujuzi gani ungependa kuelewa?",
+            "mahubiri": "Karibu! Mimi ni RevelaAI - Mahubiri Hub. Tuchunguze Biblia, muktadha na matumizi ya kila siku kwa heshima.",
+            "general": "Hi! I'm RevelaAI, built by RevelaCode in Mombasa, Kenya. What would you like to work on today?",
+        }.get(hub, "Hi! I'm RevelaAI, built by RevelaCode in Mombasa, Kenya. What would you like to work on today?")
         intent = "greeting"
     elif re.search(r"\b(latest|today|right now|current price|current news|weather today|live result)\b", lowered):
         reply = "This local rule engine has no live data feed, so I shouldn't invent current facts. Share a trusted source or the figures you have and I'll help analyze them; otherwise check an up-to-date primary source before acting."
@@ -150,9 +156,9 @@ def respond_local(message: str, preferred_hub: str = "auto", context: list | Non
                      "I will challenge weak assumptions rather than agree automatically. Share the options and constraints for a concrete comparison.")
             intent = "decision_support"
         else:
-            reply = ("I can help structure this, but this endpoint is a transparent local rule engine, not a generative language model. "
-                     "To avoid inventing facts, give me the key details, source text, data, or options. I'll help organize the evidence, test assumptions, compare trade-offs, and define a practical next action.\n\n"
-                     "A reliable starting point: goal → constraints → evidence → options → test → review.")
+            reply = ("Tell me what you want to achieve, the key facts or source material, and any constraints that matter. "
+                     "I will help organize the information, compare reasonable options, and identify a useful next step.\n\n"
+                     "A reliable starting point is to define the goal, gather evidence, compare options, test a small step, and review the result.")
             intent = "general_guidance"
     reply = _empathy_opening(emotion) + "\n\n" + reply
     return {

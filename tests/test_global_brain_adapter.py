@@ -13,7 +13,8 @@ class GlobalBrainAdapterTests(unittest.TestCase):
         self.assertEqual(normalize_hub("Shamba"), "mkulima")
         self.assertEqual(normalize_hub("Teacher"), "elimu")
         self.assertEqual(normalize_hub("Bible"), "mahubiri")
-        self.assertEqual(normalize_hub("unknown"), "general")
+        self.assertEqual(normalize_hub("unknown"), "auto")
+        self.assertEqual(normalize_hub("Auto"), "auto")
 
     def test_tone_adapts_without_claiming_emotion_detection(self):
         self.assertEqual(infer_interaction_tone("This is broken again"), "frustrated")

@@ -11,8 +11,8 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from ai.intent_router import classify_intent
-from ai.living_brain import respond_local
 from ai.global_brain_adapter import build_global_context
+from ai.hub_prompts import HUB_LABELS, get_identity_answer
 from services.ai_service import process_message
 from routes.memory_routes import (
     _record_messages,
@@ -79,6 +79,7 @@ def _persist_turn(user_oid, session_id: str, hub: str, message: str, reply: str)
         logger.warning("Smart memory write failed; chat response preserved", exc_info=True)
 
 
+@chat_bp.route("", methods=["POST"])
 @chat_bp.route("/", methods=["POST"])
 def chat():
     user_oid, user_id, auth_error = _require_identity()
@@ -98,14 +99,16 @@ def chat():
 
     context = payload.get("context") if isinstance(payload.get("context"), list) else []
     session_id = str(payload.get("sessionId") or payload.get("conversationId") or "default")[:128]
+    requested_hub = payload.get("hub") or payload.get("domain") or "auto"
     intent = classify_intent(message)
     # Give the existing text provider a shared capability map, hub guidance,
     # and tone-adaptive interaction policy on every turn. No provider is added.
     brain_context, interaction = build_global_context(
         message=message,
-        hub=payload.get("hub") or payload.get("domain") or "general",
+        hub=requested_hub,
         payload=payload,
     )
+    logger.info("HUB INTELLIGENCE | requested=%s | hub_used=%s | hub_detected=%s", interaction.get("hubRequested"), interaction.get("hub"), interaction.get("hubDetected"))
     context = context[-10:] + [brain_context]
 
     # Rehydrate relevant long-term facts on every authenticated turn.
@@ -114,13 +117,15 @@ def chat():
         context = context[-11:] + [personalization]
 
     try:
-        result = process_message(
-            message=message,
-            context=context[-12:],
-            intent=intent,
-            session_id=session_id,
-            user_id=user_id,
-        )
+        identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
+        result = ({
+            "response": identity_reply, "confidence": "high", "intent": "identity",
+            "domain": interaction.get("hub", "auto"), "provider": "revelaai-hub-identity",
+            "model": "hub-identity-policy",
+        } if identity_reply else process_message(
+            message=message, context=context[-12:], intent=intent,
+            session_id=session_id, user_id=user_id,
+        ))
         if result.get("action_required"):
             return jsonify({
                 "status": "success",
@@ -137,7 +142,9 @@ def chat():
 
         reply = str(result.get("response") or "").strip()
         if reply and not result.get("error"):
-            hub = str(result.get("domain") or payload.get("hub") or "general")
+            hub = str(interaction.get("hub") or result.get("domain") or "general")
+            if interaction.get("hubRequested") == "auto" and hub != "auto" and not reply.startswith("[Auto →"):
+                reply = f"[Auto → {HUB_LABELS.get(hub, hub.title())}]\n\n{reply}"
             _persist_turn(user_oid, session_id, hub, message, reply)
             return jsonify({
                 "status": "success",
@@ -147,6 +154,9 @@ def chat():
                     "reply": reply,
                     "confidence": result.get("confidence", "medium"),
                     "hub": hub,
+                    "hub_used": hub,
+                    "hub_requested": interaction.get("hubRequested", "auto"),
+                    "hub_detected": interaction.get("hubDetected", hub),
                     "engine": result.get("model") or result.get("provider") or "revelaai-orchestrator",
                     "provider": result.get("provider"),
                     "model": result.get("model"),
@@ -160,36 +170,10 @@ def chat():
     except Exception:
         logger.exception("Coordinated AI provider pipeline failed; using local fallback")
 
-    # Graceful degradation: local deterministic response only when hosted
-    # providers fail or return no usable answer. It is never misreported as a model.
-    fallback = respond_local(
-        message=message,
-        preferred_hub=payload.get("hub", "auto"),
-        context=context,
-    )
-    fallback_reply = str(fallback.get("reply") or "").strip()
-    if fallback_reply:
-        _persist_turn(
-            user_oid,
-            session_id,
-            str(fallback.get("hub") or payload.get("hub") or "general"),
-            message,
-            fallback_reply,
-        )
+    logger.error("MODEL RESPONSE UNAVAILABLE | hub_used=%s | session=%s", interaction.get("hub"), session_id)
     return jsonify({
-        "status": "success",
-        "data": {
-            "userId": user_id,
-            "intent": fallback.get("intent", intent),
-            "reply": fallback_reply,
-            "confidence": "fallback",
-            "hub": fallback.get("hub", "general"),
-            "engine": "revelaai-local-fallback-v2",
-            "provider": None,
-            "model": None,
-            "networkUsed": False,
-            "fallback": True,
-            "interactionTone": interaction["interactionTone"],
-            "capabilities": interaction["capabilities"],
-        },
-    }), 200
+        "status": "error", "code": "MODEL_UNAVAILABLE",
+        "message": "RevelaAI's configured text model did not return a usable answer. Please try again shortly.",
+        "hub_requested": interaction.get("hubRequested", "auto"),
+        "hub_used": interaction.get("hub", "general"),
+    }), 503
