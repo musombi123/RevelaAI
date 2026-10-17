@@ -26,6 +26,7 @@ def _write_cache(rows):
     CACHE_PATH.write_text(json.dumps(rows[-2000:], ensure_ascii=False, default=str), encoding="utf-8")
 
 class LocalCollection:
+    backend = "local_cache"
     def __init__(self, name): self.name = name
     def insert_one(self, document):
         row = {"_id": uuid4().hex, "collection": self.name, "document": document}
