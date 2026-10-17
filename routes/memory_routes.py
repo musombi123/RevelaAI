@@ -142,7 +142,7 @@ def isBestThing(text: str, recent_messages: list[str] | None = None) -> bool:
         # Keep concise but meaningful preference/identity fragments and
         # two-word proper names/locations; discard generic two-word chatter.
         explicit_preference = re.search(
-            r"\\b(?:no|avoid|prefer|use|remember|farm|business|goal)\\b",
+            r"\b(?:no|avoid|prefer|use|remember|farm|business|goal)\b",
             value,
             re.IGNORECASE,
         )
