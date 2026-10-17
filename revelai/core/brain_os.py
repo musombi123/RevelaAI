@@ -78,7 +78,9 @@ def record_outcome(category: str, success: bool, latency_ms: int | None = None,
     if latency_ms is not None and (not isinstance(latency_ms, int) or not 0 <= latency_ms <= MAX_LATENCY_MS):
         raise ValueError("latency_ms must be an integer from 0 to 600000")
     if feedback is not None:
-        feedback = " ".join(str(feedback).split())[:300]
+        feedback = str(feedback).strip().lower()
+        if feedback not in {"helpful", "unhelpful", "correct", "incorrect", "resolved", "unresolved"}:
+            raise ValueError("feedback_label must be a supported categorical label")
     record = {
         "category": category,
         "success": success,
