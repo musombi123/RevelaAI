@@ -812,6 +812,45 @@ def attach_request_id():
     )
 
 
+# =========================================================
+# SCI-CORE REVERSIBLE THROTTLE GUARD
+# =========================================================
+from collections import deque
+from routes.meta_engineer_routes import _authenticated_admin as _sci_admin_check
+from revelai.sci_core.disaster_manager import THROTTLE as SCI_THROTTLE
+
+_SCI_REQUEST_TIMES = deque()
+_SCI_RATE_LOCK = Lock()
+
+@app.before_request
+def sci_core_rate_guard():
+    now = time.time()
+    with _SCI_RATE_LOCK:
+        while _SCI_REQUEST_TIMES and now - _SCI_REQUEST_TIMES[0] > 1:
+            _SCI_REQUEST_TIMES.popleft()
+        _SCI_REQUEST_TIMES.append(now)
+        measured_rps = len(_SCI_REQUEST_TIMES)
+    # A simulation activates a short, reversible cooldown. Exempt readiness,
+    # health, and the recovery control path to avoid locking operators out.
+    if SCI_THROTTLE.get("enabled"):
+        since = SCI_THROTTLE.get("since")
+        try:
+            from datetime import datetime, timezone
+            started = datetime.fromisoformat(str(since)).timestamp()
+        except Exception:
+            started = now
+        if now - started > 60:
+            SCI_THROTTLE.update({"enabled": False, "reason": None, "since": None})
+        elif request.path in {"/health", "/ready", "/api/sci/shield/status", "/api/sci/shield/dashboard", "/api/sci/disaster/simulate"}:
+            return None
+        else:
+            return jsonify({"status": "error", "code": "SCI_SHIELD_COOLDOWN", "message": "RevelaAI Shield Active - Cooling Down", "retry_after_seconds": max(1, int(60 - (now - started)))}), 429
+    # The guard reports actual pressure but does not start a global cooldown
+    # solely from an unauthenticated burst; upstream proxy rate limiting remains recommended.
+    g.sci_core_observed_rps = measured_rps
+    return None
+
+
 @app.after_request
 def add_response_headers(
     response,
