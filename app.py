@@ -282,6 +282,8 @@ from routes.chat_routes import (
     _persist_turn,
 )
 
+from routes.vision_routes import vision_bp
+
 from routes.memory_routes import (
     _require_identity,
 )
@@ -5775,6 +5777,21 @@ def ready():
 # =========================================================
 # BLUEPRINT REGISTRATION
 # =========================================================
+
+try:
+
+    app.register_blueprint(
+        vision_bp,
+        url_prefix="/api/vision",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "vision_bp registration failed | error=%s",
+        exc,
+    )
+
 
 try:
 
