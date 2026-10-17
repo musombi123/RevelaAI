@@ -472,3 +472,67 @@ def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails():
     body = response.get_json()
     assert body["status"] == "success"
     assert body["data"]["reply"].endswith("The test response is available.")
+
+def test_recovery_policy_denies_unauthorized_authority_and_records_no_action():
+    fake = FakeCollection()
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        with pytest.raises(PermissionError):
+            simulate_recovery_action(
+                "open_provider_circuit",
+                "INC-AUTH-1",
+                {"component": "text_provider", "status": "degraded", "failure_threshold_exceeded": True},
+                authority="scheduler",
+            )
+    assert fake.rows == []
+
+
+def test_recovery_policy_enforces_cooldown_and_retry_exhaustion():
+    from datetime import datetime, timedelta, timezone
+
+    fake = FakeCollection()
+    start = datetime(2026, 10, 17, 12, 0, tzinfo=timezone.utc)
+    evidence = {"component": "text_provider", "status": "degraded", "retry_budget_available": True}
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        first = simulate_recovery_action("retry_provider_once", "INC-COOLDOWN-1", evidence, now=start)
+        during_cooldown = simulate_recovery_action(
+            "retry_provider_once", "INC-COOLDOWN-1", evidence, now=start + timedelta(seconds=30)
+        )
+        second = simulate_recovery_action(
+            "retry_provider_once", "INC-COOLDOWN-1", evidence, now=start + timedelta(seconds=301)
+        )
+        exhausted = simulate_recovery_action(
+            "retry_provider_once", "INC-COOLDOWN-1", evidence, now=start + timedelta(seconds=602)
+        )
+    assert first["attempt_count"] == 1
+    assert during_cooldown["policy_decision"] == "cooldown_active"
+    assert during_cooldown["attempt_consumed"] is False
+    assert second["attempt_count"] == 2
+    assert exhausted["policy_decision"] == "retry_exhausted"
+    assert exhausted["escalation_required"] is True
+    assert all(row["external_side_effects"] is False for row in fake.rows)
+
+
+def test_recovery_policy_verification_failure_escalates_without_execution():
+    fake = FakeCollection()
+    evidence = {"component": "text_provider", "status": "degraded", "retry_budget_available": True}
+    with patch("revelai.sci_core.storage.collection", return_value=fake):
+        result = simulate_recovery_action(
+            "retry_provider_once", "INC-VERIFY-1", evidence, simulated_verification="failed"
+        )
+    assert result["policy_decision"] == "verification_failed_escalate"
+    assert result["escalation_required"] is True
+    assert result["simulated_verification"] == "failed"
+    assert result["executed"] is False
+    assert result["external_side_effects"] is False
+    assert fake.rows[0]["verification_required"] is True
+    assert fake.rows[0]["simulation_result"] == "preconditions_met"
+
+
+def test_recovery_catalog_exposes_authority_cooldown_retry_and_verification_policy():
+    catalog = recovery_action_catalog()
+    action = catalog["actions"]["retry_provider_once"]
+    assert action["allowed_authorities"]
+    assert action["cooldown_seconds"] == 300
+    assert action["max_attempts"] == 2
+    assert action["verification_required"] is True
+    assert action["execution_enabled"] is False
