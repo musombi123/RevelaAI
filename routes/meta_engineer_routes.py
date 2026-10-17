@@ -88,6 +88,9 @@ def propose():
     if error: return error
     payload = request.get_json(silent=True) or {}
     spec = " ".join(str(payload.get("spec") or "").split())
+    target = str(payload.get("target") or "fullstack").strip().lower()
+    if target not in {"backend", "frontend", "database", "fullstack"}:
+        return jsonify({"status": "error", "code": "invalid_target"}), 400
     requested_id = str(payload.get("userId") or "").strip()
     if requested_id and requested_id != actor:
         return jsonify({"status": "error", "code": "user_identity_mismatch"}), 403
@@ -95,7 +98,7 @@ def propose():
         return jsonify({"status": "error", "code": "invalid_spec", "message": "spec must be 1–1000 characters"}), 400
     try:
         architecture = scan_architecture()
-        generated = generate_feature(spec)
+        generated = generate_feature("Target surface: " + target + ". Feature specification: " + spec)
         tests = test_feature(generated["code_path"], generated["code"])
         status = "awaiting_approval" if tests.get("passed") else "failed_test"
         now = datetime.now(timezone.utc)
@@ -103,6 +106,7 @@ def propose():
         changelog = ("# Meta-Engineer Proposal\n\n"
             + "- Feature: " + generated["feature"] + "\n"
             + "- Spec: " + spec + "\n"
+            + "- Target: " + target + "\n"
             + "- Artifact: " + generated["code_path"] + "\n"
             + "- Status: " + status + "\n"
             + "- Created: " + now.isoformat() + "\n"
@@ -111,7 +115,7 @@ def propose():
             + "\n\n## Safety\nNo production file changed. Candidate source was not executed. Human review is required.\n")
         doc = {"spec": spec, "code_path": generated["code_path"], "generated_code": generated["code"],
             "test_result": tests, "status": status, "createdAt": now, "updatedAt": now,
-            "actor": actor, "feature": generated["feature"], "kind": generated["kind"],
+            "actor": actor, "target": target, "feature": generated["feature"], "kind": generated["kind"],
             "changelog_path": changelog_path, "changelog": changelog,
             "architecture_summary": {"structure_roots": list(architecture.get("structure", {}).keys()),
                 "free_slots": architecture.get("free_slots", []), "read_only": True}}
@@ -123,7 +127,7 @@ def propose():
             save_idea(incident)
             audit("kill_switch", spec, generated["code_path"], tests, actor, {"ideaId": idea_id})
         audit("feature_proposed", spec, generated["code_path"], tests, actor,
-              {"ideaId": idea_id, "status": status, "changelog_path": changelog_path,
+              {"ideaId": idea_id, "target": target, "status": status, "changelog_path": changelog_path,
                "changelog": changelog})
         if tests.get("passed"):
             # Only Markdown is written; generated source never enters the live import path.
