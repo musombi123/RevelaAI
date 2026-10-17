@@ -231,6 +231,8 @@ from ai.living_brain import (
     respond_local,
 )
 
+from ai.global_brain_adapter import build_global_context
+
 from ai.image_prompt import (
     build_image_prompt,
 )
@@ -3075,6 +3077,11 @@ def ai_assistant():
 
         if uploaded:
 
+            brain_payload = {
+                "hub": request.form.get("hub", "general"),
+                "visionDescription": request.form.get("visionDescription", ""),
+            }
+
             raw_client_context = (
                 request.form.get(
                     "context",
@@ -3144,6 +3151,7 @@ def ai_assistant():
                 )
                 or {}
             )
+            brain_payload = payload
 
             message = (
                 payload.get(
@@ -3195,6 +3203,15 @@ def ai_assistant():
             session,
             raw_client_context,
         )
+
+        # Shared global-brain context enriches the existing provider pipeline.
+        # It shapes instructions and capability metadata; it adds no model.
+        brain_context, interaction = build_global_context(
+            message=message,
+            hub=brain_payload.get("hub") or "general",
+            payload=brain_payload,
+        )
+        previous_context = (previous_context + [brain_context])[-MAX_HISTORY:]
 
         if memory_user_oid is not None:
             personalization = _load_personalization_context(memory_user_oid)
@@ -3568,6 +3585,9 @@ def ai_assistant():
                 "emotion",
                 "unknown",
             ),
+
+            "interaction_tone": interaction["interactionTone"],
+            "capabilities": interaction["capabilities"],
 
             "confidence": ai_result.get(
                 "confidence",
