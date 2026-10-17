@@ -830,6 +830,9 @@ def sci_core_rate_guard():
             _SCI_REQUEST_TIMES.popleft()
         _SCI_REQUEST_TIMES.append(now)
         measured_rps = len(_SCI_REQUEST_TIMES)
+    if measured_rps > 200 and not SCI_THROTTLE.get("enabled"):
+        from datetime import datetime, timezone
+        SCI_THROTTLE.update({"enabled": True, "reason": "observed_rps_over_200", "since": datetime.now(timezone.utc).isoformat()})
     # A simulation activates a short, reversible cooldown. Exempt readiness,
     # health, and the recovery control path to avoid locking operators out.
     if SCI_THROTTLE.get("enabled"):
