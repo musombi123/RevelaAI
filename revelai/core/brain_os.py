@@ -27,6 +27,7 @@ def _now() -> str:
 def capability_inventory() -> dict[str, Any]:
     """Inventory known subsystems and distinguish code presence from runtime proof."""
     modules = {
+        "brain_os": "revelai.core.brain_os",
         "orchestrator": "ai.orchestrator",
         "adaptive_hub_router": "ai.intent_router",
         "global_brain_adapter": "ai.global_brain_adapter",
