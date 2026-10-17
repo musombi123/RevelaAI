@@ -40,6 +40,8 @@ def run_staging_drill(
     approved: bool,
 ) -> dict[str, Any]:
     """Exercise approval, deploy, health and rollback policy through the adapter contract."""
+    if not isinstance(adapter, SimulatedStagingAdapter):
+        raise PermissionError("live staging adapters are disabled; only the simulator is callable")
     candidate = _validate_sha(candidate_sha, "candidate_sha")
     previous = _validate_sha(previous_sha, "previous_sha")
     approval = _validate_approval_ref(approval_ref)
