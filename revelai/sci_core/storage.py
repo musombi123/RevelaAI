@@ -11,7 +11,7 @@ _client = None
 _db = None
 _lock = Lock()
 CACHE_PATH = Path(os.getenv("REVELAAI_LOCAL_CACHE_PATH", "/tmp/revelai_cache.json"))
-_ALLOWED = {"research", "threats", "shields", "disasters", "hardware_lab", "agi_manifest", "brain_outcomes", "brain_recovery_runs"}
+_ALLOWED = {"research", "threats", "shields", "disasters", "hardware_lab", "agi_manifest", "brain_outcomes", "brain_recovery_runs", "monitor_incidents"}
 
 def _read_cache():
     try:
