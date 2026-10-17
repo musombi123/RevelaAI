@@ -78,6 +78,10 @@ def test_vision_sends_ephemeral_frame_to_gemini(client, monkeypatch, valid_image
         assert url.endswith("/test-vision-model:generateContent")
         assert kwargs["json"]["contents"][0]["parts"][0]["text"] == "Describe this scene."
         assert kwargs["json"]["contents"][0]["parts"][1]["inlineData"]["mimeType"] == "image/jpeg"
+        assert "temperature" not in kwargs["json"]["generationConfig"]
+        assert "topP" not in kwargs["json"]["generationConfig"]
+        assert "topK" not in kwargs["json"]["generationConfig"]
+        assert kwargs["json"]["generationConfig"]["maxOutputTokens"] == 768
         assert kwargs["timeout"] == (10, 40)
         return MockResponse()
 
@@ -98,3 +102,49 @@ def test_vision_reports_missing_provider_configuration(client, monkeypatch, vali
     response = client.post("/api/vision/analyze", json=valid_image_payload)
     assert response.status_code == 503
     assert response.get_json()["code"] == "vision_provider_not_configured"
+
+
+
+def test_vision_maps_gemini_request_errors_to_actionable_message(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
+    monkeypatch.setattr(vision_routes, "get_gemini_headers", lambda: {"x-goog-api-key": "test-key"})
+
+    class MockResponse:
+        ok = False
+        status_code = 400
+
+        def json(self):
+            return {"error": {"code": 400, "status": "INVALID_ARGUMENT"}}
+
+    monkeypatch.setattr(vision_routes.requests, "post", lambda *args, **kwargs: MockResponse())
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert response.status_code == 502
+    body = response.get_json()
+    assert body["code"] == "vision_provider_request_rejected"
+    assert body["providerStatus"] == 400
+    assert "Gemini rejected" in body["message"]
+
+
+def test_vision_reports_provider_quota_errors(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
+    monkeypatch.setattr(vision_routes, "get_gemini_headers", lambda: {"x-goog-api-key": "test-key"})
+
+    class MockResponse:
+        ok = False
+        status_code = 429
+
+        def json(self):
+            return {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED"}}
+
+    monkeypatch.setattr(vision_routes.requests, "post", lambda *args, **kwargs: MockResponse())
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert response.status_code == 503
+    assert response.get_json()["code"] == "vision_rate_limited"
