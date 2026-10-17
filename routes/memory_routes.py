@@ -535,6 +535,46 @@ def get_memory(user_id: str):
         return jsonify(status="error", code="memory_unavailable"), 503
 
 
+@memory_bp.route("/conversations/<user_id>", methods=["GET"])
+def get_user_conversations(user_id: str):
+    """Return bounded conversation history for the authenticated owner only."""
+    identity, authenticated_id, error = _require_identity()
+    if error:
+        return error
+    if authenticated_id != str(user_id or "").strip():
+        return jsonify(status="error", code="user_identity_mismatch"), 403
+
+    try:
+        documents = conversations().find(
+            {"userId": identity},
+            {
+                "userId": 1,
+                "sessionId": 1,
+                "hub": 1,
+                "messages": 1,
+                "createdAt": 1,
+                "updatedAt": 1,
+            },
+        ).sort("updatedAt", DESCENDING).limit(50)
+
+        result = []
+        for document in documents:
+            safe = _json_safe(document) or {}
+            messages = safe.get("messages")
+            safe["messages"] = messages[-80:] if isinstance(messages, list) else []
+            result.append(safe)
+
+        return jsonify(
+            status="success",
+            userId=authenticated_id,
+            conversations=result,
+            count=len(result),
+        ), 200
+    except Exception:
+        logger.exception("Conversation history read failed")
+        return jsonify(status="error", code="conversation_history_unavailable"), 503
+
+
 @memory_bp.route("/ideas", methods=["POST"])
 def create_idea():
     identity, user_id, error = _require_identity()
