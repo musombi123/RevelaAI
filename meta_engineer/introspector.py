@@ -38,7 +38,7 @@ def scan_architecture() -> dict[str, Any]:
         if path.is_file():
             try: source = path.read_text(encoding="utf-8")
             except OSError: continue
-            names = sorted(set(re.findall(r"""\[["\'](conversations|memories|ideas|bestThings|learnings)["\']\]""", source)))
+            names = sorted(set(re.findall(r"""["'](conversations|memories|ideas|bestThings|learnings)["']""", source)))
             if names: schemas["collections:" + rel] = {"database": "revelai", "collections": names}
     route_root = ROOT / "routes"
     if not route_root.is_dir(): route_root = ROOT / "revelai" / "routers"
