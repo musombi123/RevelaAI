@@ -7,7 +7,10 @@ from typing import Any
 from pymongo import MongoClient
 
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
-_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000) if MONGO_URI else None
+try:
+    _client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000, connectTimeoutMS=3000) if MONGO_URI else None
+except Exception:
+    _client = None
 db = _client["revelai"] if _client is not None else None
 ideas_col = db["ideas"] if db is not None else None
 changelogs_col = db["changelogs"] if db is not None else None
