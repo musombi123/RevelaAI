@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from ai.intent_router import classify_intent
 from ai.living_brain import respond_local
+from ai.global_brain_adapter import build_global_context
 from services.ai_service import process_message
 from routes.memory_routes import (
     _record_messages,
@@ -98,6 +99,14 @@ def chat():
     context = payload.get("context") if isinstance(payload.get("context"), list) else []
     session_id = str(payload.get("sessionId") or payload.get("conversationId") or "default")[:128]
     intent = classify_intent(message)
+    # Give the existing text provider a shared capability map, hub guidance,
+    # and tone-adaptive interaction policy on every turn. No provider is added.
+    brain_context, interaction = build_global_context(
+        message=message,
+        hub=payload.get("hub") or payload.get("domain") or "general",
+        payload=payload,
+    )
+    context = context[-10:] + [brain_context]
 
     # Rehydrate relevant long-term facts on every authenticated turn.
     personalization = _load_personalization_context(user_oid)
@@ -143,6 +152,8 @@ def chat():
                     "model": result.get("model"),
                     "networkUsed": True,
                     "fallback": False,
+                    "interactionTone": interaction["interactionTone"],
+                    "capabilities": interaction["capabilities"],
                 },
             }), 200
         logger.warning("Provider pipeline returned no usable answer; switching to local fallback")
@@ -178,5 +189,7 @@ def chat():
             "model": None,
             "networkUsed": False,
             "fallback": True,
+            "interactionTone": interaction["interactionTone"],
+            "capabilities": interaction["capabilities"],
         },
     }), 200
