@@ -86,9 +86,24 @@ def propose():
             "architecture_summary": {"structure_roots": list(architecture.get("structure", {}).keys()),
                 "free_slots": architecture.get("free_slots", []), "read_only": True}}
         idea_id = save_idea(doc)
+        if not tests.get("passed") and "KILL SWITCH" in str(tests.get("logs", "")):
+            incident = {"type": "kill_switch", "reason": "Sandbox resource limit exceeded",
+                "status": "incident", "spec": spec, "code_path": generated["code_path"],
+                "createdAt": now, "actor": actor, "test_result": tests}
+            save_idea(incident)
+            audit("kill_switch", spec, generated["code_path"], tests, actor, {"ideaId": idea_id})
         audit("feature_proposed", spec, generated["code_path"], tests, actor,
-              {"ideaId": idea_id, "status": status, "changelog_path": changelog_path})
+              {"ideaId": idea_id, "status": status, "changelog_path": changelog_path,
+               "changelog": changelog})
         if tests.get("passed"):
+            # Only Markdown is written; generated source never enters the live import path.
+            from pathlib import Path
+            root = Path(__file__).resolve().parents[1]
+            target = (root / changelog_path).resolve()
+            if root not in target.parents:
+                raise ValueError("invalid changelog path")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(changelog, encoding="utf-8")
             return jsonify({"status": "ready for review", "ideaId": idea_id, "idea_status": status,
                 "changelog_path": changelog_path, "changelog": changelog, "test_logs": tests.get("logs", ""),
                 "code_path": generated["code_path"], "generated_code": generated["code"], "auto_deploy": False}), 201
