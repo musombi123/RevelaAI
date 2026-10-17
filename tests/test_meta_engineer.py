@@ -145,3 +145,131 @@ def test_connector_contract_simulated_actions_are_idempotent_and_never_actuate()
     assert first["external_side_effects"] is False
     assert first["executed"] is False
     assert adapter.simulated_action_count == 1
+
+def test_staging_adapter_contract_blocks_without_explicit_approval():
+    from meta_engineer.staging_adapter import SimulatedStagingAdapter, run_staging_drill
+
+    adapter = SimulatedStagingAdapter()
+    result = run_staging_drill(
+        adapter=adapter,
+        candidate_sha="a" * 40,
+        previous_sha="b" * 40,
+        approval_ref="GH-PR-123",
+        approved=False,
+    )
+    assert result["decision"] == "approval_required"
+    assert result["active_sha"] == "b" * 40
+    assert result["external_side_effects"] is False
+    assert adapter.operations == []
+
+
+def test_staging_adapter_contract_simulates_healthy_release_without_deployment():
+    from meta_engineer.staging_adapter import SimulatedStagingAdapter, run_staging_drill
+
+    adapter = SimulatedStagingAdapter(deploy_result="sim-deploy-1", health_result="healthy")
+    result = run_staging_drill(
+        adapter=adapter,
+        candidate_sha="a" * 40,
+        previous_sha="b" * 40,
+        approval_ref="GH-PR-124",
+        approved=True,
+    )
+    assert result["decision"] == "staged_candidate_healthy"
+    assert result["active_sha"] == "a" * 40
+    assert result["health_verified"] is True
+    assert result["external_side_effects"] is False
+    assert [op["operation"] for op in adapter.operations] == ["deploy_simulated", "health_check_simulated"]
+
+
+def test_staging_adapter_contract_simulates_rollback_and_verifies_last_known_good():
+    from meta_engineer.staging_adapter import SimulatedStagingAdapter, run_staging_drill
+
+    adapter = SimulatedStagingAdapter(
+        deploy_result="sim-deploy-2",
+        health_result="unhealthy",
+        rollback_result="rolled_back",
+        rollback_health_result="healthy",
+    )
+    result = run_staging_drill(
+        adapter=adapter,
+        candidate_sha="a" * 40,
+        previous_sha="b" * 40,
+        approval_ref="GH-PR-125",
+        approved=True,
+    )
+    assert result["decision"] == "rolled_back"
+    assert result["active_sha"] == "b" * 40
+    assert result["rollback_verified"] is True
+    assert result["external_side_effects"] is False
+    assert [op["operation"] for op in adapter.operations] == [
+        "deploy_simulated", "health_check_simulated", "rollback_simulated", "rollback_health_check_simulated"
+    ]
+
+
+def test_staging_adapter_contract_escalates_when_rollback_health_is_bad():
+    from meta_engineer.staging_adapter import SimulatedStagingAdapter, run_staging_drill
+
+    adapter = SimulatedStagingAdapter(
+        deploy_result="sim-deploy-3",
+        health_result="unhealthy",
+        rollback_result="rolled_back",
+        rollback_health_result="unhealthy",
+    )
+    result = run_staging_drill(
+        adapter=adapter,
+        candidate_sha="a" * 40,
+        previous_sha="b" * 40,
+        approval_ref="GH-PR-126",
+        approved=True,
+    )
+    assert result["decision"] == "rollback_failed_escalate"
+    assert result["active_sha"] is None
+    assert result["rollback_verified"] is False
+    assert result["escalation_required"] is True
+    assert result["external_side_effects"] is False
+
+
+
+def test_staging_adapter_contract_rejects_live_adapter_objects():
+    import pytest
+    from meta_engineer.staging_adapter import run_staging_drill
+
+    class LiveLikeAdapter:
+        def deploy(self, candidate_sha, idempotency_key):
+            raise AssertionError("must never be called")
+
+        def health_check(self, deployment_id):
+            raise AssertionError("must never be called")
+
+        def rollback(self, previous_sha, idempotency_key):
+            raise AssertionError("must never be called")
+
+    with pytest.raises(PermissionError):
+        run_staging_drill(
+            adapter=LiveLikeAdapter(),
+            candidate_sha="a" * 40,
+            previous_sha="b" * 40,
+            approval_ref="GH-PR-128",
+            approved=True,
+        )
+
+def test_staging_adapter_contract_rejects_invalid_commit_and_approval_refs():
+    import pytest
+    from meta_engineer.staging_adapter import SimulatedStagingAdapter, run_staging_drill
+
+    with pytest.raises(ValueError):
+        run_staging_drill(
+            adapter=SimulatedStagingAdapter(),
+            candidate_sha="../main",
+            previous_sha="b" * 40,
+            approval_ref="GH-PR-127",
+            approved=True,
+        )
+    with pytest.raises(ValueError):
+        run_staging_drill(
+            adapter=SimulatedStagingAdapter(),
+            candidate_sha="a" * 40,
+            previous_sha="b" * 40,
+            approval_ref="approved-by-me",
+            approved=True,
+        )
