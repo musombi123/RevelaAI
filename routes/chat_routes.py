@@ -61,21 +61,10 @@ def _load_personalization_context(user_oid) -> dict | None:
 
 
 def _record_brain_outcome(hub: str, success: bool, started_at: float) -> None:
-    """Record reliability telemetry only; never store prompts, replies, or user IDs."""
-    aliases = {
-        "mkulima": "shamba", "farm": "shamba", "agriculture": "shamba",
-        "mahubiri": "scripture", "faith": "scripture", "theology": "scripture",
-        "business": "biashara", "education": "elimu", "social": "community",
-    }
-    category = str(hub or "general").strip().lower()
-    category = aliases.get(category, category)
-    if category not in {"general", "coding", "research", "community", "biashara",
-                        "shamba", "elimu", "scripture", "security", "engineering"}:
-        category = "general"
+    """Record coarse reliability metrics without storing prompts, replies, or user IDs."""
     try:
-        from revelai.core.brain_os import record_outcome
-        latency_ms = max(0, min(600000, int((time.monotonic() - started_at) * 1000)))
-        record_outcome(category, bool(success), latency_ms, None, "chat_api")
+        from revelai.core.brain_os import record_chat_outcome
+        record_chat_outcome(hub, bool(success), started_at)
     except Exception:
         # Observability must never break user-facing chat.
         logger.debug("Brain OS outcome telemetry unavailable", exc_info=True)
