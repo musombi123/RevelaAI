@@ -28,3 +28,6 @@ huggingface_hub>=1.26.0
 # Image processing
 Pillow>=10.0.0
 PyJWT>=2.8.0
+# Meta-Engineer sandbox/test tooling
+pytest>=8.0,<9
+psutil>=5.9
