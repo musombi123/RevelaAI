@@ -30,7 +30,12 @@ REVELACODE_BACKEND_URL = os.getenv(
     "REVELACODE_BACKEND_URL",
     "https://revelacode-backend.onrender.com",
 ).strip().rstrip("/")
-REVELACODE_VERIFY_KEY = os.getenv("REVELACODE_VERIFY_KEY", "").strip()
+# Dedicated service-to-service key used by the protected user-verification
+# endpoint in the existing RevelaCode backend branch.
+REVELAAI_SERVICE_KEY = (
+    os.getenv("REVELAAI_SERVICE_KEY", "").strip()
+    or os.getenv("REVELACODE_VERIFY_KEY", "").strip()
+)
 VERIFY_TIMEOUT_SECONDS = float(os.getenv("REVELACODE_VERIFY_TIMEOUT_SECONDS", "4"))
 
 _mongo_client = None
@@ -115,12 +120,37 @@ def isBestThing(text: str, recent_messages: list[str] | None = None) -> bool:
     """
     value = str(text or "").strip()
     normalized = _normalize(value)
-    if len(value) < 4 or len(normalized.split()) < 3:
-        return False
-    if NOISE_ONLY.fullmatch(value):
+    if len(value) < 3 or NOISE_ONLY.fullmatch(value):
         return False
     if not re.search(r"[A-Za-z0-9]", value):
         return False
+
+    # Most fragments are not useful memories, but short explicit facts and
+    # preferences must not be discarded just because they contain few words.
+    short_fact = re.search(
+        r"\b(?:my name is|call me|i live in|i am based in|i'm based in|"
+        r"i prefer|my goal is|my business is|my farm is|i grow|i raise|"
+        r"my preferred language is|my preferred hub is)\b",
+        value,
+        re.IGNORECASE,
+    )
+    word_count = len(normalized.split())
+    if word_count < 2:
+        return False
+    if word_count == 2 and not short_fact:
+        # Keep concise but meaningful preference/identity fragments and
+        # two-word proper names/locations; discard generic two-word chatter.
+        explicit_preference = re.search(
+            r"\b(?:no|avoid|prefer|use|remember|farm|business|goal)\b",
+            value,
+            re.IGNORECASE,
+        )
+        words = [word.strip(".,!?;:()[]{}") for word in value.split()]
+        proper_name_or_place = bool(words) and all(
+            word and word[0].isupper() for word in words
+        )
+        if not explicit_preference and not proper_name_or_place:
+            return False
     for prior in (recent_messages or [])[-5:]:
         prior_normalized = _normalize(prior)
         if prior_normalized and normalized == prior_normalized:
@@ -148,7 +178,8 @@ def _authenticate() -> tuple[ObjectId | None, str | None, tuple | None]:
             token,
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
+            # The existing RevelaCode signer uses "user_id" (not "sub").
+            options={"require": ["iat", "exp"]},
         )
     except jwt.ExpiredSignatureError:
         return None, None, (jsonify(status="error", code="token_expired"), 401)
@@ -174,12 +205,12 @@ def _authenticate() -> tuple[ObjectId | None, str | None, tuple | None]:
 
 def _verify_authoritative_user(user_id: str) -> tuple[bool, str | None]:
     """Ask RevelaCode's protected verify endpoint; fail closed if misconfigured."""
-    if not REVELACODE_VERIFY_KEY:
+    if not REVELAAI_SERVICE_KEY:
         return False, "user_verification_not_configured"
     try:
         response = requests.get(
             f"{REVELACODE_BACKEND_URL}/api/auth/verify/{user_id}",
-            headers={"X-RevelaAI-Verify-Key": REVELACODE_VERIFY_KEY},
+            headers={"X-REVELAAI-SERVICE-KEY": REVELAAI_SERVICE_KEY},
             timeout=VERIFY_TIMEOUT_SECONDS,
         )
         if response.status_code == 200:

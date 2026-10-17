@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "feat/memory-v2-coordinated-ai-team"]
+    branches: [main, "feat/memory-v2-coordinated-ai-team", "feat/smart-memory-gemini-wiring"]
 
 jobs:
   python-checks:
@@ -17,7 +17,9 @@ jobs:
       - name: Compile backend modules
         run: python -m py_compile app.py routes/chat_routes.py routes/memory_routes.py ai/living_brain.py
       - name: Install memory-route test dependencies
-        run: python -m pip install Flask PyJWT pymongo requests
+        run: python -m pip install Flask PyJWT pymongo requests python-dotenv
+      - name: Verify Gemini primary and model fallback routing
+        run: python -m unittest discover -s tests -p "test_gemini_routing.py"
       - name: Verify smart filter rules
         env:
           JWT_SECRET: "test-only-secret"
@@ -30,6 +32,9 @@ jobs:
           assert not isBestThing("ok")
           assert isBestThing("My farm grows maize in Kilifi")
           assert isBestThing("I want to build a school fee calculator")
+          assert isBestThing("Mombasa Kenya")
+          assert isBestThing("No Groq")
+          assert not isBestThing("very nice")
           assert not isBestThing("I want to build a school fee calculator", [
               "I want to build a school fee calculator"
           ])

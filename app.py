@@ -227,6 +227,10 @@ from ai.intent_router import (
     classify_intent,
 )
 
+from ai.living_brain import (
+    respond_local,
+)
+
 from ai.image_prompt import (
     build_image_prompt,
 )
@@ -275,6 +279,12 @@ from utils.docx_utils import (
 
 from routes.chat_routes import (
     chat_bp,
+    _load_personalization_context,
+    _persist_turn,
+)
+
+from routes.memory_routes import (
+    _require_identity,
 )
 
 from routes.living_brain_routes import (
@@ -3021,6 +3031,24 @@ def ai_assistant():
         resolve_revelacode_user_id()
     )
 
+    # Smart memory is best-effort: only a valid JWT that also passes
+    # RevelaCode's protected user-existence check can read/write memory.
+    memory_user_oid = None
+    if user_id:
+        try:
+            memory_user_oid, verified_user_id, memory_auth_error = _require_identity()
+            if memory_auth_error or verified_user_id != user_id:
+                memory_user_oid = None
+                app.logger.info(
+                    "Smart memory identity check did not pass; continuing chat without memory"
+                )
+        except Exception:
+            memory_user_oid = None
+            app.logger.warning(
+                "Smart memory identity check failed; continuing chat without memory",
+                exc_info=True,
+            )
+
     session = get_session(
         session_id
     )
@@ -3167,6 +3195,13 @@ def ai_assistant():
             session,
             raw_client_context,
         )
+
+        if memory_user_oid is not None:
+            personalization = _load_personalization_context(memory_user_oid)
+            if personalization:
+                previous_context = (
+                    previous_context + [personalization]
+                )[-MAX_HISTORY:]
 
         app.logger.info(
             "CONVERSATION MEMORY | "
@@ -3354,10 +3389,35 @@ def ai_assistant():
             or ""
         ).strip()
 
-        if not assistant_text:
+        # Keep the local brain as a genuine last-resort fallback when
+        # Gemini and its configured Gemini fallback model both fail.
+        if ai_result.get("error") or not assistant_text:
+            app.logger.warning(
+                "Hosted text provider failed; using local fallback | request_id=%s",
+                getattr(g, "request_id", None),
+            )
+            local_result = respond_local(
+                message=message,
+                preferred_hub=intent or "auto",
+                context=previous_context,
+            )
+            assistant_text = str(
+                local_result.get("reply") or ""
+            ).strip()
+            ai_result = dict(ai_result)
+            ai_result.update({
+                "provider": None,
+                "model": None,
+                "confidence": "fallback",
+                "intent": local_result.get("intent", intent),
+                "domain": local_result.get("hub", "general"),
+                "error": None,
+                "fallback": True,
+            })
 
+        if not assistant_text:
             raise RuntimeError(
-                "RevelaAI returned an empty response."
+                "RevelaAI and its local fallback returned no usable response."
             )
 
         # -------------------------------------------------
@@ -3370,6 +3430,15 @@ def ai_assistant():
             "role": "assistant",
             "content": assistant_text,
         })
+
+        if memory_user_oid is not None:
+            _persist_turn(
+                memory_user_oid,
+                session_id,
+                str(ai_result.get("domain") or intent or "general"),
+                message,
+                assistant_text,
+            )
 
         save_session(
             session_id,
