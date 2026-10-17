@@ -1,6 +1,6 @@
 """Defensive monitoring and hardening recommendations only."""
 DEFENSIVE_ONLY = True
-import os, re, time
+import os, re, time\nfrom importlib import metadata
 from pathlib import Path
 from datetime import datetime, timezone
 import requests
