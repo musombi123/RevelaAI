@@ -30,13 +30,9 @@ REVELACODE_BACKEND_URL = os.getenv(
     "REVELACODE_BACKEND_URL",
     "https://revelacode-backend.onrender.com",
 ).strip().rstrip("/")
-# Reuse the existing service-to-service credential used by the AI Gateway.
-# REVELACODE_VERIFY_KEY remains a backwards-compatible alias for deployments
-# that already configured the dedicated memory verification secret.
-REVELAAI_SERVICE_KEY = (
-    os.getenv("REVELAAI_SERVICE_KEY", "").strip()
-    or os.getenv("REVELACODE_VERIFY_KEY", "").strip()
-)
+# Dedicated service-to-service key used by the protected user-verification
+# endpoint in the existing RevelaCode backend branch.
+REVELACODE_VERIFY_KEY = os.getenv("REVELACODE_VERIFY_KEY", "").strip()
 VERIFY_TIMEOUT_SECONDS = float(os.getenv("REVELACODE_VERIFY_TIMEOUT_SECONDS", "4"))
 
 _mongo_client = None
@@ -205,12 +201,12 @@ def _authenticate() -> tuple[ObjectId | None, str | None, tuple | None]:
 
 def _verify_authoritative_user(user_id: str) -> tuple[bool, str | None]:
     """Ask RevelaCode's protected verify endpoint; fail closed if misconfigured."""
-    if not REVELAAI_SERVICE_KEY:
+    if not REVELACODE_VERIFY_KEY:
         return False, "user_verification_not_configured"
     try:
         response = requests.get(
             f"{REVELACODE_BACKEND_URL}/api/auth/verify/{user_id}",
-            headers={"X-REVELAAI-SERVICE-KEY": REVELAAI_SERVICE_KEY},
+            headers={"X-RevelaAI-Verify-Key": REVELACODE_VERIFY_KEY},
             timeout=VERIFY_TIMEOUT_SECONDS,
         )
         if response.status_code == 200:
