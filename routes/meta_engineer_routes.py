@@ -36,8 +36,8 @@ def _authenticated_admin():
         candidates = [body]
         for key in ("data", "user", "profile"):
             if isinstance(body.get(key), dict): candidates.append(body[key])
-        backend_id = str(body.get("userId") or body.get("id") or "")
-        if backend_id != str(user_id):
+        backend_ids = {str(item.get("userId") or item.get("user_id") or item.get("id") or item.get("_id") or "").strip() for item in candidates}
+        if str(user_id) not in backend_ids:
             return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
         # The existing /api/auth/me endpoint confirms identity but deliberately
         # does not expose role. Require a server-side allowlist of known admins.
