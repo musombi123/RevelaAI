@@ -230,3 +230,45 @@ def test_diagnostics_are_bounded_and_never_claim_automatic_recovery():
 
 def test_brain_os_routes_are_registered():
     assert len(agi_router.deferred_functions) >= 6
+
+def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails():
+    from flask import Flask
+    from routes import chat_routes
+
+    app = Flask(__name__)
+    app.register_blueprint(chat_routes.chat_bp, url_prefix="/api/chat")
+    app.config["TESTING"] = True
+
+    interaction = {
+        "hub": "general",
+        "hubRequested": "auto",
+        "hubDetected": "general",
+        "interactionTone": "clear",
+        "capabilities": [],
+    }
+    with (
+        patch.object(chat_routes, "_require_identity", return_value=("oid-test", "user-test", None)),
+        patch.object(chat_routes, "_load_personalization_context", return_value=None),
+        patch.object(chat_routes, "classify_intent", return_value="general"),
+        patch.object(chat_routes, "build_global_context", return_value=([{"role": "system", "content": "test"}], interaction)),
+        patch.object(chat_routes, "get_identity_answer", return_value=None),
+        patch.object(chat_routes, "get_self_description_answer", return_value=None),
+        patch.object(chat_routes, "process_message", return_value={
+            "response": "The test response is available.",
+            "confidence": "high",
+            "intent": "general",
+            "provider": "test-provider",
+            "model": "test-model",
+        }),
+        patch.object(chat_routes, "_persist_turn"),
+        patch("revelai.core.brain_os.record_chat_outcome", side_effect=OSError("telemetry database unavailable")),
+    ):
+        response = app.test_client().post(
+            "/api/chat",
+            json={"message": "Please answer this test", "hub": "auto"},
+        )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["status"] == "success"
+    assert body["data"]["reply"].endswith("The test response is available.")
