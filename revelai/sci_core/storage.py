@@ -1,19 +1,71 @@
-"""Sci-Core uses only the dedicated revelai database and named collections."""
+"""Sci-Core uses the dedicated revelai database and a bounded local fallback when MongoDB is unreachable."""
 DEFENSIVE_ONLY = True
+import json
 import os
+from pathlib import Path
+from threading import Lock
+from uuid import uuid4
 from pymongo import MongoClient
+
 _client = None
 _db = None
+_lock = Lock()
+CACHE_PATH = Path(os.getenv("REVELAAI_LOCAL_CACHE_PATH", "/tmp/revelai_cache.json"))
+_ALLOWED = {"research", "threats", "shields", "disasters", "hardware_lab"}
+
+def _read_cache():
+    try:
+        value = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        return value if isinstance(value, list) else []
+    except (OSError, ValueError, TypeError):
+        return []
+
+def _write_cache(rows):
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # Keep local fallback bounded; this is a temporary diagnostic cache, not durable DB replacement.
+    CACHE_PATH.write_text(json.dumps(rows[-2000:], ensure_ascii=False, default=str), encoding="utf-8")
+
+class LocalCollection:
+    def __init__(self, name): self.name = name
+    def insert_one(self, document):
+        row = {"_id": uuid4().hex, "collection": self.name, "document": document}
+        with _lock:
+            rows = _read_cache()
+            rows.append(row)
+            _write_cache(rows)
+        return type("InsertResult", (), {"inserted_id": row["_id"]})()
+    def count_documents(self, query=None):
+        query = query or {}
+        with _lock: rows = _read_cache()
+        count = 0
+        for row in rows:
+            if row.get("collection") != self.name: continue
+            doc = row.get("document", {})
+            matches = True
+            for key, expected in query.items():
+                value = doc.get(key)
+                if isinstance(expected, dict) and "$gte" in expected:
+                    matches = value is not None and str(value) >= str(expected["$gte"])
+                else: matches = value == expected
+                if not matches: break
+            count += int(matches)
+        return count
+
 def database():
     global _client, _db
-    if _db is not None: return _db
-    uri = os.getenv("MONGO_URI","").strip()
+    uri = os.getenv("MONGO_URI", "").strip()
     if not uri: return None
-    _client = MongoClient(uri, serverSelectionTimeoutMS=2500, connectTimeoutMS=2500)
-    _db = _client["revelai"]
+    if _db is None:
+        _client = MongoClient(uri, serverSelectionTimeoutMS=1800, connectTimeoutMS=1800)
+        _db = _client["revelai"]
     return _db
+
 def collection(name):
-    if name not in {"research","threats","shields","disasters","hardware_lab"}: raise ValueError("Unknown Sci-Core collection")
-    db = database()
-    if db is None: raise RuntimeError("MONGO_URI is not configured")
-    return db[name]
+    if name not in _ALLOWED: raise ValueError("Unknown Sci-Core collection")
+    try:
+        db = database()
+        if db is None: return LocalCollection(name)
+        db.command("ping")
+        return db[name]
+    except Exception:
+        return LocalCollection(name)
