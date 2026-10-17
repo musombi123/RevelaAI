@@ -316,6 +316,8 @@ from routes.meta_engineer_routes import (
     meta_engineer_bp,
 )
 
+from revelai.routers.sci_core import sci_router
+
 from whatsapp_webhook import (
     whatsapp_bp,
 )
@@ -5853,6 +5855,21 @@ except Exception as exc:
 
     app.logger.warning(
         "meta_engineer_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        sci_router,
+        url_prefix="/api/sci",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "sci_router registration failed | error=%s",
         exc,
     )
 
