@@ -227,6 +227,10 @@ from ai.intent_router import (
     classify_intent,
 )
 
+from ai.living_brain import (
+    respond_local,
+)
+
 from ai.image_prompt import (
     build_image_prompt,
 )
@@ -3385,10 +3389,35 @@ def ai_assistant():
             or ""
         ).strip()
 
-        if not assistant_text:
+        # Keep the local brain as a genuine last-resort fallback when
+        # Gemini and its configured Gemini fallback model both fail.
+        if ai_result.get("error") or not assistant_text:
+            app.logger.warning(
+                "Hosted text provider failed; using local fallback | request_id=%s",
+                getattr(g, "request_id", None),
+            )
+            local_result = respond_local(
+                message=message,
+                preferred_hub=intent or "auto",
+                context=previous_context,
+            )
+            assistant_text = str(
+                local_result.get("reply") or ""
+            ).strip()
+            ai_result = dict(ai_result)
+            ai_result.update({
+                "provider": None,
+                "model": None,
+                "confidence": "fallback",
+                "intent": local_result.get("intent", intent),
+                "domain": local_result.get("hub", "general"),
+                "error": None,
+                "fallback": True,
+            })
 
+        if not assistant_text:
             raise RuntimeError(
-                "RevelaAI returned an empty response."
+                "RevelaAI and its local fallback returned no usable response."
             )
 
         # -------------------------------------------------
