@@ -54,8 +54,16 @@ class GeminiRoutingTests(unittest.TestCase):
 
 
     def test_brain_os_telemetry_failure_does_not_break_successful_chat(self):
+        import sys
+        import types
         from flask import Flask
-        from routes import chat_routes
+
+        # Chat orchestration is stubbed because this test isolates telemetry
+        # failure handling, not provider/scraper dependency installation.
+        ai_service_stub = types.ModuleType("services.ai_service")
+        ai_service_stub.process_message = lambda **kwargs: None
+        with patch.dict(sys.modules, {"services.ai_service": ai_service_stub}):
+            from routes import chat_routes
 
         app = Flask(__name__)
         app.register_blueprint(chat_routes.chat_bp, url_prefix="/api/chat")
