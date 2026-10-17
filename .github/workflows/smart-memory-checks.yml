@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, "feat/memory-v2-coordinated-ai-team"]
+    branches: [main, "feat/memory-v2-coordinated-ai-team", "feat/smart-memory-gemini-wiring"]
 
 jobs:
   python-checks:
@@ -30,6 +30,9 @@ jobs:
           assert not isBestThing("ok")
           assert isBestThing("My farm grows maize in Kilifi")
           assert isBestThing("I want to build a school fee calculator")
+          assert isBestThing("Mombasa Kenya")
+          assert isBestThing("No Groq")
+          assert not isBestThing("very nice")
           assert not isBestThing("I want to build a school fee calculator", [
               "I want to build a school fee calculator"
           ])
