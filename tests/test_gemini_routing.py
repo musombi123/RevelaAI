@@ -52,6 +52,55 @@ class GeminiRoutingTests(unittest.TestCase):
             ["gemini-primary-test", "gemini-fallback-test"],
         )
 
+
+    def test_brain_os_telemetry_failure_does_not_break_successful_chat(self):
+        import sys
+        import types
+        from flask import Flask
+
+        # Chat orchestration is stubbed because this test isolates telemetry
+        # failure handling, not provider/scraper dependency installation.
+        ai_service_stub = types.ModuleType("services.ai_service")
+        ai_service_stub.process_message = lambda **kwargs: None
+        with patch.dict(sys.modules, {"services.ai_service": ai_service_stub}):
+            from routes import chat_routes
+
+        app = Flask(__name__)
+        app.register_blueprint(chat_routes.chat_bp, url_prefix="/api/chat")
+        interaction = {
+            "hubRequested": "auto",
+            "hub": "coding",
+            "hubDetected": "coding",
+            "interactionTone": "clear",
+            "capabilities": [],
+        }
+        with (
+            patch.object(chat_routes, "_require_identity", return_value=("oid-test", "user-test", None)),
+            patch.object(chat_routes, "_load_personalization_context", return_value=None),
+            patch.object(chat_routes, "classify_intent", return_value="coding"),
+            patch.object(chat_routes, "build_global_context", return_value=("test context", interaction)),
+            patch.object(chat_routes, "get_identity_answer", return_value=None),
+            patch.object(chat_routes, "get_self_description_answer", return_value=None),
+            patch.object(chat_routes, "process_message", return_value={
+                "response": "The feature is working.",
+                "confidence": "high",
+                "intent": "coding",
+                "domain": "coding",
+                "provider": "test-provider",
+                "model": "test-model",
+            }),
+            patch.object(chat_routes, "_persist_turn"),
+            patch("revelai.core.brain_os.record_chat_outcome", side_effect=RuntimeError("telemetry unavailable")),
+        ):
+            response = app.test_client().post(
+                "/api/chat",
+                json={"message": "Check the feature", "hub": "auto", "userId": "user-test"},
+            )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["status"], "success")
+        self.assertIn("The feature is working.", body["data"]["reply"])
+
     def test_gemini_is_first_configured_text_provider_by_default(self):
         # This CI test runs without production environment variables.
         self.assertEqual(ai_client.TEXT_PROVIDER_ORDER[0], "gemini")
