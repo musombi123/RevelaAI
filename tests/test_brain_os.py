@@ -86,7 +86,7 @@ def test_chat_reliability_telemetry_normalizes_hub_and_keeps_quality_unknown(mon
     monkeypatch.setattr("time.monotonic", lambda: 1.25)
     result = record_chat_outcome(
         "mahubiri", True, 1.0,
-        provider="Gemini", route="primary-model-route",
+        provider="Gemini 2.5 Flash", route="primary-model-route",
     )
     assert result["recorded"] is True
     row = fake.rows[0]
@@ -96,7 +96,7 @@ def test_chat_reliability_telemetry_normalizes_hub_and_keeps_quality_unknown(mon
     assert row["delivery_success"] is True
     assert row["task_success"] is None
     assert row["outcome_source"] == "chat_delivery"
-    assert row["provider"] == "gemini"
+    assert row["provider"] == "gemini-2.5-flash"
     assert row["route"] == "primary-model-route"
     assert row["user_feedback"] is None
     assert "prompt" not in row and "response" not in row
