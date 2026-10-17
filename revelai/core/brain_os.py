@@ -6,6 +6,7 @@ production workers, changes firewall rules, or stores raw user conversation text
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import os
 import platform
 import re
@@ -26,6 +27,47 @@ RESOLUTION_LABELS = {"resolved", "unresolved"}
 OUTCOME_SOURCES = {"manual", "chat_delivery", "admin_review", "validator", "user_feedback", "security_monitor", "scheduler", "system"}
 ACTOR_TYPES = {"system", "chat_api", "admin_api", "validator", "admin_review", "user_feedback", "scheduler", "security_monitor", "test"}
 DIMENSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/ -]{0,99}$")
+INCIDENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$")
+RECOVERY_ACTIONS = {
+    "retry_provider_once": {
+        "component": "text_provider",
+        "risk": "low",
+        "description": "Plan one bounded provider retry for a confirmed transient failure.",
+        "required_evidence": {
+            "component": "text_provider",
+            "status": "degraded",
+            "retry_budget_available": True,
+        },
+        "future_auto_candidate": True,
+    },
+    "open_provider_circuit": {
+        "component": "text_provider",
+        "risk": "medium",
+        "description": "Plan temporary traffic isolation after a confirmed provider failure threshold.",
+        "required_evidence": {
+            "component": "text_provider",
+            "status": "degraded",
+            "failure_threshold_exceeded": True,
+        },
+        "future_auto_candidate": False,
+    },
+    "refresh_disposable_cache": {
+        "component": "transient_cache",
+        "risk": "low",
+        "description": "Plan a refresh of a disposable cache after staleness is confirmed.",
+        "required_evidence": {
+            "component": "transient_cache",
+            "status": "stale",
+        },
+        "future_auto_candidate": True,
+    },
+}
+EVIDENCE_STRING_VALUES = {
+    "component": {"text_provider", "transient_cache"},
+    "status": {"healthy", "degraded", "stale", "unknown"},
+}
+EVIDENCE_BOOLEAN_KEYS = {"retry_budget_available", "failure_threshold_exceeded"}
+EVIDENCE_KEYS = set(EVIDENCE_STRING_VALUES) | EVIDENCE_BOOLEAN_KEYS
 
 
 def _now() -> str:
@@ -352,6 +394,98 @@ def diagnose_and_recover() -> dict[str, Any]:
     }
 
 
+def recovery_action_catalog() -> dict[str, Any]:
+    """Return the reviewed simulation registry; this is not an executor."""
+    return {
+        "mode": "simulation_only",
+        "execution_enabled": False,
+        "actions": {
+            action_id: {
+                "action_id": action_id,
+                "component": action["component"],
+                "risk": action["risk"],
+                "description": action["description"],
+                "required_evidence": dict(action["required_evidence"]),
+                "future_auto_candidate": action["future_auto_candidate"],
+                "execution_enabled": False,
+                "human_approval_required_for_real_action": True,
+            }
+            for action_id, action in sorted(RECOVERY_ACTIONS.items())
+        },
+    }
+
+
+def simulate_recovery_action(
+    action_id: str,
+    incident_id: str,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate and audit a recovery plan without executing external side effects."""
+    if not isinstance(action_id, str) or action_id not in RECOVERY_ACTIONS:
+        raise ValueError("unknown recovery action")
+    if not isinstance(incident_id, str):
+        raise ValueError("incident_id must be a bounded internal identifier")
+    incident_id = incident_id.strip()
+    if not INCIDENT_PATTERN.fullmatch(incident_id):
+        raise ValueError("incident_id must contain only safe identifier characters (max 100)")
+    if evidence is None:
+        evidence = {}
+    if not isinstance(evidence, dict):
+        raise ValueError("evidence must be an object")
+    if set(evidence) - EVIDENCE_KEYS:
+        raise ValueError("evidence contains unsupported fields")
+
+    clean_evidence: dict[str, Any] = {}
+    for key, value in evidence.items():
+        if key in EVIDENCE_BOOLEAN_KEYS:
+            if not isinstance(value, bool):
+                raise ValueError(f"{key} must be boolean")
+            clean_evidence[key] = value
+        else:
+            if not isinstance(value, str) or value.strip().lower() not in EVIDENCE_STRING_VALUES[key]:
+                raise ValueError(f"{key} must be an approved categorical value")
+            clean_evidence[key] = value.strip().lower()
+
+    action = RECOVERY_ACTIONS[action_id]
+    required = action["required_evidence"]
+    unmet = [key for key, expected in required.items() if clean_evidence.get(key) != expected]
+    preconditions_met = not unmet
+    created_at = _now()
+    incident_ref = hashlib.sha256(incident_id.encode("utf-8")).hexdigest()[:24]
+    audit_event = {
+        "schema_version": "1.0",
+        "incident_ref": incident_ref,
+        "action_id": action_id,
+        "mode": "simulation_only",
+        "preconditions_met": preconditions_met,
+        "unmet_preconditions": unmet,
+        "simulation_result": "preconditions_met" if preconditions_met else "preconditions_not_met",
+        "executed": False,
+        "external_side_effects": False,
+        "created_at": created_at,
+    }
+    # Fail closed: no simulated plan is reported as recorded if the audit write fails.
+    from revelai.sci_core.storage import collection
+    collection("brain_recovery_runs").insert_one(audit_event.copy())
+    return {
+        "status": "simulated",
+        "action_id": action_id,
+        "component": action["component"],
+        "risk": action["risk"],
+        "mode": "simulation_only",
+        "preconditions_met": preconditions_met,
+        "unmet_preconditions": unmet,
+        "simulation_result": audit_event["simulation_result"],
+        "executed": False,
+        "external_side_effects": False,
+        "execution_enabled": False,
+        "human_approval_required_for_real_action": True,
+        "audit_recorded": True,
+        "incident_ref": incident_ref,
+        "created_at": created_at,
+    }
+
+
 def engineering_guardrails() -> dict[str, Any]:
     """Describe enforceable engineering boundaries for the existing Meta-Engineer."""
     return {
@@ -360,6 +494,8 @@ def engineering_guardrails() -> dict[str, Any]:
                      "security_review", "human_approval", "controlled_deployment", "post_deploy_health_check"],
         "production_write_enabled": False,
         "candidate_execution_enabled": False,
+        "recovery_action_execution_enabled": False,
+        "recovery_action_mode": "simulation_only",
         "protected_areas": ["authentication", "authorization", "secrets", "core configuration", "security middleware"],
         "reason": "This deployment has no verified isolated build-and-deploy executor; source changes remain proposals until an approved CI/CD pipeline is connected.",
     }
@@ -407,6 +543,36 @@ def register_routes(bp) -> None:
             return jsonify({"status": "error", "code": "invalid_outcome", "message": str(exc)}), 400
         except Exception:
             return jsonify({"status": "error", "code": "outcome_storage_unavailable"}), 503
+
+    @bp.get("/brain-os/heal/actions")
+    def brain_os_heal_actions():
+        actor, error = require_admin()
+        if error:
+            return error
+        from flask import jsonify
+        result = recovery_action_catalog()
+        result["actor"] = actor
+        return jsonify(result), 200
+
+    @bp.post("/brain-os/heal/actions/simulate")
+    def brain_os_heal_actions_simulate():
+        actor, error = require_admin()
+        if error:
+            return error
+        from flask import jsonify, request
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = simulate_recovery_action(
+                payload.get("action_id"),
+                payload.get("incident_id"),
+                payload.get("evidence"),
+            )
+            result["actor"] = actor
+            return jsonify(result), 200
+        except ValueError as exc:
+            return jsonify({"status": "error", "code": "invalid_recovery_plan", "message": str(exc)}), 400
+        except Exception:
+            return jsonify({"status": "error", "code": "recovery_audit_unavailable"}), 503
 
     @bp.post("/brain-os/heal/diagnose")
     def brain_os_heal_diagnose():
