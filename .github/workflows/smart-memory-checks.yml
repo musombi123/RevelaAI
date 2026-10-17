@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile backend modules
-        run: python -m py_compile app.py routes/chat_routes.py routes/memory_routes.py ai/living_brain.py ai/global_brain_adapter.py
+        run: python -m py_compile app.py config/db.py routes/chat_routes.py routes/memory_routes.py ai/living_brain.py ai/global_brain_adapter.py
       - name: Install memory-route test dependencies
         run: python -m pip install Flask PyJWT pymongo requests python-dotenv
       - name: Verify userId header is bound to signed identity
@@ -26,6 +26,19 @@ jobs:
         run: python -m unittest discover -s tests -p "test_global_brain_adapter.py"
       - name: Verify Gemini primary and model fallback routing
         run: python -m unittest discover -s tests -p "test_gemini_routing.py"
+      - name: Verify database separation contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path("config/db.py").read_text(encoding="utf-8")
+          assert 'db = client["revelai"]' in source
+          assert 'db["conversations"]' in source
+          assert 'db["memories"]' in source
+          assert 'db["ideas"]' in source
+          assert 'db["learnings"]' in source
+          assert 'users_col' not in source
+          print("RevelaAI uses its own canonical database and collections.")
+          PY
       - name: Verify smart filter rules
         env:
           JWT_SECRET: "test-only-secret"
