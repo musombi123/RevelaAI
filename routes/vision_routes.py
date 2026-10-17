@@ -90,7 +90,7 @@ def _decode_image(payload: dict) -> tuple[str, bytes]:
             if width < 1 or height < 1 or width * height > MAX_IMAGE_PIXELS:
                 raise ValueError("image dimensions are invalid or too large")
             image.verify()
-    except (UnidentifiedImageError, OSError) as exc:
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ValueError("image content is invalid or unsupported") from exc
 
     return mime_type, image_bytes
