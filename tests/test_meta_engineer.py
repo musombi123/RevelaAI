@@ -229,6 +229,30 @@ def test_staging_adapter_contract_escalates_when_rollback_health_is_bad():
     assert result["external_side_effects"] is False
 
 
+
+def test_staging_adapter_contract_rejects_live_adapter_objects():
+    import pytest
+    from meta_engineer.staging_adapter import run_staging_drill
+
+    class LiveLikeAdapter:
+        def deploy(self, candidate_sha, idempotency_key):
+            raise AssertionError("must never be called")
+
+        def health_check(self, deployment_id):
+            raise AssertionError("must never be called")
+
+        def rollback(self, previous_sha, idempotency_key):
+            raise AssertionError("must never be called")
+
+    with pytest.raises(PermissionError):
+        run_staging_drill(
+            adapter=LiveLikeAdapter(),
+            candidate_sha="a" * 40,
+            previous_sha="b" * 40,
+            approval_ref="GH-PR-128",
+            approved=True,
+        )
+
 def test_staging_adapter_contract_rejects_invalid_commit_and_approval_refs():
     import pytest
     from meta_engineer.staging_adapter import SimulatedStagingAdapter, run_staging_drill
