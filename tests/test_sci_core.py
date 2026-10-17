@@ -29,9 +29,7 @@ class SciCoreSafetyTests(unittest.TestCase):
         self.assertIn("safety.md", result["artifacts"])
 
     def test_routes_are_registered(self):
-        paths = {rule.rule for rule in sci_router.url_map.iter_rules()} if hasattr(sci_router, 'url_map') else {rule.rule for rule in sci_router.deferred_functions}
-        # Flask blueprint deferred functions are used before registration; verify module import instead.
-        self.assertTrue(sci_router)
+        self.assertGreater(len(sci_router.deferred_functions), 0)
 
     def test_disaster_type_is_validated(self):
         with self.assertRaises(ValueError):
