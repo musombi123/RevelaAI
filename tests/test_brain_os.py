@@ -49,15 +49,28 @@ def test_capability_inventory_distinguishes_presence_from_runtime_health():
     assert "interpretation" in result
 
 
-def test_outcome_recording_stores_no_prompt_or_response_content():
+def test_outcome_recording_stores_privacy_minimized_separate_evidence():
     fake = FakeCollection()
     with patch("revelai.sci_core.storage.collection", return_value=fake):
-        result = record_outcome("coding", True, 120, "helpful", "admin-1")
+        result = record_outcome(
+            "coding", True, 120, "helpful", "admin_api",
+            task_success=None, provider="test-provider", route="coding-primary",
+            outcome_source="admin_review",
+        )
     assert result["recorded"] is True
-    assert fake.rows[0]["category"] == "coding"
-    assert "prompt" not in fake.rows[0]
-    assert "response" not in fake.rows[0]
-    assert fake.rows[0]["feedback_label"] == "helpful"
+    row = fake.rows[0]
+    assert row["category"] == "coding"
+    assert row["success"] is True
+    assert row["delivery_success"] is True
+    assert row["task_success"] is None
+    assert row["user_feedback"] == "helpful"
+    assert row["quality_label"] is None
+    assert row["outcome_source"] == "admin_review"
+    assert row["provider"] == "test-provider"
+    assert row["route"] == "coding-primary"
+    assert row["actor"] == "admin_api"
+    assert "prompt" not in row and "response" not in row
+    assert "user_id" not in row and "userId" not in row
 
 
 def test_outcome_recording_rejects_freeform_feedback_and_invalid_latency():
@@ -67,28 +80,73 @@ def test_outcome_recording_rejects_freeform_feedback_and_invalid_latency():
         record_outcome("coding", True, 600001)
 
 
-def test_chat_reliability_telemetry_normalizes_hub_and_omits_user_content(monkeypatch):
+def test_chat_reliability_telemetry_normalizes_hub_and_keeps_quality_unknown(monkeypatch):
     fake = FakeCollection()
     monkeypatch.setattr("revelai.sci_core.storage.collection", lambda name: fake)
     monkeypatch.setattr("time.monotonic", lambda: 1.25)
-    result = record_chat_outcome("mahubiri", True, 1.0)
+    result = record_chat_outcome(
+        "mahubiri", True, 1.0,
+        provider="Gemini 2.5 Flash", route="primary-model-route",
+    )
     assert result["recorded"] is True
-    assert fake.rows[0]["category"] == "scripture"
-    assert fake.rows[0]["actor"] == "chat_api"
-    assert fake.rows[0]["latency_ms"] == 250
-    assert "prompt" not in fake.rows[0] and "response" not in fake.rows[0]
+    row = fake.rows[0]
+    assert row["category"] == "scripture"
+    assert row["actor"] == "chat_api"
+    assert row["latency_ms"] == 250
+    assert row["delivery_success"] is True
+    assert row["task_success"] is None
+    assert row["outcome_source"] == "chat_delivery"
+    assert row["provider"] == "gemini-2.5-flash"
+    assert row["route"] == "primary-model-route"
+    assert row["user_feedback"] is None
+    assert "prompt" not in row and "response" not in row
 
 
-def test_outcome_summary_reports_aggregates_without_actor_ids():
+def test_outcome_summary_separates_delivery_quality_feedback_and_provider_metrics():
     fake = FakeCollection()
     fake.rows.extend([
-        {"category": "coding", "success": True, "latency_ms": 100, "actor": "secret-user", "created_at": "2026-10-01"},
-        {"category": "coding", "success": False, "latency_ms": 200, "actor": "secret-user", "created_at": "2026-10-02"},
+        {
+            "category": "coding", "success": True, "delivery_success": True,
+            "task_success": True, "latency_ms": 100, "provider": "primary",
+            "route": "route-a", "feedback_label": "helpful", "user_feedback": "helpful",
+            "outcome_source": "validator", "actor": "private-account-id", "created_at": "2026-10-01",
+        },
+        {
+            "category": "coding", "success": False, "delivery_success": False,
+            "task_success": False, "latency_ms": 200, "provider": "primary",
+            "route": "route-a", "feedback_label": "incorrect", "quality_label": "incorrect",
+            "outcome_source": "validator", "actor": "private-account-id", "created_at": "2026-10-02",
+        },
+        {
+            "category": "coding", "success": True, "latency_ms": 150,
+            "actor": "private-account-id", "created_at": "2026-10-03",
+        },
     ])
     with patch("revelai.sci_core.storage.collection", return_value=fake):
         result = outcome_summary()
-    assert result["categories"]["coding"]["success_rate"] == 0.5
-    assert "secret-user" not in str(result)
+    coding = result["categories"]["coding"]
+    assert coding["sample_size"] == 3
+    assert coding["delivery_sample_size"] == 3
+    assert coding["delivery_success_rate"] == round(2 / 3, 3)
+    assert coding["success_rate"] == coding["delivery_success_rate"]
+    assert coding["task_success_sample_size"] == 2
+    assert coding["task_success_rate"] == 0.5
+    assert coding["task_success_by_source"]["validator"]["sample_size"] == 2
+    assert coding["user_feedback_counts"] == {"helpful": 1}
+    assert coding["quality_label_counts"] == {"incorrect": 1}
+    assert coding["providers"]["primary"]["sample_size"] == 2
+    assert coding["providers"]["primary"]["delivery_success_rate"] == 0.5
+    assert coding["routes"]["route-a"]["sample_size"] == 2
+    assert "private-account-id" not in str(result)
+
+
+def test_outcome_recording_rejects_invalid_quality_and_dimensions():
+    with pytest.raises(ValueError):
+        record_outcome("coding", True, task_success="yes")
+    with pytest.raises(ValueError):
+        record_outcome("coding", True, provider="email@example.com")
+    with pytest.raises(ValueError):
+        record_outcome("coding", True, outcome_source="untrusted-arbitrary-source")
 
 
 def test_engineering_guardrails_keep_production_mutation_disabled():

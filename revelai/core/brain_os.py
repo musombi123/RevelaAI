@@ -8,16 +8,24 @@ from __future__ import annotations
 import importlib.util
 import os
 import platform
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 TASK_CATEGORIES = {
     "general", "coding", "research", "community", "biashara",
     "shamba", "elimu", "scripture", "security", "engineering",
 }
 MAX_LATENCY_MS = 600_000
+FEEDBACK_LABELS = {"helpful", "unhelpful", "correct", "incorrect", "resolved", "unresolved"}
+USER_FEEDBACK_LABELS = {"helpful", "unhelpful"}
+QUALITY_LABELS = {"correct", "incorrect"}
+RESOLUTION_LABELS = {"resolved", "unresolved"}
+OUTCOME_SOURCES = {"manual", "chat_delivery", "admin_review", "validator", "user_feedback", "security_monitor", "scheduler", "system"}
+ACTOR_TYPES = {"system", "chat_api", "admin_api", "validator", "admin_review", "user_feedback", "scheduler", "security_monitor", "test"}
+DIMENSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/ -]{0,99}$")
 
 
 def _now() -> str:
@@ -68,36 +76,111 @@ def capability_inventory() -> dict[str, Any]:
     }
 
 
-def record_outcome(category: str, success: bool, latency_ms: int | None = None,
-                   feedback: str | None = None, actor: str | None = None) -> dict[str, Any]:
-    """Persist a privacy-minimized task outcome; never stores prompts or response text."""
+def _normalize_dimension(value: Any, field: str) -> str | None:
+    """Accept only bounded system identifiers, never arbitrary text as a metric dimension."""
+    if value is None or value == "":
+        return None
+    if not isinstance(value, (str, int, float)):
+        raise ValueError(f"{field} must be a short system identifier")
+    clean = str(value).strip()
+    if not clean:
+        return None
+    if len(clean) > 100 or not DIMENSION_PATTERN.fullmatch(clean):
+        raise ValueError(f"{field} must contain only safe identifier characters (max 100)")
+    # Display names may contain spaces; normalize them to stable IDs. Symbols
+    # such as @ are rejected to avoid persisting arbitrary identifiers.
+    return re.sub(r"\s+", "-", clean).lower()
+
+
+def _safe_actor(actor: str | None) -> str:
+    """Store an actor class, never an arbitrary user/account identifier."""
+    candidate = str(actor or "system").strip().lower()
+    return candidate if candidate in ACTOR_TYPES else "system"
+
+
+def record_outcome(
+    category: str,
+    success: bool,
+    latency_ms: int | None = None,
+    feedback: str | None = None,
+    actor: str | None = None,
+    *,
+    task_success: bool | None = None,
+    provider: str | None = None,
+    route: str | None = None,
+    outcome_source: str = "manual",
+) -> dict[str, Any]:
+    """Persist privacy-minimized evidence, separating delivery from task quality.
+
+    The legacy success field is retained for compatibility and means technical
+    delivery success. task_success is independent and may remain unknown.
+    Feedback categories are stored in separate semantic fields.
+    """
     category = str(category or "").strip().lower()
     if category not in TASK_CATEGORIES:
         raise ValueError("unsupported task category")
     if not isinstance(success, bool):
         raise ValueError("success must be boolean")
-    if latency_ms is not None and (not isinstance(latency_ms, int) or not 0 <= latency_ms <= MAX_LATENCY_MS):
+    if task_success is not None and not isinstance(task_success, bool):
+        raise ValueError("task_success must be boolean or null")
+    if latency_ms is not None and (
+        not isinstance(latency_ms, int) or not 0 <= latency_ms <= MAX_LATENCY_MS
+    ):
         raise ValueError("latency_ms must be an integer from 0 to 600000")
     if feedback is not None:
         feedback = str(feedback).strip().lower()
-        if feedback not in {"helpful", "unhelpful", "correct", "incorrect", "resolved", "unresolved"}:
+        if feedback not in FEEDBACK_LABELS:
             raise ValueError("feedback_label must be a supported categorical label")
+    outcome_source = str(outcome_source or "manual").strip().lower()
+    if outcome_source not in OUTCOME_SOURCES:
+        raise ValueError("unsupported outcome_source")
+
+    provider = _normalize_dimension(provider, "provider")
+    route = _normalize_dimension(route, "route")
+    user_feedback = feedback if feedback in USER_FEEDBACK_LABELS else None
+    quality_label = feedback if feedback in QUALITY_LABELS else None
+    resolution_label = feedback if feedback in RESOLUTION_LABELS else None
+
     record = {
+        "schema_version": SCHEMA_VERSION,
         "category": category,
+        # Keep the old field for existing dashboards/records; it is delivery only.
         "success": success,
+        "delivery_success": success,
+        "task_success": task_success,
         "latency_ms": latency_ms,
         "feedback_label": feedback,
-        "actor": str(actor or "system")[:128],
+        "user_feedback": user_feedback,
+        "quality_label": quality_label,
+        "resolution_label": resolution_label,
+        "outcome_source": outcome_source,
+        "provider": provider,
+        "route": route,
+        "actor": _safe_actor(actor),
         "created_at": _now(),
     }
     from revelai.sci_core.storage import collection
     collection("brain_outcomes").insert_one(record.copy())
-    return {"recorded": True, "category": category, "success": success, "created_at": record["created_at"]}
+    return {
+        "recorded": True,
+        "category": category,
+        "success": success,
+        "delivery_success": success,
+        "task_success": task_success,
+        "created_at": record["created_at"],
+    }
 
 
-def record_chat_outcome(hub: str, success: bool, started_at: float) -> dict[str, Any] | None:
-    """Record coarse chat reliability telemetry without content or user identity."""
+def record_chat_outcome(
+    hub: str,
+    success: bool,
+    started_at: float,
+    provider: str | None = None,
+    route: str | None = None,
+) -> dict[str, Any] | None:
+    """Record technical chat delivery only; quality is deliberately left unknown."""
     import time
+
     aliases = {
         "mkulima": "shamba", "farm": "shamba", "agriculture": "shamba",
         "mahubiri": "scripture", "faith": "scripture", "theology": "scripture",
@@ -108,27 +191,128 @@ def record_chat_outcome(hub: str, success: bool, started_at: float) -> dict[str,
     if category not in TASK_CATEGORIES:
         category = "general"
     latency_ms = max(0, min(MAX_LATENCY_MS, int((time.monotonic() - started_at) * 1000)))
-    return record_outcome(category, bool(success), latency_ms, None, "chat_api")
+    return record_outcome(
+        category,
+        bool(success),
+        latency_ms,
+        None,
+        "chat_api",
+        task_success=None,
+        provider=provider,
+        route=route,
+        outcome_source="chat_delivery",
+    )
+
+
+def _delivery_value(row: dict[str, Any]) -> bool | None:
+    """Read the new delivery field and fall back to legacy success records."""
+    value = row.get("delivery_success")
+    if isinstance(value, bool):
+        return value
+    legacy = row.get("success")
+    return legacy if isinstance(legacy, bool) else None
+
+
+def _rate(rows: list[dict[str, Any]], field: str) -> float | None:
+    labeled = [row[field] for row in rows if isinstance(row.get(field), bool)]
+    if not labeled:
+        return None
+    return round(sum(1 for value in labeled if value) / len(labeled), 3)
+
+
+def _counts(rows: list[dict[str, Any]], field: str, legacy_feedback: set[str] | None = None) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = row.get(field)
+        if value not in FEEDBACK_LABELS and legacy_feedback and row.get("feedback_label") in legacy_feedback:
+            value = row.get("feedback_label")
+        if isinstance(value, str) and value in FEEDBACK_LABELS:
+            counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def outcome_summary() -> dict[str, Any]:
-    """Return aggregated success statistics without exposing actor identifiers."""
+    """Summarize delivery, labeled task outcomes, feedback and provider samples separately."""
     from revelai.sci_core.storage import collection
+
     col = collection("brain_outcomes")
-    grouped = {}
+    grouped: dict[str, Any] = {}
+
+    def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        delivery_rows = [
+            {"_delivery_value": _delivery_value(row)}
+            for row in rows
+            if _delivery_value(row) is not None
+        ]
+        task_rows = [row for row in rows if isinstance(row.get("task_success"), bool)]
+        latencies = [row.get("latency_ms") for row in rows if isinstance(row.get("latency_ms"), int)]
+        task_by_source: dict[str, list[dict[str, Any]]] = {}
+        for row in task_rows:
+            source = str(row.get("outcome_source") or "legacy")
+            task_by_source.setdefault(source, []).append(row)
+
+        provider_rows: dict[str, list[dict[str, Any]]] = {}
+        route_rows: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            if row.get("provider"):
+                provider_rows.setdefault(str(row["provider"]), []).append(row)
+            if row.get("route"):
+                route_rows.setdefault(str(row["route"]), []).append(row)
+
+        def summarized_dimensions(dimensions: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, items in sorted(dimensions.items()):
+                dimension_delivery_rows = [
+                    {"delivery_value": _delivery_value(item)}
+                    for item in items if _delivery_value(item) is not None
+                ]
+                result[key] = {
+                    "sample_size": len(items),
+                    "delivery_sample_size": len(dimension_delivery_rows),
+                    "delivery_success_rate": _rate(dimension_delivery_rows, "delivery_value"),
+                    "task_success_sample_size": sum(1 for item in items if isinstance(item.get("task_success"), bool)),
+                    "task_success_rate": _rate(items, "task_success"),
+                }
+            return result
+
+        delivery_rate = _rate(delivery_rows, "_delivery_value")
+        return {
+            "sample_size": len(rows),
+            "delivery_sample_size": len(delivery_rows),
+            "delivery_success_rate": delivery_rate,
+            # Backward-compatible alias; success_rate always describes delivery.
+            "success_rate": delivery_rate,
+            "task_success_sample_size": len(task_rows),
+            "task_success_rate": _rate(rows, "task_success"),
+            "task_success_by_source": {
+                source: {
+                    "sample_size": len(items),
+                    "success_rate": _rate(items, "task_success"),
+                }
+                for source, items in sorted(task_by_source.items())
+            },
+            "user_feedback_counts": _counts(rows, "user_feedback", USER_FEEDBACK_LABELS),
+            "quality_label_counts": _counts(rows, "quality_label", QUALITY_LABELS),
+            "resolution_label_counts": _counts(rows, "resolution_label", RESOLUTION_LABELS),
+            "median_latency_ms": sorted(latencies)[len(latencies) // 2] if latencies else None,
+            "providers": summarized_dimensions(provider_rows),
+            "routes": summarized_dimensions(route_rows),
+            "window": "latest up to 200 recorded outcomes",
+        }
+
     for category in sorted(TASK_CATEGORIES):
         rows = list(col.find({"category": category}).sort("created_at", -1).limit(200))
         if rows:
-            successes = sum(1 for row in rows if row.get("success") is True)
-            latencies = [row.get("latency_ms") for row in rows if isinstance(row.get("latency_ms"), int)]
-            grouped[category] = {
-                "sample_size": len(rows),
-                "success_rate": round(successes / len(rows), 3),
-                "median_latency_ms": sorted(latencies)[len(latencies) // 2] if latencies else None,
-                "window": "latest up to 200 recorded outcomes",
-            }
-    return {"generated_at": _now(), "categories": grouped,
-            "adaptation_policy": "Metrics inform future routing decisions; they do not change model weights or permissions automatically."}
+            grouped[category] = summarize(rows)
+    return {
+        "generated_at": _now(),
+        "schema_version": SCHEMA_VERSION,
+        "categories": grouped,
+        "adaptation_policy": (
+            "Delivery success, task outcomes and categorical feedback remain separate evidence. "
+            "Metrics may inform evaluation; they do not change live routing, model weights or permissions automatically."
+        ),
+    }
 
 
 def diagnose_and_recover() -> dict[str, Any]:
@@ -207,8 +391,17 @@ def register_routes(bp) -> None:
         from flask import jsonify, request
         payload = request.get_json(silent=True) or {}
         try:
-            result = record_outcome(payload.get("category"), payload.get("success"),
-                                    payload.get("latency_ms"), payload.get("feedback_label"), actor)
+            result = record_outcome(
+                payload.get("category"),
+                payload.get("success"),
+                payload.get("latency_ms"),
+                payload.get("feedback_label"),
+                "admin_api",
+                task_success=payload.get("task_success"),
+                provider=payload.get("provider"),
+                route=payload.get("route"),
+                outcome_source="admin_review",
+            )
             return jsonify(result), 201
         except ValueError as exc:
             return jsonify({"status": "error", "code": "invalid_outcome", "message": str(exc)}), 400

@@ -60,11 +60,20 @@ def _load_personalization_context(user_oid) -> dict | None:
         return None
 
 
-def _record_brain_outcome(hub: str, success: bool, started_at: float) -> None:
-    """Record coarse reliability metrics without storing prompts, replies, or user IDs."""
+def _record_brain_outcome(
+    hub: str,
+    success: bool,
+    started_at: float,
+    provider: str | None = None,
+    route: str | None = None,
+) -> None:
+    """Record delivery/latency and safe provider dimensions, never conversation content."""
     try:
         from revelai.core.brain_os import record_chat_outcome
-        record_chat_outcome(hub, bool(success), started_at)
+        record_chat_outcome(
+            hub, bool(success), started_at,
+            provider=provider, route=route,
+        )
     except Exception:
         # Observability must never break user-facing chat.
         logger.debug("Brain OS outcome telemetry unavailable", exc_info=True)
@@ -162,7 +171,7 @@ def chat():
             hub = str(interaction.get("hub") or result.get("domain") or "general")
             if interaction.get("hubRequested") == "auto" and hub != "auto" and not reply.startswith("[Auto →"):
                 reply = f"[Auto → {HUB_LABELS.get(hub, hub.title())}]\n\n{reply}"
-            _record_brain_outcome(hub, True, started_at)
+            _record_brain_outcome(hub, True, started_at, result.get("provider"), result.get("model"))
             _persist_turn(user_oid, session_id, hub, message, reply)
             return jsonify({
                 "status": "success",
