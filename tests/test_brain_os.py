@@ -376,6 +376,88 @@ def test_defensive_monitor_controlled_incident_maps_severity_and_hashes_source()
     assert fake.rows[0]["fingerprint"]
 
 
+
+def test_runtime_health_monitor_probes_allowlisted_https_target_without_storing_url():
+    from unittest.mock import Mock
+    from revelai.sci_core import monitor_runner
+
+    response = Mock(status_code=200)
+    fake = FakeCollection()
+    with (
+        patch.object(monitor_runner.requests, "get", return_value=response) as get,
+        patch("revelai.sci_core.storage.collection", return_value=fake),
+        patch.object(monitor_runner, "_collect_checks", return_value={
+            "runtime_endpoints": monitor_runner.collect_runtime_endpoint_checks(
+                '[{"id":"revelaai-api","url":"https://revelai.example.com/health","expected_statuses":[200]}]',
+                "revelai.example.com",
+            ),
+            "code": [], "auth": [], "dependencies": [],
+        }),
+        patch.object(monitor_runner.requests, "post") as post,
+    ):
+        post.return_value.raise_for_status.return_value = None
+        result = monitor_runner.monitor_once(alert_url="https://alerts.example.test/webhook")
+    get.assert_called_once()
+    assert get.call_args.kwargs["allow_redirects"] is False
+    assert result["runtime_endpoints"]["configured"] is True
+    assert result["runtime_endpoints"]["healthy_count"] == 1
+    assert result["runtime_endpoints"]["unhealthy_count"] == 0
+    assert "https://revelai.example.com/health" not in str(result)
+
+
+def test_runtime_health_monitor_alerts_on_server_failure_without_following_redirects():
+    from unittest.mock import Mock
+    from revelai.sci_core import monitor_runner
+
+    response = Mock(status_code=503)
+    fake = FakeCollection()
+    with (
+        patch.object(monitor_runner.requests, "get", return_value=response),
+        patch("revelai.sci_core.storage.collection", return_value=fake),
+        patch.object(monitor_runner.requests, "post") as post,
+    ):
+        post.return_value.raise_for_status.return_value = None
+        result = monitor_runner.monitor_once(
+            alert_url="https://alerts.example.test/webhook",
+            checks={"runtime_endpoints": monitor_runner.collect_runtime_endpoint_checks(
+                '[{"id":"revelaai-api","url":"https://revelai.example.com/health"}]',
+                "revelai.example.com",
+            ), "code": [], "auth": [], "dependencies": []},
+        )
+    assert result["alerts_sent"] == 1
+    assert result["runtime_endpoints"]["unhealthy_count"] == 1
+    incident = post.call_args.kwargs["json"]["incidents"][0]
+    assert incident["type"] == "runtime_endpoint_unhealthy"
+    assert incident["target_id"] == "revelaai-api"
+    assert "https://revelai.example.com" not in str(incident)
+    assert incident["severity"] == "critical"
+
+
+def test_runtime_health_monitor_rejects_unapproved_hosts_and_non_https_urls():
+    from revelai.sci_core import monitor_runner
+
+    blocked_host = monitor_runner.collect_runtime_endpoint_checks(
+        '[{"id":"evil","url":"https://169.254.169.254/latest/meta-data"}]',
+        "revelai.example.com",
+    )
+    wrong_scheme = monitor_runner.collect_runtime_endpoint_checks(
+        '[{"id":"revelaai-api","url":"http://revelai.example.com/health"}]',
+        "revelai.example.com",
+    )
+    assert blocked_host[0]["type"] == "monitor_check_failed"
+    assert wrong_scheme[0]["type"] == "monitor_check_failed"
+    assert "169.254.169.254" not in str(blocked_host)
+    assert "http://revelai.example.com" not in str(wrong_scheme)
+
+
+def test_runtime_health_monitor_reports_missing_configuration_as_failure():
+    from revelai.sci_core import monitor_runner
+
+    result = monitor_runner.collect_runtime_endpoint_checks("", "")
+    assert result[0]["type"] == "monitor_check_failed"
+    assert "REVELAAI_MONITOR_TARGETS_JSON" in result[0]["fix_suggestion"]
+
+
 def test_engineering_guardrails_keep_production_mutation_disabled():
     result = engineering_guardrails()
     assert result["production_write_enabled"] is False

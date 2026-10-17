@@ -11,6 +11,16 @@ The current checks are:
 
 Static pattern matches can be false positives and can miss real attacks. A successful scan means these checks ran; it does not mean the system is attack-proof.
 
+## Runtime health checks
+
+The scheduled workflow can also probe deployed health endpoints. Set the following repository configuration:
+- `REVELAAI_MONITOR_TARGETS_JSON` — JSON array of 1–25 targets, for example `[{"id":"revelaai-api","url":"https://YOUR-OWN-HTTPS-HOST/health","expected_statuses":[200]}]`.
+- `REVELAAI_MONITOR_ALLOWED_HOSTS` — comma-separated exact hostnames that are owned/authorized, without scheme or paths.
+
+Each target must use HTTPS on port 443, an exact allowlisted hostname, no URL credentials/query/fragment, and a unique short ID. Redirects are not followed. The runner uses a bounded timeout and never stores response bodies or full URLs. Only the target ID and status class are included in incident metadata. The allowed-host variable is a security boundary: add only hosts the company owns or has explicit permission to monitor. Use public, unauthenticated health endpoints; this runner does not support sending credentials to health targets.
+
+If runtime target configuration is missing or invalid, the check reports a monitoring configuration failure rather than marking the environment clean. Until these variables are configured and a scheduled run is observed, deployed service health monitoring is not operationally verified.
+
 ## Required deployment configuration
 
 Configure this GitHub Actions repository secret:
