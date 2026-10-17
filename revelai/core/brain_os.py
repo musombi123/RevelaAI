@@ -95,6 +95,22 @@ def record_outcome(category: str, success: bool, latency_ms: int | None = None,
     return {"recorded": True, "category": category, "success": success, "created_at": record["created_at"]}
 
 
+def record_chat_outcome(hub: str, success: bool, started_at: float) -> dict[str, Any] | None:
+    """Record coarse chat reliability telemetry without content or user identity."""
+    import time
+    aliases = {
+        "mkulima": "shamba", "farm": "shamba", "agriculture": "shamba",
+        "mahubiri": "scripture", "faith": "scripture", "theology": "scripture",
+        "business": "biashara", "education": "elimu", "social": "community",
+    }
+    category = str(hub or "general").strip().lower()
+    category = aliases.get(category, category)
+    if category not in TASK_CATEGORIES:
+        category = "general"
+    latency_ms = max(0, min(MAX_LATENCY_MS, int((time.monotonic() - started_at) * 1000)))
+    return record_outcome(category, bool(success), latency_ms, None, "chat_api")
+
+
 def outcome_summary() -> dict[str, Any]:
     """Return aggregated success statistics without exposing actor identifiers."""
     from revelai.sci_core.storage import collection

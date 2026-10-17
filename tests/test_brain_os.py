@@ -9,6 +9,7 @@ from revelai.core.brain_os import (
     engineering_guardrails,
     outcome_summary,
     record_outcome,
+    record_chat_outcome,
 )
 from revelai.routers.agi_router import agi_router
 
@@ -64,6 +65,18 @@ def test_outcome_recording_rejects_freeform_feedback_and_invalid_latency():
         record_outcome("coding", True, 10, "Here is private conversation text")
     with pytest.raises(ValueError):
         record_outcome("coding", True, 600001)
+
+
+def test_chat_reliability_telemetry_normalizes_hub_and_omits_user_content(monkeypatch):
+    fake = FakeCollection()
+    monkeypatch.setattr("revelai.sci_core.storage.collection", lambda name: fake)
+    monkeypatch.setattr("time.monotonic", lambda: 1.25)
+    result = record_chat_outcome("mahubiri", True, 1.0)
+    assert result["recorded"] is True
+    assert fake.rows[0]["category"] == "scripture"
+    assert fake.rows[0]["actor"] == "chat_api"
+    assert fake.rows[0]["latency_ms"] == 250
+    assert "prompt" not in fake.rows[0] and "response" not in fake.rows[0]
 
 
 def test_outcome_summary_reports_aggregates_without_actor_ids():
