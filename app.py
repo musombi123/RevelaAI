@@ -699,6 +699,11 @@ app.config.update({
     "PROPAGATE_EXCEPTIONS": False,
 })
 
+app.logger.info(
+    "RevelaAI v2.0 - 3 Repos Wired - Cluster0 revelacode users + "
+    "revelai memory/ideas - Self-Learning per userId"
+)
+
 
 # =========================================================
 # PROXY SUPPORT
