@@ -13,6 +13,7 @@ from flask import Blueprint, jsonify, request
 from ai.intent_router import classify_intent
 from ai.global_brain_adapter import build_global_context
 from ai.hub_prompts import HUB_LABELS, get_identity_answer
+from revelai.core.agi_manifest import get_self_description_answer
 from services.ai_service import process_message
 from routes.memory_routes import (
     _record_messages,
@@ -118,11 +119,15 @@ def chat():
 
     try:
         identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
+        self_description_reply = get_self_description_answer(message)
+        direct_reply = identity_reply or self_description_reply
         result = ({
-            "response": identity_reply, "confidence": "high", "intent": "identity",
-            "domain": interaction.get("hub", "auto"), "provider": "revelaai-hub-identity",
-            "model": "hub-identity-policy",
-        } if identity_reply else process_message(
+            "response": direct_reply, "confidence": "high",
+            "intent": "identity" if identity_reply else "self_description",
+            "domain": interaction.get("hub", "auto"),
+            "provider": "revelaai-hub-identity" if identity_reply else "revelaai-manifest",
+            "model": "hub-identity-policy" if identity_reply else "agi-manifest-policy",
+        } if direct_reply else process_message(
             message=message, context=context[-12:], intent=intent,
             session_id=session_id, user_id=user_id,
         ))
