@@ -4,13 +4,13 @@
 
 Workflow: `.github/workflows/brain-os-candidate-validation.yml`
 
-- Manually validates a selected branch, tag or commit on a disposable GitHub-hosted runner.
+- Automatically validates each pull request targeting `main`, and also supports manual validation of a selected branch, tag or commit on a disposable GitHub-hosted runner.
 - Uses read-only repository permissions and disables persisted checkout credentials.
 - Does not receive RevelaCode, production database, deployment or provider secrets.
 - Applies a 15-minute job timeout, compiles the candidate, runs the Meta-Engineer/Sci-Core/Brain OS test suite and checks the candidate diff.
-- Publishes test logs, candidate commit, changed-file summary, requested ref and test outcome as a 14-day artifact even when tests fail.
+- Publishes test logs, candidate commit, base commit, full diff summary, requested ref and test outcome as a 14-day artifact even when tests fail.
 
-Candidate code is untrusted input. The runner is ephemeral, but it is not a fully network-isolated sandbox; do not give this workflow secrets or permission to write to the repository.
+Candidate code is untrusted input. The runner is ephemeral, but it is not a fully network-isolated sandbox; do not give this workflow secrets or permission to write to the repository. Pull-request runs have read-only repository permissions, disable persistent checkout credentials, and receive no production or deployment secrets. This automation improves test coverage and evidence collection; it does not by itself approve or deploy candidate code.
 
 ## Approval and rollback policy
 
