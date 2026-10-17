@@ -6,6 +6,7 @@ production workers, changes firewall rules, or stores raw user conversation text
 from __future__ import annotations
 
 import importlib.util
+import math
 import hashlib
 import os
 import platform
@@ -271,6 +272,139 @@ def _counts(rows: list[dict[str, Any]], field: str, legacy_feedback: set[str] | 
         if isinstance(value, str) and value in FEEDBACK_LABELS:
             counts[value] = counts.get(value, 0) + 1
     return dict(sorted(counts.items()))
+
+
+def _parse_outcome_time(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _wilson_interval(successes: int, total: int) -> dict[str, float] | None:
+    """Return a 95% Wilson score interval for a Bernoulli success rate."""
+    if total <= 0:
+        return None
+    z = 1.96
+    p = successes / total
+    denominator = 1 + (z * z / total)
+    center = (p + (z * z / (2 * total))) / denominator
+    margin = (
+        z * math.sqrt((p * (1 - p) / total) + (z * z / (4 * total * total)))
+        / denominator
+    )
+    return {"lower": round(max(0.0, center - margin), 4), "upper": round(min(1.0, center + margin), 4)}
+
+
+def evaluate_routing_shadow(
+    category: str,
+    baseline_provider: str,
+    candidate_provider: str,
+) -> dict[str, Any]:
+    """Compare providers using recent trusted task outcomes; never selects a live route."""
+    category = str(category or "").strip().lower()
+    if category not in TASK_CATEGORIES:
+        raise ValueError("unsupported task category")
+    baseline = _normalize_dimension(baseline_provider, "baseline_provider")
+    candidate = _normalize_dimension(candidate_provider, "candidate_provider")
+    if not baseline or not candidate:
+        raise ValueError("baseline_provider and candidate_provider are required")
+    if baseline == candidate:
+        raise ValueError("baseline_provider and candidate_provider must differ")
+
+    now = datetime.now(timezone.utc)
+    max_age_hours = 72
+    minimum_task_samples = 20
+    trusted_sources = {"validator", "admin_review"}
+    from revelai.sci_core.storage import collection
+    col = collection("brain_outcomes")
+
+    def provider_metrics(provider: str) -> dict[str, Any]:
+        raw_rows = list(col.find({"category": category, "provider": provider}).limit(1000))
+        recent: list[dict[str, Any]] = []
+        stale_or_unparseable = 0
+        for row in raw_rows:
+            observed_at = _parse_outcome_time(row.get("created_at"))
+            if observed_at is None or observed_at > now or (now - observed_at).total_seconds() > max_age_hours * 3600:
+                stale_or_unparseable += 1
+                continue
+            recent.append(row)
+        trusted = [
+            row for row in recent
+            if row.get("outcome_source") in trusted_sources
+            and isinstance(row.get("task_success"), bool)
+        ]
+        successes = sum(1 for row in trusted if row["task_success"] is True)
+        deliveries = [row for row in recent if _delivery_value(row) is not None]
+        delivery_successes = sum(1 for row in deliveries if _delivery_value(row) is True)
+        feedback = [row for row in recent if row.get("user_feedback") in USER_FEEDBACK_LABELS]
+        helpful = sum(1 for row in feedback if row.get("user_feedback") == "helpful")
+        latest = max((_parse_outcome_time(row.get("created_at")) for row in recent), default=None)
+        return {
+            "provider": provider,
+            "recent_sample_size": len(recent),
+            "stale_or_unparseable_sample_size": stale_or_unparseable,
+            "task_sample_size": len(trusted),
+            "task_successes": successes,
+            "task_success_rate": round(successes / len(trusted), 4) if trusted else None,
+            "task_success_interval_95": _wilson_interval(successes, len(trusted)),
+            "delivery_sample_size": len(deliveries),
+            "delivery_success_rate": round(delivery_successes / len(deliveries), 4) if deliveries else None,
+            "user_feedback_sample_size": len(feedback),
+            "user_helpful_rate": round(helpful / len(feedback), 4) if feedback else None,
+            "latest_observation_at": latest.isoformat() if latest else None,
+        }
+
+    base_metrics = provider_metrics(baseline)
+    candidate_metrics = provider_metrics(candidate)
+    report: dict[str, Any] = {
+        "policy_version": "routing-shadow-v1",
+        "mode": "shadow_only",
+        "live_route_changed": False,
+        "category": category,
+        "baseline": base_metrics,
+        "candidate": candidate_metrics,
+        "minimum_task_samples_per_provider": minimum_task_samples,
+        "freshness_window_hours": max_age_hours,
+        "baseline_delta_task_success_rate": None,
+        "recommendation": "insufficient_evidence",
+        "reason": "Each provider needs enough recent, trusted task-quality labels; delivery-only and unknown labels do not qualify.",
+        "generated_at": _now(),
+        "canary_or_live_changes_enabled": False,
+    }
+    if base_metrics["task_sample_size"] < minimum_task_samples or candidate_metrics["task_sample_size"] < minimum_task_samples:
+        return report
+
+    base_rate = base_metrics["task_success_rate"]
+    candidate_rate = candidate_metrics["task_success_rate"]
+    report["baseline_delta_task_success_rate"] = round(candidate_rate - base_rate, 4)
+    base_delivery = base_metrics["delivery_success_rate"]
+    candidate_delivery = candidate_metrics["delivery_success_rate"]
+    delivery_conflict = (
+        base_delivery is not None
+        and candidate_delivery is not None
+        and candidate_delivery < base_delivery - 0.05
+    )
+    base_interval = base_metrics["task_success_interval_95"]
+    candidate_interval = candidate_metrics["task_success_interval_95"]
+    if delivery_conflict:
+        report["recommendation"] = "conflicting_evidence"
+        report["reason"] = "Candidate task-quality labels may look better, but its delivery success is materially worse; no routing change is permitted."
+    elif candidate_interval["lower"] > base_interval["upper"]:
+        report["recommendation"] = "candidate_favored_for_further_offline_evaluation"
+        report["reason"] = "Recent trusted task-quality evidence favors the candidate with non-overlapping 95% Wilson intervals; this is not authorization to change a live route."
+    else:
+        report["recommendation"] = "no_clear_winner"
+        report["reason"] = "Current task-quality intervals overlap; keep the existing baseline and gather more evidence."
+    return report
 
 
 def outcome_summary() -> dict[str, Any]:
@@ -543,6 +677,26 @@ def register_routes(bp) -> None:
             return jsonify({"status": "error", "code": "invalid_outcome", "message": str(exc)}), 400
         except Exception:
             return jsonify({"status": "error", "code": "outcome_storage_unavailable"}), 503
+
+    @bp.post("/brain-os/routing/shadow-evaluate")
+    def brain_os_routing_shadow_evaluate():
+        actor, error = require_admin()
+        if error:
+            return error
+        from flask import jsonify, request
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = evaluate_routing_shadow(
+                payload.get("category"),
+                payload.get("baseline_provider"),
+                payload.get("candidate_provider"),
+            )
+            result["actor"] = actor
+            return jsonify(result), 200
+        except ValueError as exc:
+            return jsonify({"status": "error", "code": "invalid_routing_evaluation", "message": str(exc)}), 400
+        except Exception:
+            return jsonify({"status": "error", "code": "routing_evaluation_unavailable"}), 503
 
     @bp.get("/brain-os/heal/actions")
     def brain_os_heal_actions():
