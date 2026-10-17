@@ -7,6 +7,9 @@ from ..sci_core.storage import collection, database
 
 agi_router=Blueprint("agi_router",__name__)
 
+from ..core.brain_os import register_routes as register_brain_os_routes
+register_brain_os_routes(agi_router)
+
 def _persist_manifest():
  payload=get_manifest()
  payload["updatedAt"]=datetime.now(timezone.utc).isoformat()
