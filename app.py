@@ -312,6 +312,9 @@ from routes.users_routes import (
 from routes.hub_routes import (
     hub_bp,
 )
+from routes.meta_engineer_routes import (
+    meta_engineer_bp,
+)
 
 from whatsapp_webhook import (
     whatsapp_bp,
@@ -5835,6 +5838,21 @@ except Exception as exc:
 
     app.logger.warning(
         "hub_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        meta_engineer_bp,
+        url_prefix="/api/meta-engineer",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "meta_engineer_bp registration failed | error=%s",
         exc,
     )
 
