@@ -62,7 +62,9 @@ def run_research(query, topic="general"):
         result.update({"bom":[{"item":"ESP32 development board","purpose":"low-cost controller"},{"item":"Sensor selected for the measurement","purpose":"environmental input"},{"item":"Fused, appropriately rated power supply","purpose":"protected power"},{"item":"Enclosure and wiring","purpose":"environmental and electrical protection"}],"circuit_concept":"Sensor output to ESP32 GPIO/ADC; power through a correctly rated protected supply; optional relay/MOSFET driver sized for the load with flyback protection for inductive loads. Keep mains voltage isolated and professionally installed.","pseudocode":"read sensor; validate range; apply hysteresis; send authenticated telemetry over TLS; on sensor/network failure enter safe state; never energize a pump without hardware interlocks."})
     try:
         from .storage import collection
-        collection("research").insert_one(result.copy())
+        col = collection("research")
+        col.insert_one(result.copy())
+        result["storage_backend"] = getattr(col, "backend", "mongodb")
     except Exception as exc:
         result["audit_persisted"] = False
         result["storage_warning"] = "Research could not be persisted; check MongoDB configuration."
