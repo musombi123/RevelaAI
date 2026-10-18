@@ -27,6 +27,18 @@ USECT_ZERO_ADMIN_TOKEN=<same secret configured for the Go core>
 USECT_ZERO_TIMEOUT_SECONDS=5
 ```
 
+For a private Render service, `USECT_ZERO_URL` may instead be the internal `host:port` value supplied by a Blueprint `fromService.property: hostport` reference. The adapter validates that host/port value and adds the internal HTTP scheme. Keep the Go core private; do not point this variable at a public URL unless you have deliberately reviewed and secured that exposure.
+
+## Render Blueprint
+
+The repository's `render.yaml` now describes two services: the public Flask gateway (`revelaai-backend`) and private Go service (`usect-zero-core`). The backend receives the core's private host/port and the same server-side admin token through Render service references. The Go service stores runtime state under `/var/data/usect-zero`, backed by a persistent disk, so key requests, issued-key records, approvals, evidence and audit logs survive routine restarts/redeployments.
+
+- Both services must be in the same Render workspace and region for private networking.
+- The private Go service and persistent disk use paid Render resources (`starter` plan and 1 GB disk in this Blueprint). Review the current cost/plan in Render before syncing the Blueprint.
+- After syncing and deploying, verify `GET /api/usect-zero/health` returns HTTP 200, then reload the admin key-request and issued-key views.
+- The new persistent store starts empty. Records that existed only in a previous ephemeral or unreachable core instance are not automatically migrated; preserve/export them from that instance first if it is still available.
+
+
 The HTTP URL above is suitable only when both processes share the same host/network namespace. For production, run the Go core as a private internal service and set `USECT_ZERO_URL` to its private HTTP(S) address. Do not expose the Go admin endpoints directly to the public internet. If the service crosses an untrusted network, use TLS and network access controls.
 
 The backend's `USECT_ZERO_ADMIN_TOKEN` must match the Go core secret. The Flask route only sends it after the existing authoritative platform-admin check succeeds. Do not send this token from the browser. Never forward the frontend's bearer JWT to the Go service.
