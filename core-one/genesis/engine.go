@@ -236,10 +236,12 @@ func overlayModelMetadata(base, proposed ToolSpec) ToolSpec {
 	out := base
 	if v := cleanModelString(proposed.Title, 120); v != "" { out.Title = v }
 	if v := cleanModelString(proposed.Purpose, 500); v != "" { out.Purpose = v }
-	out.Capabilities = cleanModelList(proposed.Capabilities, 8, 120, base.Capabilities)
-	out.Inputs = cleanModelList(proposed.Inputs, 8, 120, base.Inputs)
-	out.Outputs = cleanModelList(proposed.Outputs, 8, 120, base.Outputs)
-	out.Safeguards = cleanModelList(proposed.Safeguards, 8, 180, base.Safeguards)
+	// Model metadata may add detail, but cannot remove deterministic baseline capabilities,
+	// required request fields, outputs, or safeguards.
+	out.Capabilities = mergeModelList(base.Capabilities, proposed.Capabilities, 12, 120)
+	out.Inputs = mergeModelList(base.Inputs, proposed.Inputs, 12, 120)
+	out.Outputs = mergeModelList(base.Outputs, proposed.Outputs, 12, 120)
+	out.Safeguards = mergeModelList(base.Safeguards, proposed.Safeguards, 16, 180)
 	out.Name = base.Name
 	out.Demand = base.Demand
 	out.Category = base.Category
