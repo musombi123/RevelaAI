@@ -322,7 +322,10 @@ func inferRequirements(spec ToolSpec) []inferredRequirement {
 
 func findNativeCapability(requirement string, catalogue map[string]nativeCapability) (nativeCapability, bool) {
 	lower := strings.ToLower(requirement)
-	for _, capability := range catalogue {
+	// Iterate the ordered catalogue rather than a Go map so repeated runs produce the same graph.
+	for _, candidate := range nativeCapabilityCatalogue {
+		capability, exists := catalogue[candidate.id]
+		if !exists { continue }
 		for _, term := range capability.terms {
 			if lower == term || strings.Contains(lower, term) || strings.Contains(term, lower) {
 				return capability, true
