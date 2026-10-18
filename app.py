@@ -3600,6 +3600,68 @@ def ai_assistant():
 
             sources = []
 
+        raw_tool_execution = ai_result.get("tool_execution")
+        if not isinstance(raw_tool_execution, dict):
+            _orchestrator_for_tool = ai_result.get("orchestrator")
+            raw_tool_execution = (
+                _orchestrator_for_tool.get("usect_zero_tool")
+                if isinstance(_orchestrator_for_tool, dict)
+                else None
+            )
+
+        usect_tool_metadata = None
+        if isinstance(raw_tool_execution, dict):
+            usect_tool_metadata = {
+                "name": str(
+                    raw_tool_execution.get("name")
+                    or raw_tool_execution.get("tool")
+                    or "usect_zero"
+                )[:80],
+                "operation": str(raw_tool_execution.get("operation") or "unknown")[:40],
+                "status": str(raw_tool_execution.get("status") or "unknown")[:40],
+                "executed": bool(raw_tool_execution.get("executed", False)),
+                "fallback": bool(raw_tool_execution.get("fallback", False)),
+            }
+            for _field in ("http_status", "error_code"):
+                _value = raw_tool_execution.get(_field)
+                if isinstance(_value, (int, str)) and not isinstance(_value, bool):
+                    usect_tool_metadata[_field] = str(_value)[:100] if isinstance(_value, str) else _value
+            _tool_message = raw_tool_execution.get("message")
+            if isinstance(_tool_message, str) and _tool_message.strip():
+                usect_tool_metadata["message"] = _tool_message.strip()[:240]
+
+            # Only a deliberately small evidence summary crosses into the browser.
+            _raw_result = raw_tool_execution.get("result")
+            _allowed_result_fields = (
+                "file_count", "language_counts", "git_head", "manifest_sha256",
+                "read_only", "target", "proposal_id", "id", "status",
+                "compiled", "artifact_count", "source_count",
+            )
+            if isinstance(_raw_result, dict):
+                _summary = {}
+                for _field in _allowed_result_fields:
+                    if _field not in _raw_result:
+                        continue
+                    _value = _raw_result[_field]
+                    if isinstance(_value, str):
+                        _summary[_field] = _value[:240]
+                    elif isinstance(_value, (int, float, bool)) or _value is None:
+                        _summary[_field] = _value
+                    elif isinstance(_value, dict):
+                        _summary[_field] = {
+                            str(_key)[:60]: _item
+                            for _key, _item in list(_value.items())[:12]
+                            if isinstance(_item, (str, int, float, bool)) or _item is None
+                        }
+                    elif isinstance(_value, list):
+                        _summary[_field] = [
+                            _item[:160] if isinstance(_item, str) else _item
+                            for _item in _value[:6]
+                            if isinstance(_item, (str, int, float, bool)) or _item is None
+                        ]
+                if _summary:
+                    usect_tool_metadata["result_summary"] = _summary
+
         meta = {
             "ai_model": ai_result.get(
                 "model"
@@ -3687,6 +3749,8 @@ def ai_assistant():
                     {},
                 )
             ),
+
+            "usect_zero_tool": usect_tool_metadata,
 
             "build_id": REVELAAI_BUILD_ID,
         }
