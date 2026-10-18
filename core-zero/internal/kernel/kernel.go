@@ -142,8 +142,7 @@ func (k *Kernel) writeJSON(rel string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil { return err }
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil { return err }
-	b = append(b, '
-')
+	b = append(b, '\n')
 	tmp := dst + ".tmp"
 	if err = os.WriteFile(tmp, b, 0600); err != nil { return err }
 	return os.Rename(tmp, dst)
