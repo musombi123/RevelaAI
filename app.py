@@ -316,6 +316,7 @@ from routes.meta_engineer_routes import (
 )
 
 from routes.automation_fabric_routes import automation_fabric_bp
+from routes.usect_zero_routes import usect_zero_bp
 
 from revelai.routers.sci_core import sci_router
 from revelai.routers.agi_router import agi_router
@@ -5921,6 +5922,21 @@ except Exception as exc:
 
     app.logger.warning(
         "meta_engineer_bp registration failed | error=%s",
+        exc,
+    )
+
+
+try:
+
+    app.register_blueprint(
+        usect_zero_bp,
+        url_prefix="/api/usect-zero",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "usect_zero_bp registration failed | error=%s",
         exc,
     )
 
