@@ -423,3 +423,24 @@ def test_assembly_board_profiles_proxy_through_scoped_gateway(monkeypatch, test_
     assert observed["path"] == "/v1/assemble/boards"
     assert observed["api_key"] == "scoped-read-key"
     assert observed["admin"] is False
+
+
+def test_client_accepts_render_private_service_hostport(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_URL", "usect-zero-core-host:10000")
+    assert client._base_url() == "http://usect-zero-core-host:10000"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "usect-zero-core-host",
+        "usect-zero-core-host:not-a-port",
+        "usect-zero-core-host:10000/path",
+        "user:pass@usect-zero-core-host:10000",
+        "ftp://usect-zero-core-host:10000",
+    ],
+)
+def test_client_rejects_malformed_render_service_reference(monkeypatch, value):
+    monkeypatch.setenv("USECT_ZERO_URL", value)
+    with pytest.raises(client.USECTZeroConfigurationError):
+        client._base_url()

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"usect-zero.local/core-zero/forge"
@@ -109,6 +111,8 @@ func TestDiagnosticsRequiresScopedKeyAndReturnsSafeReport(t *testing.T) {
 
 func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
 	root := t.TempDir()
+	dataRoot := filepath.Join(t.TempDir(), "persistent", "usect-zero")
+	t.Setenv("USECT_ZERO_DATA_DIR", dataRoot)
 	k, err := kernel.New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +175,14 @@ func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
 	}
 	if generated["human_review_required"] != true || generated["validation"] == nil {
 		t.Fatalf("review gate or validation report missing: %v", generated)
+	}
+	artifacts, ok := generated["artifacts"].([]any)
+	if !ok || len(artifacts) != 6 {
+		t.Fatalf("expected six generated artifact references: %v", generated["artifacts"])
+	}
+	firstArtifact, ok := artifacts[0].(string)
+	if !ok || !strings.HasPrefix(firstArtifact, "usect-zero-data/evidence/assemble/") || strings.Contains(firstArtifact, "..") {
+		t.Fatalf("external persistent storage must return a safe logical path: %v", artifacts[0])
 	}
 
 	code, unsupported := call(t, h, http.MethodPost, "/v1/assemble", `{"target":"esp32-sensor","template_version":"9.9.9"}`, map[string]string{"Content-Type": "application/json", "X-API-Key": secret})

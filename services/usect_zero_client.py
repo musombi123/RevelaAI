@@ -70,7 +70,40 @@ def _timeout_seconds() -> int:
 
 def _base_url() -> str:
     raw = os.getenv("USECT_ZERO_URL", "http://127.0.0.1:8780").strip()
+
+    # Render Blueprints expose a service's internal host and port through
+    # fromService.property=hostport (for example, "usect-zero-core:10000").
+    # Accept that exact host:port form as HTTP; explicit schemes still undergo
+    # the strict URL validation below.
+    if "://" not in raw:
+        endpoint = urlsplit("//" + raw)
+        try:
+            port = endpoint.port
+        except ValueError as exc:
+            raise USECTZeroConfigurationError(
+                "USECT_ZERO_URL host:port reference has an invalid port."
+            ) from exc
+        if (
+            not endpoint.hostname
+            or port is None
+            or endpoint.username is not None
+            or endpoint.password is not None
+            or endpoint.path
+            or endpoint.query
+            or endpoint.fragment
+        ):
+            raise USECTZeroConfigurationError(
+                "USECT_ZERO_URL must be an absolute HTTP(S) URL or a service host:port reference."
+            )
+        raw = "http://" + raw
+
     parsed = urlsplit(raw)
+    try:
+        parsed.port  # Force validation of malformed/out-of-range ports.
+    except ValueError as exc:
+        raise USECTZeroConfigurationError(
+            "USECT_ZERO_URL contains an invalid port."
+        ) from exc
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.netloc
