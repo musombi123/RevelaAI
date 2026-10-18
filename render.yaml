@@ -1,4 +1,5 @@
 services:
+  # Public Flask gateway. USECT-ZERO itself stays on Render's private network.
   - type: web
     name: revelaai-backend
     env: python
@@ -7,3 +8,34 @@ services:
     envVars:
       - key: GROQ_API_KEY
         sync: false
+      - key: USECT_ZERO_ENABLED
+        value: "true"
+      - key: USECT_ZERO_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
+      - key: USECT_ZERO_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          envVarKey: USECT_ZERO_ADMIN_TOKEN
+
+  # Private Go core. The persistent disk keeps API key records, approval state,
+  # audit events and generated evidence across deploys/restarts.
+  - type: pserv
+    name: usect-zero-core
+    runtime: go
+    rootDir: core-zero
+    plan: starter
+    buildCommand: go build -o ./usect-zero ./cmd/usect-zero
+    startCommand: ./usect-zero -mode serve -root .. -listen 0.0.0.0:$PORT
+    disk:
+      name: usect-zero-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: USECT_ZERO_DATA_DIR
+        value: /var/data/usect-zero
+      - key: USECT_ZERO_ADMIN_TOKEN
+        generateValue: true
