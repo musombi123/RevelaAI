@@ -99,7 +99,7 @@ var nativeCapabilityCatalogue = []nativeCapability{
 	{id: "offline_core", label: "Model-optional offline core", description: "Can derive a generic specification without external models or network research.", terms: []string{"offline operation", "model optional", "no model", "without network"}},
 	{id: "queue_recovery", label: "Durable queue recovery", description: "Persists queued demand and recovers interrupted queue work.", terms: []string{"queue recovery", "durable queue", "restart recovery", "retry interrupted work"}},
 	{id: "test_scaffold", label: "Acceptance-test scaffold", description: "Generates initial tests and CI validation for proposal packages.", terms: []string{"acceptance tests", "test scaffold", "unit tests", "validation tests"}},
-	{id: "privacy_consent", label: "Privacy and consent boundary", description: "Documents privacy/consent requirements for relevant integrations; production enforcement remains domain-specific.", terms: []string{"privacy", "consent", "retention", "authorized collection"}},
+	{id: "privacy_consent", label: "Privacy and consent boundary", description: "Documents privacy/consent requirements for relevant integrations; production enforcement remains domain-specific.", terms: []string{"privacy", "consent", "explicit consent", "retention", "authorized collection"}},
 	{id: "hardware_boundary", label: "Hardware integration boundary", description: "Produces a non-certified hardware guide and requires exact-part review.", terms: []string{"hardware integration", "hardware guide", "device integration", "datasheet"}},
 	{id: "hardware_safety", label: "Hardware safety review", description: "Requires schematic, ratings, safe fixture and qualified review before physical connection.", terms: []string{"hardware safety", "emergency stop", "fail safe", "interlock"}},
 }
@@ -182,11 +182,13 @@ func BuildCapabilityPlan(spec ToolSpec, evidence ResearchEvidence, coreRoot stri
 		} else {
 			unresolved++
 			plan.MissingCapabilities = append(plan.MissingCapabilities, req.capability)
+			gapID := "gap:" + slugName(req.capability)
 			plan.Nodes = append(plan.Nodes, CapabilityNode{
-				ID: id, Label: req.capability, Kind: "requirement_gap",
+				ID: gapID, Label: req.capability, Kind: "capability_gap",
 				Status: "implementation_required", Source: req.origin,
 				Description: req.description,
 			})
+			plan.Edges = append(plan.Edges, CapabilityEdge{From: id, To: gapID, Rel: "requires_implementation", Reason: "No native contract or metadata-compatible library was found for this requirement."})
 		}
 		plan.Nodes = append(plan.Nodes, CapabilityNode{
 			ID: id, Label: req.capability, Kind: "requirement",
