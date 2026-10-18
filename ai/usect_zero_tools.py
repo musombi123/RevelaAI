@@ -12,6 +12,7 @@ import os
 import re
 from collections import deque
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any
 
 from services.usect_zero_client import (
@@ -30,6 +31,7 @@ MAX_TOOL_INPUT_CHARS = 12_000
 MAX_TOOL_OUTPUT_CHARS = 20_000
 TOOL_NAME = "usect_zero"
 _RECENT_ACTIVITY: deque[dict[str, Any]] = deque(maxlen=50)
+_ACTIVITY_LOCK = Lock()
 _ACTIVITY_SUMMARY_FIELDS = (
     "file_count", "language_counts", "git_head", "manifest_sha256",
     "read_only", "evidence_note", "target", "proposal_id", "id",
@@ -289,7 +291,9 @@ def recent_activity(limit: int = 25) -> list[dict[str, Any]]:
         bounded_limit = min(max(int(limit), 1), 50)
     except (TypeError, ValueError):
         bounded_limit = 25
-    return [dict(item) for item in list(reversed(_RECENT_ACTIVITY))[:bounded_limit]]
+    with _ACTIVITY_LOCK:
+        items = list(reversed(_RECENT_ACTIVITY))[:bounded_limit]
+    return [dict(item) for item in items]
 
 
 def _record_activity(outcome: dict[str, Any]) -> None:
@@ -318,7 +322,7 @@ def _record_activity(outcome: dict[str, Any]) -> None:
                     if isinstance(item, (str, int, float, bool)) or item is None
                 ]
 
-    _RECENT_ACTIVITY.append({
+    activity_item = {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "name": str(outcome.get("name") or outcome.get("tool") or TOOL_NAME)[:80],
         "operation": str(outcome.get("operation") or "unknown")[:40],
@@ -327,7 +331,9 @@ def _record_activity(outcome: dict[str, Any]) -> None:
         "http_status": outcome.get("http_status") if isinstance(outcome.get("http_status"), int) else None,
         "error_code": str(outcome.get("error_code") or "")[:100] or None,
         "result_summary": summary,
-    })
+    }
+    with _ACTIVITY_LOCK:
+        _RECENT_ACTIVITY.append(activity_item)
 
 
 def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
