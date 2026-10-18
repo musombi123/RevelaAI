@@ -108,9 +108,16 @@ def test_scoped_api_key_is_forwarded_but_bearer_token_is_not(monkeypatch, test_c
         status_code = 200
         content = b'{"read_only": true}'
 
+        def iter_content(self, chunk_size=65536):
+            yield self.content
+
         @staticmethod
         def json():
             return {"read_only": True}
+
+        @staticmethod
+        def close():
+            return None
 
     def fake_http(method, url, **kwargs):
         observed["http_headers"] = kwargs["headers"]
@@ -182,3 +189,27 @@ def test_invalid_admin_resource_identifier_is_rejected(monkeypatch, test_client)
     )
     response = test_client.post("/api/usect-zero/keys/requests/%2e%2e%2fsecret/approve", json={})
     assert response.status_code in {400, 404}
+
+
+
+def test_core_response_stream_is_capped(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+
+    class OversizedHTTPResponse:
+        status_code = 200
+
+        def iter_content(self, chunk_size=65536):
+            yield b"x" * (client.MAX_RESPONSE_BYTES + 1)
+
+        @staticmethod
+        def close():
+            return None
+
+    monkeypatch.setattr(
+        client.requests,
+        "request",
+        lambda *args, **kwargs: OversizedHTTPResponse(),
+    )
+
+    with pytest.raises(client.USECTZeroResponseTooLarge):
+        client.request_core("GET", "/v1/health")
