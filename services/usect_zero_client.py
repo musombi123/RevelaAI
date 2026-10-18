@@ -41,7 +41,11 @@ class USECTZeroUnavailable(USECTZeroError):
 
 
 class USECTZeroPayloadTooLarge(USECTZeroError):
-    """A request or response exceeds the adapter's size limit."""
+    """An inbound request exceeds the adapter's size limit."""
+
+
+class USECTZeroResponseTooLarge(USECTZeroError):
+    """The core service returned more data than the adapter permits."""
 
 
 @dataclass(frozen=True)
@@ -135,6 +139,9 @@ def request_core(
         headers["X-Admin-Token"] = admin_token
 
     url = _base_url() + path
+    response = None
+    chunks: list[bytes] = []
+    total_bytes = 0
     try:
         response = requests.request(
             normalized_method,
@@ -144,17 +151,28 @@ def request_core(
             headers=headers,
             timeout=(_timeout_seconds(), _timeout_seconds()),
             allow_redirects=False,
+            stream=True,
         )
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total_bytes += len(chunk)
+            if total_bytes > MAX_RESPONSE_BYTES:
+                raise USECTZeroResponseTooLarge(
+                    "Core response exceeds the 5 MiB limit."
+                )
+            chunks.append(chunk)
+    except USECTZeroResponseTooLarge:
+        raise
     except requests.RequestException as exc:
         raise USECTZeroUnavailable("The USECT-ZERO core service is unavailable.") from exc
-
-    content = response.content or b""
-    if len(content) > MAX_RESPONSE_BYTES:
-        raise USECTZeroPayloadTooLarge("Core response exceeds the 5 MiB limit.")
+    finally:
+        if response is not None:
+            response.close()
 
     try:
-        payload = response.json()
-    except (ValueError, json.JSONDecodeError) as exc:
+        payload = json.loads(b"".join(chunks).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
         raise USECTZeroUnavailable("The USECT-ZERO core returned invalid JSON.") from exc
 
     if not isinstance(payload, dict):
