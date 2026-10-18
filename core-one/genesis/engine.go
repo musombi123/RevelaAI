@@ -144,7 +144,18 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 		_ = e.Guardian.LogBlocked("final_specification", demand, d.Reason)
 		return Invention{}, ErrBlocked
 	}
-	invention, err := e.forge(spec, evidence)
+	plan, err := BuildCapabilityPlan(spec, evidence, e.CoreRoot)
+	if err != nil {
+		return Invention{}, fmt.Errorf("build capability/requirement plan: %w", err)
+	}
+	planBytes, err := json.Marshal(plan)
+	if err != nil { return Invention{}, fmt.Errorf("encode capability plan: %w", err) }
+	if d := e.Guardian.Check(string(planBytes)); !d.Allowed {
+		_ = e.Guardian.LogBlocked("capability_plan", string(planBytes), d.Reason)
+		e.publish(Event{Type: "blocked", At: time.Now().UTC(), Message: "Guardian blocked the invention because its capability plan violated policy.", Status: d.Code})
+		return Invention{}, ErrBlocked
+	}
+	invention, err := e.forge(spec, evidence, plan)
 	if err != nil {
 		e.publish(Event{Type: "forge_error", At: time.Now().UTC(), Message: limitText(err.Error(), 300), Status: "error"})
 		return Invention{}, err
