@@ -24,7 +24,8 @@ func NewWebResearcher() *WebResearcher {
 	return &WebResearcher{Client: &http.Client{Timeout: 5 * time.Second}, Offline: offline}
 }
 
-func (r *WebResearcher) Research(demand string) (ResearchEvidence, error) {
+func (r *WebResearcher) Research(ctx context.Context, demand string) (ResearchEvidence, error) {
+	if ctx == nil { ctx = context.Background() }
 	now := time.Now().UTC()
 	q := strings.TrimSpace(demand)
 	e := ResearchEvidence{ID: newID("research"), Query: q, CollectedAt: now, Mode: "online-with-offline-fallback", Sources: []ResearchSource{}, Findings: []string{}}
@@ -43,12 +44,12 @@ func (r *WebResearcher) Research(demand string) (ResearchEvidence, error) {
 	}
 	e.Sources = append(e.Sources, links...)
 	if !r.Offline {
-		ctx, cancel := context.WithTimeout(context.Background(), 13*time.Second)
+		researchCtx, cancel := context.WithTimeout(ctx, 13*time.Second)
 		defer cancel()
-		e.Sources = append(e.Sources, r.github(ctx, q)...)
-		e.Sources = append(e.Sources, r.arxiv(ctx, q)...)
-		e.Sources = append(e.Sources, r.nvd(ctx, q)...)
-		e.Sources = append(e.Sources, r.kenyaRSS(ctx, q)...)
+		e.Sources = append(e.Sources, r.github(researchCtx, q)...)
+		e.Sources = append(e.Sources, r.arxiv(researchCtx, q)...)
+		e.Sources = append(e.Sources, r.nvd(researchCtx, q)...)
+		e.Sources = append(e.Sources, r.kenyaRSS(researchCtx, q)...)
 	}
 	usable := 0
 	for _, s := range e.Sources {
