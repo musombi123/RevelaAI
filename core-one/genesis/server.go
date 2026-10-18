@@ -113,6 +113,14 @@ func (s *Server) serveTool(w http.ResponseWriter, r *http.Request, part string) 
 		b, err := os.ReadFile(filepath.Join(dir, "hardware_guide.md")); if err != nil { writeAPIError(w, 404, "tool_not_found", "Tool or hardware guide not found."); return }
 		writeAPIJSON(w, 200, map[string]any{"name": name, "status": "await_merge", "hardware_guide": string(b)}); return
 	}
+	if len(parts) == 2 && parts[1] == "capability_plan" {
+		b, err := os.ReadFile(filepath.Join(dir, "capability_plan.json"))
+		if err != nil { writeAPIError(w, 404, "capability_plan_not_found", "Tool or capability plan not found."); return }
+		var plan CapabilityPlan
+		if err := json.Unmarshal(b, &plan); err != nil { writeAPIError(w, 500, "capability_plan_invalid", "Saved capability plan could not be parsed."); return }
+		writeAPIJSON(w, 200, map[string]any{"name": name, "status": "await_merge", "capability_plan": plan})
+		return
+	}
 	if len(parts) != 1 { writeAPIError(w, 404, "not_found", "Route not found."); return }
 	b, err := os.ReadFile(filepath.Join(dir, "evidence.json")); if err != nil { writeAPIError(w, 404, "tool_not_found", "Tool proposal not found."); return }
 	var record map[string]any
@@ -154,7 +162,12 @@ func (e *Engine) ListInventions() ([]map[string]any, error) {
 		raw, err := os.ReadFile(filepath.Join(e.CoreRoot, "inventions", item.Name(), "evidence.json")); if err != nil { continue }
 		var rec struct { ID string `json:"invention_id"`; CreatedAt time.Time `json:"created_at"`; Status string `json:"status"`; Specification ToolSpec `json:"specification"` }
 		if json.Unmarshal(raw, &rec) != nil { continue }
-		out = append(out, map[string]any{"id": rec.ID, "name": item.Name(), "title": rec.Specification.Title, "category": rec.Specification.Category, "industry": rec.Specification.Industry, "status": "await_merge", "created_at": rec.CreatedAt})
+		capabilitySummary := map[string]any{"url": "/v1/genesis/tools/" + item.Name() + "/capability_plan"}
+		if planBytes, err := os.ReadFile(filepath.Join(e.CoreRoot, "inventions", item.Name(), "capability_plan.json")); err == nil {
+			var plan CapabilityPlan
+			if json.Unmarshal(planBytes, &plan) == nil { capabilitySummary["status"] = plan.Status; capabilitySummary["coverage"] = plan.Coverage; capabilitySummary["unresolved"] = plan.MissingCapabilities }
+		}
+		out = append(out, map[string]any{"id": rec.ID, "name": item.Name(), "title": rec.Specification.Title, "category": rec.Specification.Category, "industry": rec.Specification.Industry, "status": "await_merge", "created_at": rec.CreatedAt, "capability_plan": capabilitySummary})
 	}
 	return out, nil
 }
