@@ -155,6 +155,22 @@ def usect_zero_health():
     return jsonify(safe), status_code
 
 
+@usect_zero_bp.get("/activity")
+def usect_zero_activity():
+    """Return recent in-process tool outcomes to verified platform admins only."""
+    _actor, error = _require_platform_admin()
+    if error:
+        return error
+    from ai.usect_zero_tools import recent_activity
+
+    return jsonify({
+        "module": "usect-zero",
+        "items": recent_activity(25),
+        "persistent": False,
+        "retention": "bounded in-memory; resets on process restart",
+    }), 200
+
+
 @usect_zero_bp.post("/keys/request")
 def request_developer_key():
     """Public intake only: the Go core creates a pending request, never a key."""
