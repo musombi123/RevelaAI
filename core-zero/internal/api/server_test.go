@@ -43,4 +43,20 @@ func TestKeyRequestIsPendingUntilAdminApproves(t *testing.T) {
 	code, body = call(t, h, http.MethodPost, "/v1/mind/compile", `{"source":"scan\nheal sample.py"}`, map[string]string{"Content-Type": "application/json", "X-API-Key": secret})
 	if code != 401 || body["code"] != "api_key_or_scope_required" { t.Fatalf("scope escalation accepted: %d %v", code, body) }
 	if ok, _ := forge.New(k.CoreRoot).Validate(secret, "scan:read"); !ok { t.Fatal("key validation failed after API issue") }
+
+	code, issued := call(t, h, http.MethodGet, "/v1/keys/issued?status=active", "", map[string]string{"X-Admin-Token": "test-admin-token-123"})
+	if code != 200 { t.Fatalf("issued-key listing failed: %d %v", code, issued) }
+	keys, ok := issued["keys"].([]any)
+	if !ok || len(keys) != 1 { t.Fatalf("expected one active issued key: %v", issued) }
+	keyView, ok := keys[0].(map[string]any)
+	if !ok || keyView["id"] == nil || keyView["status"] != "active" { t.Fatalf("issued-key view invalid: %v", keys[0]) }
+	if _, leaked := keyView["key_hash"]; leaked { t.Fatalf("key hash leaked in response: %v", keyView) }
+	if _, leaked := keyView["api_key"]; leaked { t.Fatalf("raw API key leaked in listing: %v", keyView) }
+
+	keyID, _ := keyView["id"].(string)
+	code, revoked := call(t, h, http.MethodPost, "/v1/keys/issued/"+keyID+"/revoke", `{"confirmation":"REVOKE_KEY"}`, map[string]string{"X-Admin-Token": "test-admin-token-123", "Content-Type": "application/json"})
+	if code != 200 || revoked["status"] != "revoked" { t.Fatalf("issued-key revocation failed: %d %v", code, revoked) }
+	code, active := call(t, h, http.MethodGet, "/v1/keys/issued?status=active", "", map[string]string{"X-Admin-Token": "test-admin-token-123"})
+	if code != 200 { t.Fatalf("active-key refresh failed: %d %v", code, active) }
+	if remaining, ok := active["keys"].([]any); !ok || len(remaining) != 0 { t.Fatalf("revoked key remains active: %v", active) }
 }
