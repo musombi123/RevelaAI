@@ -106,6 +106,20 @@ def test_scaffold_is_written_as_disabled_proposal_only(tmp_path):
     assert "not_implemented" in (proposal / "tool.py").read_text(encoding="utf-8")
 
 
+
+def test_research_planning_does_not_resolve_dns_before_consent(monkeypatch):
+    from automation_fabric import registry
+
+    def forbidden_dns(*args, **kwargs):
+        raise AssertionError("DNS must not run while only planning a tool")
+
+    monkeypatch.setattr(registry.socket, "getaddrinfo", forbidden_dns)
+    validated = registry.validate_arguments(
+        "research.fetch_public_page",
+        {"url": "https://docs.python.org/3/"},
+    )
+    assert validated["url"] == "https://docs.python.org/3/"
+
 def test_consent_can_be_revoked(tmp_path):
     db = str(tmp_path / "fabric.sqlite3")
     store.grant_scopes("test-user", ["workspace:read"], reason="test", ttl_seconds=600, db_path=db)
