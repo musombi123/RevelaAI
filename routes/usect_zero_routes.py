@@ -210,6 +210,12 @@ def revoke_developer_key(key_id: str):
     return _admin_proxy("POST", f"/v1/keys/issued/{key_id}/revoke")
 
 
+@usect_zero_bp.get("/diagnostics")
+def core_diagnostics():
+    """Return operational and baseline-drift diagnostics using scan:read scope."""
+    return _proxy("GET", "/v1/diagnostics")
+
+
 @usect_zero_bp.get("/scan")
 def scan_repository():
     return _proxy("GET", "/v1/scan")

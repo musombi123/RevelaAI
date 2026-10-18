@@ -43,10 +43,11 @@ USECT_ZERO_ADMIN_TOKEN='replace-with-a-long-local-secret' ./core-zero/usect-zero
 
 No production key should be issued until the admin token is configured securely. For production use, the token must be supplied by a secret manager/environment and rotated; do not commit it.
 
-## Six modules
+## Core modules
 
 | Module | Implemented now | Explicit limitation |
 |---|---|---|
+| `diagnostics/` | Runtime metadata, storage write/cleanup probes, and added/modified/missing file comparison against a saved baseline | Read-only repository analysis; reports drift but never repairs it; samples at most 50 paths per category |
 | `heal/` | Baseline-vs-working-tree scan, Git-HEAD candidate staging, hash checks, human approval | Whole-file only; no function-level changelog restoration or autonomous watcher yet |
 | `assemble/` | BOM + SVG wiring overview + placeholder flash instructions + simple STL for one registered sensor fixture | Not a generic CAD/ECAD/firmware generator; artifacts require technical review |
 | `radar/` | Offline strict-semver comparison and +30% benchmark rule | No unattended internet scan; imported evidence required |

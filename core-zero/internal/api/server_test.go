@@ -60,3 +60,48 @@ func TestKeyRequestIsPendingUntilAdminApproves(t *testing.T) {
 	if code != 200 { t.Fatalf("active-key refresh failed: %d %v", code, active) }
 	if remaining, ok := active["keys"].([]any); !ok || len(remaining) != 0 { t.Fatalf("revoked key remains active: %v", active) }
 }
+
+
+func TestDiagnosticsRequiresScopedKeyAndReturnsSafeReport(t *testing.T) {
+	root := t.TempDir()
+	k, err := kernel.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(k)
+
+	code, body := call(t, h, http.MethodGet, "/v1/diagnostics", "", nil)
+	if code != 401 || body["code"] != "api_key_or_scope_required" {
+		t.Fatalf("diagnostics must require scan:read: code=%d body=%v", code, body)
+	}
+
+	code, requestBody := call(t, h, http.MethodPost, "/v1/keys/request", `{"name":"Diagnostics Test","email":"diag@example.invalid","reason":"Need operational diagnostics and baseline drift visibility","scopes":["scan:read"]}`, map[string]string{"Content-Type": "application/json"})
+	if code != 202 {
+		t.Fatalf("key request failed: %d %v", code, requestBody)
+	}
+	request, ok := requestBody["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request was missing from response: %v", requestBody)
+	}
+	id, _ := request["id"].(string)
+	t.Setenv("USECT_ZERO_ADMIN_TOKEN", "test-admin-token-123")
+	code, approved := call(t, h, http.MethodPost, "/v1/keys/requests/"+id+"/approve", `{"confirmation":"ISSUE_KEY","ttl_days":30}`, map[string]string{"X-Admin-Token": "test-admin-token-123", "Content-Type": "application/json"})
+	if code != 200 {
+		t.Fatalf("key approval failed: %d %v", code, approved)
+	}
+	secret, _ := approved["api_key"].(string)
+
+	code, report := call(t, h, http.MethodGet, "/v1/diagnostics", "", map[string]string{"X-API-Key": secret})
+	if code != 200 {
+		t.Fatalf("diagnostics failed: %d %v", code, report)
+	}
+	if report["schema_version"] != "usect-zero.diagnostics.v1" || report["status"] != "ready" {
+		t.Fatalf("unexpected diagnostics response: %v", report)
+	}
+	if _, leaked := report["repository_root"]; leaked {
+		t.Fatalf("diagnostics leaked the absolute repository root: %v", report)
+	}
+	if _, ok := report["storage"].([]any); !ok {
+		t.Fatalf("diagnostics storage checks missing: %v", report)
+	}
+}

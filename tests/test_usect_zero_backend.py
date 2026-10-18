@@ -322,3 +322,37 @@ def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypa
     assert observed["query"] == {"status": "active"}
     assert observed["admin"] is True
     assert observed["api_key"] is None
+
+
+def test_diagnostics_route_uses_scoped_developer_key_channel(monkeypatch, test_client):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    observed = {}
+
+    def fake_core(method, path, **kwargs):
+        observed.update(method=method, path=path, **kwargs)
+        return client.CoreReply(
+            200,
+            {
+                "schema_version": "usect-zero.diagnostics.v1",
+                "status": "ready",
+                "baseline": {
+                    "status": "compared",
+                    "added_count": 0,
+                    "modified_count": 0,
+                    "missing_count": 0,
+                },
+            },
+        )
+
+    monkeypatch.setattr(routes, "request_core", fake_core)
+    response = test_client.get(
+        "/api/usect-zero/diagnostics",
+        headers={"X-API-Key": "scoped-developer-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["schema_version"] == "usect-zero.diagnostics.v1"
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/v1/diagnostics"
+    assert observed["admin"] is False
+    assert observed["api_key"] == "scoped-developer-key"

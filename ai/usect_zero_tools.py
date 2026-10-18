@@ -51,6 +51,15 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "usect_zero_diagnostics",
+        "description": "Check USECT-ZERO runtime details, data-directory write readiness, and added/modified/missing repository files versus the saved baseline. This is a read-only report; it never repairs drift.",
+        "operation": "diagnostics",
+        "scope": "scan:read",
+        "method": "GET",
+        "path": "/v1/diagnostics",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "usect_zero_propose_healing",
         "description": "Ask USECT-ZERO to check for missing tracked files against its recorded baseline and create a review-only healing proposal. Never approves or restores files automatically.",
         "operation": "heal",
@@ -134,7 +143,7 @@ def tool_catalog_prompt() -> str:
     lines = [
         "FIRST-CLASS ENGINEERING TOOL — USECT-ZERO",
         "USECT-ZERO is a named engineering tool in the primary brain pipeline, not a model/provider fallback.",
-        "For repository inspection, engineering recovery proposals, registered assembly fixtures, version-evidence comparison, adapter planning, or RV Lang compilation, use the matching USECT-ZERO tool outcome supplied by the server.",
+        "For repository scans and core diagnostics, engineering recovery proposals, registered assembly fixtures, version-evidence comparison, adapter planning, or RV Lang compilation, use the matching USECT-ZERO tool outcome supplied by the server.",
         "Never claim a USECT-ZERO operation occurred unless the current turn contains its tool_execution result.",
         "When a required USECT-ZERO tool is unavailable, report that blocker; do not silently answer as though the tool ran or downgrade the task to an ordinary answer.",
         "The server only dispatches a bounded allowlist. Admin approval, recovery application, code execution, deployment, and hardware actuation are not brain tools.",
@@ -188,6 +197,12 @@ def select_tool_for_message(message: str, intent: str = "general") -> tuple[str,
     lowered = text.lower()
     if not text:
         return None
+
+    if re.search(
+        r"\\b(?:diagnostic(?:s)?|health check|health status|baseline drift|repository drift|core readiness|storage readiness|what changed since baseline)\\b",
+        lowered,
+    ):
+        return "diagnostics", {}
 
     # Structured offline evidence must be provided by the user; the brain
     # must not create benchmark numbers to satisfy this tool.
@@ -374,7 +389,7 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
 
     try:
         method = spec["method"]
-        if operation == "scan":
+        if operation in {"scan", "diagnostics"}:
             body = None
         elif operation == "heal":
             body = b"{}"
