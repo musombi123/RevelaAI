@@ -74,7 +74,8 @@ func generatedJavaScriptSDK(spec ToolSpec) string {
 	source := fmt.Sprintf(`// Generated browser/Node fetch SDK proposal for %s.
 export class Client {
   constructor(baseUrl, token = "") {
-    this.baseUrl = String(baseUrl).replace(/\\/+$/, "");
+    this.baseUrl = String(baseUrl);
+    while (this.baseUrl.endsWith("/")) this.baseUrl = this.baseUrl.slice(0, -1);
     const url = new URL(this.baseUrl);
     if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.host))) {
       throw new Error("HTTPS is required off localhost");

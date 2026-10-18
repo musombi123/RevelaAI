@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,7 +25,9 @@ func NewWebResearcher() *WebResearcher {
 	return &WebResearcher{Client: &http.Client{Timeout: 5 * time.Second}, Offline: offline}
 }
 
-func (r *WebResearcher) Research(demand string) (ResearchEvidence, error) {
+func (r *WebResearcher) Research(ctx context.Context, demand string) (ResearchEvidence, error) {
+	if ctx == nil { ctx = context.Background() }
+	select { case <-ctx.Done(): return ResearchEvidence{}, ctx.Err(); default: }
 	now := time.Now().UTC()
 	q := strings.TrimSpace(demand)
 	e := ResearchEvidence{ID: newID("research"), Query: q, CollectedAt: now, Mode: "online-with-offline-fallback", Sources: []ResearchSource{}, Findings: []string{}}
@@ -43,13 +46,26 @@ func (r *WebResearcher) Research(demand string) (ResearchEvidence, error) {
 	}
 	e.Sources = append(e.Sources, links...)
 	if !r.Offline {
-		ctx, cancel := context.WithTimeout(context.Background(), 13*time.Second)
+		// Independent public sources run in parallel under one bounded deadline. Results are
+		// joined in a stable order so evidence bundles remain reproducible.
+		researchCtx, cancel := context.WithTimeout(ctx, 13*time.Second)
 		defer cancel()
-		e.Sources = append(e.Sources, r.github(ctx, q)...)
-		e.Sources = append(e.Sources, r.arxiv(ctx, q)...)
-		e.Sources = append(e.Sources, r.nvd(ctx, q)...)
-		e.Sources = append(e.Sources, r.kenyaRSS(ctx, q)...)
+		collectors := []func(context.Context, string) []ResearchSource{r.github, r.arxiv, r.nvd, r.kenyaRSS}
+		results := make([][]ResearchSource, len(collectors))
+		var wg sync.WaitGroup
+		for i, collect := range collectors {
+			wg.Add(1)
+			go func(index int, fn func(context.Context, string) []ResearchSource) {
+				defer wg.Done()
+				results[index] = fn(researchCtx, q)
+			}(i, collect)
+		}
+		wg.Wait()
+		for _, records := range results {
+			e.Sources = append(e.Sources, records...)
+		}
 	}
+	if err := ctx.Err(); err != nil { return ResearchEvidence{}, err }
 	usable := 0
 	for _, s := range e.Sources {
 		if s.Status == "retrieved" || s.Status == "reference_link" {

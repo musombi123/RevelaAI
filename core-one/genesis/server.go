@@ -35,6 +35,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/v1/genesis/health" && r.Method == http.MethodGet:
 		model := os.Getenv("GENESIS_MODEL_BASE_URL") != ""
 		writeAPIJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version, "standalone": true, "model_assisted": model, "execution": "proposal_only", "merge": "human_required"})
+	case path == "/v1/genesis/status" && r.Method == http.MethodGet:
+		status, err := s.Engine.OperationalStatus()
+		if err != nil { writeAPIError(w, http.StatusInternalServerError, "status_unavailable", "Could not assemble operational status."); return }
+		writeAPIJSON(w, http.StatusOK, status)
 	case path == "/v1/genesis/invent" && r.Method == http.MethodPost:
 		if !s.allowMutation(w, r) {
 			return
@@ -119,6 +123,8 @@ func (s *Server) serveTool(w http.ResponseWriter, r *http.Request, part string) 
 func (s *Server) serveStream(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher); if !ok { writeAPIError(w, 500, "stream_unsupported", "Server does not support event streaming."); return }
 	w.Header().Set("Content-Type", "text/event-stream"); w.Header().Set("Connection", "keep-alive"); w.Header().Set("X-Accel-Buffering", "no")
+	// Clear the server-wide write deadline for a long-lived stream; heartbeats keep it active.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 	ch, cancel := s.Engine.Subscribe(); defer cancel(); deadline := time.NewTicker(20 * time.Second); defer deadline.Stop()
 	w.WriteHeader(200); _, _ = io.WriteString(w, ": genesis stream connected\n\n"); flusher.Flush()
 	for { select {
@@ -151,6 +157,44 @@ func (e *Engine) ListInventions() ([]map[string]any, error) {
 		out = append(out, map[string]any{"id": rec.ID, "name": item.Name(), "title": rec.Specification.Title, "category": rec.Specification.Category, "industry": rec.Specification.Industry, "status": "await_merge", "created_at": rec.CreatedAt})
 	}
 	return out, nil
+}
+
+
+func (e *Engine) OperationalStatus() (map[string]any, error) {
+	inventions, err := e.ListInventions()
+	if err != nil { return nil, err }
+	queueCounts := map[string]int{}
+	for _, state := range []string{"pending", "processing", "await_merge", "blocked", "failed"} {
+		entries, err := os.ReadDir(filepath.Join(e.CoreRoot, "state", "queue", state))
+		if os.IsNotExist(err) { queueCounts[state] = 0; continue }
+		if err != nil { return nil, err }
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") { continue }
+			info, err := entry.Info()
+			if err == nil && info.Mode().IsRegular() { queueCounts[state]++ }
+		}
+	}
+	latestResearch := ""
+	researchEntries, err := os.ReadDir(filepath.Join(e.CoreRoot, "research"))
+	if err != nil && !os.IsNotExist(err) { return nil, err }
+	if err == nil {
+		for i := len(researchEntries)-1; i >= 0; i-- {
+			entry := researchEntries[i]
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") { latestResearch = entry.Name(); break }
+		}
+	}
+	guardianOK, guardianReason := e.Guardian.policyReady()
+	blockedLog := filepath.Join(e.CoreRoot, "guardian", "blocked.log")
+	var blockedLogUpdated any
+	if info, err := os.Stat(blockedLog); err == nil { blockedLogUpdated = info.ModTime().UTC() }
+	return map[string]any{
+		"status": "ok", "version": Version, "standalone": true,
+		"model_assisted": strings.TrimSpace(os.Getenv("GENESIS_MODEL_BASE_URL")) != "",
+		"offline_mode": strings.EqualFold(os.Getenv("GENESIS_OFFLINE"), "1") || strings.EqualFold(os.Getenv("GENESIS_OFFLINE"), "true"),
+		"guardian": map[string]any{"ready": guardianOK, "reason": guardianReason, "blocked_log_updated_at": blockedLogUpdated},
+		"queue": queueCounts, "invention_count": len(inventions), "latest_research_file": latestResearch,
+		"generated_code_execution": false, "automatic_merge": false,
+	}, nil
 }
 
 func decodeAPIJSON(w http.ResponseWriter, r *http.Request, out any) error {

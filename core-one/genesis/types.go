@@ -1,8 +1,11 @@
 package genesis
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
-const Version = "0.1.0-alpha"
+const Version = "0.2.0-alpha"
 
 // Demand is an untrusted request to propose a new tool. It is never executed as code.
 type Demand struct {
@@ -11,6 +14,7 @@ type Demand struct {
 	Source    string    `json:"source,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Status    string    `json:"status"`
+	Error     string    `json:"error,omitempty"`
 }
 
 type ResearchSource struct {
@@ -73,9 +77,9 @@ type Event struct {
 }
 
 type Researcher interface {
-	Research(demand string) (ResearchEvidence, error)
+	Research(ctx context.Context, demand string) (ResearchEvidence, error)
 }
 
 type ModelAdapter interface {
-	Suggest(demand string, evidence ResearchEvidence, fallback ToolSpec) (ToolSpec, error)
+	Suggest(ctx context.Context, demand string, evidence ResearchEvidence, fallback ToolSpec) (ToolSpec, error)
 }

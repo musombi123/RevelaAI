@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Revela Genesis Core-One API
-  version: 0.1.0-alpha
+  version: 0.2.0-alpha
   description: Standalone, model-optional tool-invention service. Generated tool paths remain proposals until human merge and registration.
 servers:
   - url: http://127.0.0.1:8781
@@ -47,6 +47,12 @@ paths:
       responses:
         '202': {description: Demand persisted for next scheduled scan}
         '403': {description: Guardian blocked demand}
+  /v1/genesis/status:
+    get:
+      summary: Read queue, invention, research and Guardian operational status
+      responses:
+        '200': {description: Current local operational snapshot}
+        '500': {description: Status could not be read}
   /v1/genesis/tools:
     get:
       summary: List generated invention proposals

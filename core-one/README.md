@@ -4,6 +4,20 @@
 
 This module is deliberately additive. It does not modify `core-zero`, the existing RevelaAI brain, or frontend files. The Go module has no third-party Go dependencies.
 
+## Core-One reliability upgrade — v0.2.0-alpha
+
+This upgrade hardens the foundation before adding broader invention capabilities:
+
+- Research adapters and the model adapter honor request cancellation; independent research sources run concurrently under a shared deadline.
+- Model output may enrich bounded descriptive metadata, but cannot rename the invention, reclassify its industry/category, or remove a demand-derived hardware guide requirement.
+- Guardian fails closed if the local policy file is missing, oversized, or missing mandatory protection categories. Research findings are now screened as well as individual source records.
+- Queue records are atomically claimed, interrupted claims are recovered, cancellation returns active work to the pending queue, and persistence errors are surfaced through daemon events rather than silently discarded.
+- The service exposes `GET /v1/genesis/status` for queue counts, invention totals, last research file, model/offline mode, and Guardian readiness.
+- The SSE stream clears the server's normal write deadline so it can remain connected beyond the standard HTTP response timeout.
+- A dedicated GitHub Actions workflow runs Go tests with the race detector, `go vet`, a CLI build, and offline generation/compile checks for emitted Go packages plus Python/JavaScript SDK syntax.
+
+These checks raise confidence; they do not replace an integration review or a production deployment test.
+
 ## What it does today
 
 - **Eye:** research cycles query GitHub repository search, arXiv, NVD CVE search, and a Kenya-focused RSS query. Each evidence packet also contains direct research links for WIPO PATENTSCOPE, ISO, KEBS, Jumia Kenya, Mouser, and DigiKey. Direct links are leads, not verified prices, patent clearance, legal advice, standards compliance, or proof of market demand. Repository scanning fingerprints repeated TODO/FIXME/workaround lines without executing source code or copying whole source files into model prompts.
@@ -45,14 +59,14 @@ Requires Go 1.23 or newer. From the repository root:
 
 ```powershell
 cd core-one
-go test ./...
+go test -race ./...
 $env:GENESIS_OFFLINE = "1"
 go run ./cmd/genesis -mode invent -repo-root .. -demand "Create tool: offline file vault"
 ```
 
 The offline run does not call the internet or require a model. It creates a package under `../core-one/inventions/offline_file_vault/`, a contract library, a model blueprint, and evidence/expansion records. Remove or review generated artifacts deliberately; the generator will not overwrite an existing invention directory.
 
-Run the API and daemon locally:
+Run the API and daemon locally (for the stricter acceptance pass, run `go test -race ./...` and `go vet ./...` first):
 
 ```powershell
 cd core-one
@@ -73,6 +87,7 @@ The daemon scans immediately on startup and then every 60 seconds by default. A 
 The full local contract is in `openapi.yaml`:
 
 - `GET /v1/genesis/health`
+- `GET /v1/genesis/status` — queue, Guardian, research and invention snapshot
 - `POST /v1/genesis/invent` — research and generate a single proposal now
 - `POST /v1/genesis/queue` — durable demand queue for the daemon
 - `GET /v1/genesis/tools`

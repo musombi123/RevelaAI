@@ -1,0 +1,68 @@
+name: Revela Genesis Core-One CI
+
+on:
+  push:
+    paths:
+      - "core-one/**"
+      - ".github/workflows/genesis-core-one-ci.yml"
+  pull_request:
+    paths:
+      - "core-one/**"
+      - ".github/workflows/genesis-core-one-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  go-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: core-one/go.mod
+      - name: Unit and race tests
+        working-directory: core-one
+        run: go test -race ./...
+      - name: Static analysis
+        working-directory: core-one
+        run: go vet ./...
+      - name: Build standalone CLI
+        working-directory: core-one
+        run: go build -trimpath -o "$RUNNER_TEMP/revela-genesis" ./cmd/genesis
+
+  generated-artifacts:
+    runs-on: ubuntu-latest
+    needs: go-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate offline proposals without a model or network
+        working-directory: core-one
+        env:
+          GENESIS_OFFLINE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          go run ./cmd/genesis -mode invent -repo-root "$tmp" -demand "Create tool: offline file vault"
+          go run ./cmd/genesis -mode invent -repo-root "$tmp" -demand "offline second file vault"
+          cp go.mod "$tmp/core-one/go.mod"
+          cd "$tmp/core-one"
+          go test ./...
+          python -m py_compile inventions/offline_file_vault/sdk/python/client.py
+          node --input-type=module --check < inventions/offline_file_vault/sdk/js/client.js
+          test -s inventions/offline_file_vault/openapi.yaml
+          test -s inventions/offline_file_vault/hardware_guide.md
+          test -s inventions/offline_file_vault/AWAIT_MERGE.md
+          test -s inventions/offline_second_file_vault/sdk/go/client.go

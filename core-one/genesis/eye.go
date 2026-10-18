@@ -26,11 +26,13 @@ type gapSignal struct {
 // EyeScan performs one model-free discovery cycle: external research, repository gap fingerprinting,
 // provenance persistence, and threshold-based demand triggering. Triggered work remains await-merge.
 func (e *Engine) EyeScan(ctx context.Context) error {
+	if ctx == nil { ctx = context.Background() }
 	select { case <-ctx.Done(): return ctx.Err(); default: }
-	if e.Researcher == nil { e.Researcher = NewWebResearcher() }
+	e.mu.RLock(); researcher := e.Researcher; e.mu.RUnlock(); if researcher == nil { researcher = NewWebResearcher() }
 	e.publish(Event{Type: "eye_scan_started", At: time.Now().UTC(), Message: "Eye began a scheduled source and repository-gap scan."})
-	evidence, err := e.Researcher.Research("emerging technology demand engineering workarounds hardware integration standards Kenya")
+	evidence, err := researcher.Research(ctx, "emerging technology demand engineering workarounds hardware integration standards Kenya")
 	if err != nil { return err }
+	if err := ctx.Err(); err != nil { return err }
 	for _, src := range evidence.Sources {
 		if src.Status != "retrieved" { continue }
 		if d := e.Guardian.Check(src.Name + " " + src.Title + " " + src.Snippet); !d.Allowed {
