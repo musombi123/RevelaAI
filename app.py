@@ -3634,9 +3634,8 @@ def ai_assistant():
             _raw_result = raw_tool_execution.get("result")
             _allowed_result_fields = (
                 "file_count", "language_counts", "git_head", "manifest_sha256",
-                "read_only", "evidence_note", "target", "proposal_id", "id",
-                "status", "compiled", "artifact_count", "source_count",
-                "summary", "warnings", "errors",
+                "read_only", "target", "proposal_id", "id", "status",
+                "compiled", "artifact_count", "source_count",
             )
             if isinstance(_raw_result, dict):
                 _summary = {}
