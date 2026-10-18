@@ -3,7 +3,7 @@
 The dispatcher runs before language-model generation. It is not a fallback
 provider: engineering requests that match a supported operation must produce
 a USECT-ZERO tool outcome before the model is allowed to synthesize a reply.
-The tool catalog is included in the model instructions on every turn.
+The tool catalog is included in every ordinary text-model turn.
 """
 from __future__ import annotations
 
