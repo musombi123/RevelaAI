@@ -144,7 +144,18 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 		_ = e.Guardian.LogBlocked("final_specification", demand, d.Reason)
 		return Invention{}, ErrBlocked
 	}
-	invention, err := e.forge(spec, evidence)
+	plan, err := BuildCapabilityPlan(spec, evidence, e.CoreRoot)
+	if err != nil {
+		return Invention{}, fmt.Errorf("build capability/requirement plan: %w", err)
+	}
+	planBytes, err := json.Marshal(plan)
+	if err != nil { return Invention{}, fmt.Errorf("encode capability plan: %w", err) }
+	if d := e.Guardian.Check(string(planBytes)); !d.Allowed {
+		_ = e.Guardian.LogBlocked("capability_plan", string(planBytes), d.Reason)
+		e.publish(Event{Type: "blocked", At: time.Now().UTC(), Message: "Guardian blocked the invention because its capability plan violated policy.", Status: d.Code})
+		return Invention{}, ErrBlocked
+	}
+	invention, err := e.forge(spec, evidence, plan)
 	if err != nil {
 		e.publish(Event{Type: "forge_error", At: time.Now().UTC(), Message: limitText(err.Error(), 300), Status: "error"})
 		return Invention{}, err
@@ -225,10 +236,12 @@ func overlayModelMetadata(base, proposed ToolSpec) ToolSpec {
 	out := base
 	if v := cleanModelString(proposed.Title, 120); v != "" { out.Title = v }
 	if v := cleanModelString(proposed.Purpose, 500); v != "" { out.Purpose = v }
-	out.Capabilities = cleanModelList(proposed.Capabilities, 8, 120, base.Capabilities)
-	out.Inputs = cleanModelList(proposed.Inputs, 8, 120, base.Inputs)
-	out.Outputs = cleanModelList(proposed.Outputs, 8, 120, base.Outputs)
-	out.Safeguards = cleanModelList(proposed.Safeguards, 8, 180, base.Safeguards)
+	// Model metadata may add detail, but cannot remove deterministic baseline capabilities,
+	// required request fields, outputs, or safeguards.
+	out.Capabilities = mergeModelList(base.Capabilities, proposed.Capabilities, 12, 120)
+	out.Inputs = mergeModelList(base.Inputs, proposed.Inputs, 12, 120)
+	out.Outputs = mergeModelList(base.Outputs, proposed.Outputs, 12, 120)
+	out.Safeguards = mergeModelList(base.Safeguards, proposed.Safeguards, 16, 180)
 	out.Name = base.Name
 	out.Demand = base.Demand
 	out.Category = base.Category

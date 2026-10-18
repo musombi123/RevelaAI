@@ -36,12 +36,19 @@ paths:
         '400': {description: Invalid request}
         '401': {description: Authentication required}
         '403': {description: Consent or authorization missing}
+  /v1/%s/capability_plan:
+    get:
+      summary: Read the generated capability graph and requirement plan
+      operationId: get%sCapabilityPlan
+      responses:
+        '200': {description: Staged capability plan; gaps and library matches require review}
+        '404': {description: Capability plan not found}
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-`, yamlSafe(spec.Title), spec.Name, operationName(spec.Name))
+`, yamlSafe(spec.Title), spec.Name, operationName(spec.Name), spec.Name, operationName(spec.Name))
 }
 
 func operationName(s string) string {
@@ -72,6 +79,7 @@ Genesis has generated a proposal. It intentionally does not merge, install, exec
 ## Required before merge
 
 - [ ] Review demand, research provenance, and evidence.json; verify external claims independently.
+- [ ] Review capability_plan.json and assign an owner/test to every unresolved capability.
 - [ ] Review every generated source file and the reusable library driver.
 - [ ] Run go test ./... from core-one/.
 - [ ] Run static analysis, dependency/license checks, secret scanning, and security tests.
