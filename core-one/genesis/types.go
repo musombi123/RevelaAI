@@ -63,8 +63,10 @@ type Invention struct {
 	Category  string           `json:"category"`
 	Industry  string           `json:"industry"`
 	Files     []string         `json:"files"`
-	Evidence  ResearchEvidence `json:"evidence"`
-	Summary   string           `json:"summary"`
+	Evidence          ResearchEvidence `json:"evidence"`
+	Summary           string           `json:"summary"`
+	CapabilityPlanPath string           `json:"capability_plan_path"`
+	CapabilityCoverage CapabilityCoverage `json:"capability_coverage"`
 }
 
 type Event struct {
