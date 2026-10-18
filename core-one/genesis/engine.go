@@ -24,8 +24,10 @@ type Engine struct {
 	Researcher Researcher
 	Model      ModelAdapter
 
-	mu          sync.Mutex
+	mu          sync.RWMutex
+	inventMu    sync.Mutex
 	researchMu  sync.Mutex
+	queueMu     sync.Mutex
 	eventMu     sync.RWMutex
 	subscribers map[chan Event]struct{}
 }
@@ -74,23 +76,38 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 		return Invention{}, ctx.Err()
 	default:
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.inventMu.Lock()
+	defer e.inventMu.Unlock()
+	e.mu.RLock()
+	researcher, model := e.Researcher, e.Model
+	e.mu.RUnlock()
+	if researcher == nil { researcher = NewWebResearcher() }
 	decision := e.Guardian.Check(demand)
 	if !decision.Allowed {
 		_ = e.Guardian.LogBlocked("demand", demand, decision.Reason)
 		e.publish(Event{Type: "blocked", At: time.Now().UTC(), Message: "Guardian blocked a demand before research or file generation.", Status: decision.Code})
 		return Invention{}, ErrBlocked
 	}
-	if e.Researcher == nil {
-		e.Researcher = NewWebResearcher()
-	}
 	e.publish(Event{Type: "research_started", At: time.Now().UTC(), Message: "Eye started research for an approved demand."})
-	evidence, err := e.Researcher.Research(demand)
+	evidence, err := researcher.Research(ctx, demand)
 	if err != nil {
 		return Invention{}, fmt.Errorf("research failed: %w", err)
 	}
+	if len(evidence.Sources) > 200 || len(evidence.Findings) > 100 {
+		return Invention{}, errors.New("research evidence exceeded configured item limits; invention refused")
+	}
+	for _, finding := range evidence.Findings {
+		if len(finding) > 4000 { return Invention{}, errors.New("research finding exceeded the 4000-character limit; invention refused") }
+		if d := e.Guardian.Check(finding); !d.Allowed {
+			_ = e.Guardian.LogBlocked("research_finding", finding, d.Reason)
+			e.publish(Event{Type: "blocked", At: time.Now().UTC(), Message: "Guardian blocked the complete invention because a research finding matched a prohibited pattern.", Status: d.Code})
+			return Invention{}, ErrBlocked
+		}
+	}
 	for _, source := range evidence.Sources {
+		if len(source.Name) > 200 || len(source.URL) > 2048 || len(source.Title) > 500 || len(source.Snippet) > 4000 {
+			return Invention{}, errors.New("research source exceeded configured field limits; invention refused")
+		}
 		checkText := source.Name + " " + source.Title + " " + source.Snippet + " " + source.URL
 		if d := e.Guardian.Check(checkText); !d.Allowed {
 			_ = e.Guardian.LogBlocked("research_source", source.URL+" "+checkText, d.Reason)
@@ -102,9 +119,10 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 		return Invention{}, fmt.Errorf("save research evidence: %w", err)
 	}
 
-	spec := deriveSpec(demand)
-	if e.Model != nil {
-		modelSpec, modelErr := e.Model.Suggest(demand, evidence, spec)
+	baseSpec := deriveSpec(demand)
+	spec := baseSpec
+	if model != nil {
+		modelSpec, modelErr := model.Suggest(ctx, demand, evidence, baseSpec)
 		if modelErr == nil {
 			candidate, _ := json.Marshal(modelSpec)
 			if d := e.Guardian.Check(string(candidate)); !d.Allowed {
@@ -112,20 +130,9 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 				e.publish(Event{Type: "blocked", At: time.Now().UTC(), Message: "Guardian blocked the complete invention because a model-generated specification violated policy.", Status: d.Code})
 				return Invention{}, ErrBlocked
 			}
-			// The model only supplies bounded metadata, never code or shell commands.
-			if modelSpec.Name == spec.Name {
-				spec = modelSpec
-			} else {
-				spec.Title = modelSpec.Title
-				spec.Purpose = modelSpec.Purpose
-				spec.Capabilities = modelSpec.Capabilities
-				spec.Inputs = modelSpec.Inputs
-				spec.Outputs = modelSpec.Outputs
-				spec.Safeguards = modelSpec.Safeguards
-				spec.ModelAssisted = modelSpec.ModelAssisted
-				spec.ModelNote = modelSpec.ModelNote
-			}
-			spec.Name = deriveSpec(demand).Name
+			// Model content is untrusted metadata only. Identity, classification, and hardware safety
+			// boundaries remain anchored to the deterministic demand parser.
+			spec = overlayModelMetadata(baseSpec, modelSpec)
 		} else {
 			spec.ModelNote = "Configured model adapter was unavailable; deterministic model-free specification used: " + limitText(modelErr.Error(), 160)
 		}
@@ -207,6 +214,27 @@ func (e *Engine) Subscribe() (<-chan Event, func()) {
 		e.eventMu.Unlock()
 	}
 	return ch, cancel
+}
+
+// overlayModelMetadata deliberately keeps identity/classification/safety flags from the
+// deterministic demand parser. An optional model may enrich bounded descriptive metadata only.
+func overlayModelMetadata(base, proposed ToolSpec) ToolSpec {
+	out := base
+	if v := cleanModelString(proposed.Title, 120); v != "" { out.Title = v }
+	if v := cleanModelString(proposed.Purpose, 500); v != "" { out.Purpose = v }
+	out.Capabilities = cleanModelList(proposed.Capabilities, 8, 120, base.Capabilities)
+	out.Inputs = cleanModelList(proposed.Inputs, 8, 120, base.Inputs)
+	out.Outputs = cleanModelList(proposed.Outputs, 8, 120, base.Outputs)
+	out.Safeguards = cleanModelList(proposed.Safeguards, 8, 180, base.Safeguards)
+	out.Name = base.Name
+	out.Demand = base.Demand
+	out.Category = base.Category
+	out.Industry = base.Industry
+	out.NeedsHardwareGuide = base.NeedsHardwareGuide
+	out.ModelAssisted = true
+	out.ModelNote = cleanModelString(proposed.ModelNote, 180)
+	if out.ModelNote == "" { out.ModelNote = "Model contributed bounded descriptive metadata; tool identity and safety classification remained deterministic." }
+	return out
 }
 
 const defaultGuardianRules = `version: 1
