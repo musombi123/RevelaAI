@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Revela Genesis Core-One API
-  version: 0.2.0-alpha
+  version: 0.3.0-alpha
   description: Standalone, model-optional tool-invention service. Generated tool paths remain proposals until human merge and registration.
 servers:
   - url: http://127.0.0.1:8781
