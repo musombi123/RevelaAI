@@ -15,40 +15,51 @@ BACKEND_URL = os.getenv("REVELACODE_BACKEND_URL", "https://revelacode-backend.on
 ADMIN_TIMEOUT = 4
 
 def _authenticated_admin():
-    """Use the existing JWT resolver and authoritative backend role; fail closed."""
+    """Require the currently stored RevelaCode administrator role; fail closed."""
     authorization = (request.headers.get("Authorization") or "").strip()
-    if not authorization.startswith("Bearer "):
+    if not authorization.startswith("Bearer ") or not authorization[7:].strip():
         return None, (jsonify({"status": "error", "code": "authentication_required"}), 401)
+
     try:
-        # Runtime import prevents a circular import while app.py registers this blueprint.
+        # Runtime import avoids a circular import while app.py registers this blueprint.
         from app import resolve_revelacode_user_id
         user_id = resolve_revelacode_user_id()
     except Exception:
         user_id = None
     if not user_id:
         return None, (jsonify({"status": "error", "code": "invalid_identity"}), 401)
+
     try:
-        response = requests.get(BACKEND_URL + "/api/auth/me",
-            headers={"Authorization": authorization}, timeout=ADMIN_TIMEOUT)
+        # RevelaCode validates the JWT and reads the user's CURRENT role from its
+        # authoritative user store. Never use frontend role flags or JWT role claims.
+        response = requests.get(
+            BACKEND_URL + "/api/auth/verify-admin",
+            headers={"Authorization": authorization},
+            timeout=ADMIN_TIMEOUT,
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if response.status_code == 401:
+            return None, (jsonify({"status": "error", "code": body.get("code", "authentication_required")}), 401)
+        if response.status_code == 403:
+            code = body.get("code") if body.get("code") in {"admin_required", "user_identity_mismatch"} else "admin_required"
+            return None, (jsonify({"status": "error", "code": code}), 403)
+        if response.status_code == 404:
+            return None, (jsonify({"status": "error", "code": "user_not_found"}), 403)
         if response.status_code != 200:
             return None, (jsonify({"status": "error", "code": "admin_verification_unavailable"}), 503)
-        body = response.json()
-        candidates = [body]
-        for key in ("data", "user", "profile"):
-            if isinstance(body.get(key), dict): candidates.append(body[key])
-        backend_ids = {str(item.get("userId") or item.get("user_id") or item.get("id") or item.get("_id") or "").strip() for item in candidates}
-        if str(user_id) not in backend_ids:
+
+        if not isinstance(body, dict):
+            return None, (jsonify({"status": "error", "code": "admin_verification_unavailable"}), 503)
+        canonical_id = str(body.get("userId") or body.get("user_id") or body.get("id") or "").strip()
+        if canonical_id != str(user_id):
             return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
-        # The existing /api/auth/me endpoint confirms identity but deliberately
-        # does not expose role. Require a server-side allowlist of known admins.
-        # Never trust a caller-supplied userId or role field.
-        allowed_admins = {item.strip() for item in os.getenv("META_ENGINEER_ADMIN_USER_IDS", "").split(",") if item.strip()}
-        if not allowed_admins:
-            return None, (jsonify({"status": "error", "code": "admin_allowlist_not_configured"}), 503)
-        if str(user_id) not in allowed_admins:
+        if body.get("authorized") is not True or str(body.get("role") or "").strip().lower() != "admin":
             return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
         return str(user_id), None
-    except (requests.RequestException, ValueError):
+    except requests.RequestException:
         return None, (jsonify({"status": "error", "code": "admin_verification_unavailable"}), 503)
 
 @meta_engineer_bp.get("/health")
