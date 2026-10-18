@@ -28,6 +28,44 @@ class SciCoreSafetyTests(unittest.TestCase):
         self.assertIn("firmware.cpp", result["artifacts"])
         self.assertIn("safety.md", result["artifacts"])
 
+
+    def test_browser_cors_preflight_is_allowed_without_bearer_token(self):
+        from flask import Flask
+        from unittest.mock import patch
+
+        app = Flask("sci-core-preflight-test")
+        app.register_blueprint(sci_router, url_prefix="/api/sci")
+        client = app.test_client()
+
+        # Browsers do not include Authorization in the OPTIONS preflight itself.
+        # The real GET/POST must still be authorized after CORS negotiation.
+        with patch("revelai.routers.sci_core._authenticated_admin") as admin_check:
+            response = client.options(
+                "/api/sci/shield/status",
+                headers={
+                    "Origin": "https://revelacode-frontend.onrender.com",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "authorization",
+                },
+            )
+        self.assertIn(response.status_code, (200, 204))
+        admin_check.assert_not_called()
+
+    def test_real_sci_core_request_still_calls_admin_gate(self):
+        from flask import Flask, jsonify
+        from unittest.mock import patch
+
+        app = Flask("sci-core-auth-test")
+        app.register_blueprint(sci_router, url_prefix="/api/sci")
+        client = app.test_client()
+
+        denied = (jsonify({"status": "error", "code": "admin_required"}), 403)
+        with patch("revelai.routers.sci_core._authenticated_admin", return_value=(None, denied)) as admin_check:
+            response = client.get("/api/sci/shield/status")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "admin_required")
+        admin_check.assert_called_once()
+
     def test_routes_are_registered(self):
         self.assertGreater(len(sci_router.deferred_functions), 0)
 
