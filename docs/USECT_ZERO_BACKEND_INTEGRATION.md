@@ -55,12 +55,13 @@ Mounted under `/api/usect-zero`:
 | `POST /heal/baseline` | Core baseline route | Platform admin + server-side admin token |
 | `POST /heal/proposals` | `POST /v1/heal/proposals` | Go core validates `heal:propose` scope |
 | `POST /heal/proposals/{id}/approve` | Core restore approval route | Platform admin + server-side admin token and core confirmation rules |
-| `POST /assemble` | `POST /v1/assemble` | Go core validates `assemble:propose` scope |
+| `GET /assemble/templates` | `GET /v1/assemble/templates` | Go core validates `scan:read`; read-only versioned catalog and template validation status |
+| `POST /assemble` | `POST /v1/assemble` | Go core validates `assemble:propose`; optional exact `template_version`, registry/BOM/wiring validation and review-only manifest |
 | `POST /radar/compare` | `POST /v1/radar/compare` | Go core validates `radar:compare` scope |
 | `POST /bridge/plan` | `POST /v1/bridge/plan` | Go core validates `bridge:propose` scope |
 | `POST /mind/compile` | `POST /v1/mind/compile` | Go core validates `mind:compile` scope |
 
-The diagnostics report samples at most 50 paths per drift category while retaining full counts, omits absolute repository roots, and only probes USECT-ZERO data directories with temporary files that are removed immediately. Drift is informational and is never automatically repaired. Requests and responses are bounded; the Flask blueprint exposes an explicit set of routes mapped to `/v1/` endpoints, and the client rejects non-versioned or traversal paths; redirects are not followed; HTTP calls have short timeouts. The adapter forwards only `X-API-Key` for external developer operations. Admin operations use a separately configured server-side token and do not forward user Authorization headers.
+The diagnostics report samples at most 50 paths per drift category while retaining full counts, omits absolute repository roots, and only probes USECT-ZERO data directories with temporary files that are removed immediately. Drift is informational and is never automatically repaired. Assembly is driven by the versioned in-code curated registry; invalid or unregistered target/version pairs are rejected, BOM wire quantities are checked against connection count, pin endpoints and connection references are validated, and the generated manifest records that hardware has not been verified. Existing files are not overwritten. Requests and responses are bounded; the Flask blueprint exposes an explicit set of routes mapped to `/v1/` endpoints, and the client rejects non-versioned or traversal paths; redirects are not followed; HTTP calls have short timeouts. The adapter forwards only `X-API-Key` for external developer operations. Admin operations use a separately configured server-side token and do not forward user Authorization headers.
 
 ## What this first backend pass does not do
 

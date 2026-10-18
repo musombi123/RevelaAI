@@ -227,13 +227,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		replyJSON(w, 200, p)
 		return
 	}
+	if r.URL.Path == "/v1/assemble/templates" && r.Method == http.MethodGet {
+		actor, ok := s.requireScope(w, r, "scan:read")
+		if !ok {
+			return
+		}
+		templates := assemble.ListTemplates()
+		_ = actor // Catalog reads are non-mutating; no per-read audit event is needed.
+		replyJSON(w, 200, map[string]any{
+			"status": "ok",
+			"schema_version": "usect-zero.assembly-catalog.v1",
+			"templates": templates,
+			"count": len(templates),
+			"human_review_required": true,
+		})
+		return
+	}
 	if r.URL.Path == "/v1/assemble" && r.Method == http.MethodPost {
 		actor, ok := s.requireScope(w, r, "assemble:propose")
 		if !ok { return }
-		var in struct { Target string `json:"target"` }
+		var in struct {
+			Target string `json:"target"`
+			TemplateVersion string `json:"template_version"`
+		}
 		if e := decodeJSON(w, r, &in); e != nil { replyJSON(w, 400, apiError{"error", "invalid_json", e.Error()}); return }
 		out := filepath.Join(k.CoreRoot, "evidence", "assemble", time.Now().UTC().Format("20060102T150405.000000000Z"))
-		res, e := assemble.Generate(in.Target, out)
+		res, e := assemble.GenerateVersion(in.Target, in.TemplateVersion, out)
 		if e != nil { replyJSON(w, 422, map[string]any{"status": "needs_curated_template", "error": e.Error(), "result": res}); return }
 		for i, p := range res.Artifacts { rel, er := filepath.Rel(k.Root, p); if er == nil { res.Artifacts[i] = filepath.ToSlash(rel) } }
 		_ = k.Audit("assemble_proposal", actor, in.Target, res.Status, map[string]any{"artifact_count": len(res.Artifacts)})

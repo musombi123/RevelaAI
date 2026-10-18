@@ -51,6 +51,15 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "usect_zero_list_assembly_templates",
+        "description": "List registered, versioned assembly templates and their validation status before generation. Read-only; no artifacts are generated and no hardware is accessed.",
+        "operation": "assemble_templates",
+        "scope": "scan:read",
+        "method": "GET",
+        "path": "/v1/assemble/templates",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "usect_zero_diagnostics",
         "description": "Check USECT-ZERO runtime details, data-directory write readiness, and added/modified/missing repository files versus the saved baseline. This is a read-only report; it never repairs drift.",
         "operation": "diagnostics",
@@ -70,14 +79,17 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "usect_zero_assemble_fixture",
-        "description": "Generate the one currently registered ESP32-S3 sensor example bundle for human review. It is not a general CAD/ECAD engine and must not claim physical validation.",
+        "description": "Generate artifacts from an exact registered version of the curated ESP32-S3 sensor template. BOM and wiring metadata are validated before files are generated; output remains a review draft and is not hardware-verified.",
         "operation": "assemble",
         "scope": "assemble:propose",
         "method": "POST",
         "path": "/v1/assemble",
         "parameters": {
             "type": "object",
-            "properties": {"target": {"type": "string", "enum": ["esp32-sensor"]}},
+            "properties": {
+                "target": {"type": "string", "enum": ["esp32-sensor"]},
+                "template_version": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+            },
             "required": ["target"],
             "additionalProperties": False,
         },
@@ -231,6 +243,12 @@ def select_tool_for_message(message: str, intent: str = "general") -> tuple[str,
         if target:
             return "bridge", {"target": target}
 
+    if re.search(
+        r"\b(?:assembly|assemble)\s+(?:template|templates|catalog|catalogue)|\b(?:list|show|available|registered|supported)\b.{0,50}\b(?:assembly templates?|assemble templates?|hardware templates?|design templates?)\b|\bwhat (?:assembly|hardware) templates? (?:are )?available\b",
+        lowered,
+    ):
+        return "assemble_templates", {}
+
     if re.search(r"\b(?:heal proposal|propose healing|recover deleted file|recover modified file|restore missing file|restore a missing file|missing tracked files|modified tracked files|modified baseline file|repository recovery|code recovery)\b|/heal\b", lowered):
         return "heal", {}
 
@@ -240,7 +258,11 @@ def select_tool_for_message(message: str, intent: str = "general") -> tuple[str,
         re.I,
     ):
         target = "esp32-sensor" if re.search(r"\b(?:esp32|bme280|sensor fixture)\b", lowered, re.I) else "unregistered-target"
-        return "assemble", {"target": target}
+        version_match = re.search(r"\bv?(\d+\.\d+\.\d+)\b", text, re.I)
+        arguments = {"target": target}
+        if version_match:
+            arguments["template_version"] = version_match.group(1)
+        return "assemble", arguments
 
     if re.search(
         r"\b(?:scan|inspect|inventory|map)\b.{0,60}\b(?:repository|repo|codebase|project files|architecture|structure|tracked files)\b|\b(?:repository|repo|codebase)\b.{0,60}\b(?:scan|inspect|inventory|architecture map)\b|\bwhat files (?:are|exist) in (?:this|the) (?:repo|repository|codebase)\b",
@@ -389,7 +411,7 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
 
     try:
         method = spec["method"]
-        if operation in {"scan", "diagnostics"}:
+        if operation in {"scan", "diagnostics", "assemble_templates"}:
             body = None
         elif operation == "heal":
             body = b"{}"
@@ -399,6 +421,11 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
                 if not isinstance(target, str) or len(target) > 80:
                     raise ValueError("target must be a short string")
                 payload = {"target": target}
+                version = args.get("template_version")
+                if version is not None:
+                    if not isinstance(version, str) or not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
+                        raise ValueError("template_version must use strict major.minor.patch format")
+                    payload["template_version"] = version
             elif operation == "bridge":
                 target = args.get("target")
                 if target not in {"ros2", "fpga", "labview", "device"}:

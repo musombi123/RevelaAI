@@ -179,6 +179,31 @@ paths:
         '200': {description: Approved recovery executed and audited.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /v1/assemble/templates:
+    get:
+      tags: [assemble]
+      operationId: listAssemblyTemplates
+      summary: List versioned curated templates and validation state
+      description: Read-only catalogue. Uses scan:read scope; no artifacts or hardware operations are performed.
+      security: [{ApiKey: []}]
+      x-required-scope: scan:read
+      responses:
+        '200':
+          description: Registered template metadata and deterministic validation status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, schema_version, templates, count, human_review_required]
+                properties:
+                  status: {type: string, const: ok}
+                  schema_version: {type: string, const: usect-zero.assembly-catalog.v1}
+                  templates:
+                    type: array
+                    items: {$ref: '#/components/schemas/AssemblyTemplateSummary'}
+                  count: {type: integer, minimum: 0}
+                  human_review_required: {type: boolean, const: true}
+        '401': {$ref: '#/components/responses/Unauthorized'}
   /v1/assemble:
     post:
       tags: [assemble]
@@ -195,8 +220,9 @@ paths:
               required: [target]
               properties:
                 target: {type: string, enum: [esp32-sensor]}
+                template_version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$', description: Optional exact template version; omitted selects the latest registered version.}
       responses:
-        '201': {description: Artifacts generated for human review; no hardware touched.}
+        '201': {description: Validated, versioned artifacts generated for human review; no hardware touched.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '422': {description: No curated template exists for the requested target.}
   /v1/radar/compare:
@@ -377,6 +403,18 @@ components:
         api_key: {type: string, writeOnly: true}
         shown_once: {type: boolean, const: true}
         note: {type: string}
+    AssemblyTemplateSummary:
+      type: object
+      required: [id, target, version, title, part_count, connection_count, validation_status, human_review_required]
+      properties:
+        id: {type: string}
+        target: {type: string}
+        version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
+        title: {type: string}
+        part_count: {type: integer, minimum: 0}
+        connection_count: {type: integer, minimum: 0}
+        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
+        human_review_required: {type: boolean, const: true}
     RadarEvidence:
       type: object
       required: [name, version, benchmark]
