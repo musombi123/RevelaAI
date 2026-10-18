@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import deque
+from datetime import datetime, timezone
 from typing import Any
 
 from services.usect_zero_client import (
@@ -27,6 +29,13 @@ from services.usect_zero_client import (
 MAX_TOOL_INPUT_CHARS = 12_000
 MAX_TOOL_OUTPUT_CHARS = 20_000
 TOOL_NAME = "usect_zero"
+_RECENT_ACTIVITY: deque[dict[str, Any]] = deque(maxlen=50)
+_ACTIVITY_SUMMARY_FIELDS = (
+    "file_count", "language_counts", "git_head", "manifest_sha256",
+    "read_only", "evidence_note", "target", "proposal_id", "id",
+    "status", "compiled", "artifact_count", "source_count", "summary",
+    "warnings", "errors",
+)
 
 # Public, model-readable tool contract. The runtime dispatcher below retains
 # strict allowlisted routes and never exposes the admin token to the model.
@@ -274,6 +283,53 @@ def _scan_summary(payload: dict[str, Any]) -> dict[str, Any]:
     return _sanitize(summary)
 
 
+def recent_activity(limit: int = 25) -> list[dict[str, Any]]:
+    """Return a bounded, sanitized activity view; records are in-process only."""
+    try:
+        bounded_limit = min(max(int(limit), 1), 50)
+    except (TypeError, ValueError):
+        bounded_limit = 25
+    return [dict(item) for item in list(reversed(_RECENT_ACTIVITY))[:bounded_limit]]
+
+
+def _record_activity(outcome: dict[str, Any]) -> None:
+    """Record operational status without user prompts, credentials or file paths."""
+    raw_result = outcome.get("result")
+    summary: dict[str, Any] = {}
+    if isinstance(raw_result, dict):
+        for field in _ACTIVITY_SUMMARY_FIELDS:
+            if field not in raw_result:
+                continue
+            value = raw_result[field]
+            if isinstance(value, str):
+                summary[field] = value[:180]
+            elif isinstance(value, (int, float, bool)) or value is None:
+                summary[field] = value
+            elif isinstance(value, dict):
+                summary[field] = {
+                    str(key)[:50]: item
+                    for key, item in list(value.items())[:10]
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                }
+            elif isinstance(value, list):
+                summary[field] = [
+                    item[:120] if isinstance(item, str) else item
+                    for item in value[:5]
+                    if isinstance(item, (str, int, float, bool)) or item is None
+                ]
+
+    _RECENT_ACTIVITY.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "name": str(outcome.get("name") or outcome.get("tool") or TOOL_NAME)[:80],
+        "operation": str(outcome.get("operation") or "unknown")[:40],
+        "status": str(outcome.get("status") or "unknown")[:40],
+        "executed": bool(outcome.get("executed", False)),
+        "http_status": outcome.get("http_status") if isinstance(outcome.get("http_status"), int) else None,
+        "error_code": str(outcome.get("error_code") or "")[:100] or None,
+        "result_summary": summary,
+    })
+
+
 def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Invoke one known tool using a dedicated scoped brain key, never admin credentials."""
     spec = _CATALOG_BY_OPERATION.get(str(operation or ""))
@@ -396,6 +452,7 @@ def execute_for_message(message: str, intent: str = "general") -> dict[str, Any]
     outcome["selection"] = "server_tool_router"
     outcome["fallback"] = False
     outcome["input_summary"] = str(message or "").strip()[:500]
+    _record_activity(outcome)
     serialized = json.dumps(outcome, ensure_ascii=False, default=str)
     if len(serialized) > MAX_TOOL_OUTPUT_CHARS:
         outcome["result"] = {"truncated": True, "summary": serialized[:MAX_TOOL_OUTPUT_CHARS]}
@@ -406,6 +463,7 @@ __all__ = [
     "TOOL_CATALOG",
     "execute_for_message",
     "execute_tool",
+    "recent_activity",
     "select_tool_for_message",
     "tool_catalog_prompt",
 ]
