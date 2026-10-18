@@ -95,7 +95,7 @@ func containsAny(value string, words ...string) bool {
 	return false
 }
 
-func (e *Engine) forge(spec ToolSpec, evidence ResearchEvidence) (Invention, error) {
+func (e *Engine) forge(spec ToolSpec, evidence ResearchEvidence, capabilityPlan CapabilityPlan) (Invention, error) {
 	invRoot := filepath.Join(e.CoreRoot, "inventions")
 	libRoot := filepath.Join(e.CoreRoot, "libraries", "created")
 	modelRoot := filepath.Join(e.CoreRoot, "models")
@@ -131,11 +131,12 @@ func (e *Engine) forge(spec ToolSpec, evidence ResearchEvidence) (Invention, err
 		return Invention{}, err
 	}
 	created := time.Now().UTC()
-	files := []string{"code.go", "library.go", "openapi.yaml", "README.md", "hardware_guide.md", "test.go", "evidence.json", "expansion_plan.json", "AWAIT_MERGE.md", "sdk/go/client.go", "sdk/python/client.py", "sdk/js/client.js"}
+	files := []string{"code.go", "library.go", "openapi.yaml", "README.md", "hardware_guide.md", "test.go", "evidence.json", "capability_plan.json", "expansion_plan.json", "AWAIT_MERGE.md", "sdk/go/client.go", "sdk/python/client.py", "sdk/js/client.js"}
 	contents := map[string]string{
 		"code.go": generatedCode(spec), "library.go": generatedLibrary(spec), "openapi.yaml": generatedOpenAPI(spec),
-		"README.md": generatedREADME(spec, evidence), "hardware_guide.md": generatedHardwareGuide(spec), "test.go": generatedTest(spec),
+		"README.md": generatedREADME(spec, evidence) + generatedCapabilityPlanNote(capabilityPlan), "hardware_guide.md": generatedHardwareGuide(spec), "test.go": generatedTest(spec),
 		"evidence.json":       string(mustJSON(map[string]any{"invention_id": id, "specification": spec, "research": evidence, "created_at": created, "status": "await_merge"})),
+		"capability_plan.json": string(mustJSON(capabilityPlan)),
 		"expansion_plan.json": string(mustJSON(makeExpansionPlan(spec, e.CoreRoot))), "AWAIT_MERGE.md": generatedMergeChecklist(spec),
 		"sdk/go/client.go": generatedGoSDK(spec), "sdk/python/client.py": generatedPythonSDK(spec), "sdk/js/client.js": generatedJavaScriptSDK(spec),
 	}
@@ -190,7 +191,8 @@ func (e *Engine) forge(spec ToolSpec, evidence ResearchEvidence) (Invention, err
 		Directory: filepath.ToSlash(filepath.Join("core-one", "inventions", spec.Name)),
 		Library:   filepath.ToSlash(filepath.Join("core-one", "libraries", "created", libName)),
 		Model:     filepath.ToSlash(filepath.Join("core-one", "models", spec.Name+".yaml")), Category: spec.Category, Industry: spec.Industry,
-		Files: allFiles, Evidence: evidence, Summary: "Generated as a staged proposal. No source was executed, no external device was actuated, and no changes were merged."}, nil
+		Files: allFiles, Evidence: evidence, Summary: "Generated as a staged proposal. No source was executed, no external device was actuated, and no changes were merged.",
+		CapabilityPlanPath: filepath.ToSlash(filepath.Join("core-one", "inventions", spec.Name, "capability_plan.json")), CapabilityCoverage: capabilityPlan.Coverage}, nil
 }
 
 func (e *Engine) writeGeneratedLibrary(dir string, spec ToolSpec) error {
@@ -264,13 +266,7 @@ func (e *Engine) findLibraryDependencies(spec ToolSpec, maxItems int) []libraryM
 		if json.Unmarshal(raw, &meta) != nil || meta.Name == spec.Name+"_lib" {
 			continue
 		}
-		score := 0
-		if meta.Industry == spec.Industry && spec.Industry != "general" {
-			score += 4
-		}
-		if meta.Category == spec.Category {
-			score += 2
-		}
+		score := scoreLibrary(spec, meta)
 		if score > 0 {
 			candidates = append(candidates, candidate{meta: meta, score: score})
 		}
@@ -289,4 +285,10 @@ func (e *Engine) findLibraryDependencies(spec ToolSpec, maxItems int) []libraryM
 		out = append(out, c.meta)
 	}
 	return out
+}
+
+
+func generatedCapabilityPlanNote(plan CapabilityPlan) string {
+	return fmt.Sprintf("\n\n## Capability graph and requirement plan\n\nA deterministic capability plan is stored in `capability_plan.json`. It records %d requirements, %d native contract matches, %d reusable-library candidates, and %d unresolved capabilities. Native coverage is %.1f%%; this is a planning metric, not a measure of production readiness. Review every acceptance check and unresolved risk before implementation or merge.\n",
+		plan.Coverage.Required, plan.Coverage.NativeContracts, plan.Coverage.LibraryCandidates, plan.Coverage.Unresolved, plan.Coverage.NativeCoverage)
 }
