@@ -46,7 +46,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 	e.queueMu.Lock();defer e.queueMu.Unlock()
 	root:=filepath.Join(e.CoreRoot,"state","queue");pending:=filepath.Join(root,"pending");processing:=filepath.Join(root,"processing")
 	if err:=os.MkdirAll(pending,0700);err!=nil{return err};if err:=os.MkdirAll(processing,0700);err!=nil{return err};if err:=os.MkdirAll(filepath.Join(root,"failed"),0700);err!=nil{return err}
-	firstErr:e.recoverProcessing(root,pending,processing)
+	firstErr:=e.recoverProcessing(root,pending,processing)
 	entries,err:=os.ReadDir(pending);if err!=nil{return err}
 	sort.Slice(entries,func(i,j int)bool{return entries[i].Name()<entries[j].Name()})
 	for _,entry:=range entries {
