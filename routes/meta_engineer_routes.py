@@ -14,6 +14,7 @@ from meta_engineer.sandbox_tester import test_feature
 meta_engineer_bp = Blueprint("meta_engineer_bp", __name__)
 BACKEND_URL = os.getenv("REVELACODE_BACKEND_URL", "https://revelacode-backend.onrender.com").rstrip("/")
 ADMIN_TIMEOUT = 4
+PLATFORM_ADMIN_ROLES = frozenset({"admin", "platform_admin", "super_admin", "revelacode_admin"})
 
 def _authenticated_admin():
     """Require the currently stored RevelaCode administrator role; fail closed."""
@@ -57,7 +58,7 @@ def _authenticated_admin():
         canonical_id = str(body.get("userId") or body.get("user_id") or body.get("id") or "").strip()
         if canonical_id != str(user_id):
             return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
-        if body.get("authorized") is not True or str(body.get("role") or "").strip().lower() != "admin":
+        if body.get("authorized") is not True or str(body.get("role") or "").strip().lower() not in PLATFORM_ADMIN_ROLES:
             return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
         return str(user_id), None
     except requests.RequestException:
