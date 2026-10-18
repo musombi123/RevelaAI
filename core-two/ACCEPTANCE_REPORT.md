@@ -1,5 +1,5 @@
 # USECT-TWO acceptance report
-**Scope:** additive files under `core-two/` only. The branch does not alter any existing ZERO/ONE file.
+**Scope:** Core-Two implementation files are contained in `core-two/`. This branch also wires the cores into the existing RevelaAI host through `ai/core_mesh.py`, `ai/orchestrator.py`, `services/ai_service.py`, `app.py`, and `README.md`. Existing Core-Zero/Core-One engine source files are unchanged.
 ## Repository integration verified from the inspected baseline
 - Core-Zero exists at `core-zero/` with module path `usect-zero.local/core-zero`; Mind imports its `mind.Compile` and `radar.Compare` packages directly.
 - Core-One exists at `core-one/` with module path `revela-genesis.local/core-one`; Mind imports `genesis.Engine` / `genesis.Guardian` and reads `ListInventions()` and library/invention evidence without calling `NewEngine()` (which would create additional Core-One state).
@@ -21,7 +21,7 @@ The test suite in the branch covers:
 9. Authenticated human feedback bound to a staged version/tool/mutation, with ranking changes that cannot bypass Guardian/tests or merge code.
 10. Shared provider environment names and protection against including the provider key in the request body.
 11. Unknown historical timing, BOM cost, merge time, safety score and merge score staying null/unobserved instead of becoming invented zeroes.
-The baseline tracked Git tree did not contain `core-zero/guardian/rules.yaml`, so this remains an integration gap. Existing workflows are path-filtered to Core-Zero/Core-One and may not run for a Core-Two-only change. The draft PR must not be merged until full-repository Go tests, builds, and three-daemon health checks pass.
+The baseline tracked Git tree did not contain `core-zero/guardian/rules.yaml`, so this remains an integration gap. The candidate-validation workflow did run on this pull request and failed its whitespace check on a trailing-space line in this report; that line was removed in commit `5bac3e472db1c0f9910b9ba83035b9f8f4c6ddaf`. A passing rerun for that cleanup has not yet been observed. The draft PR must not be merged until full-repository Go tests, builds, and three-daemon health checks pass.
 ## Sample improvement evidence
 The checked-in `offline_vault` replay is a synthetic 1,800-node / 7,200-edge dependency graph. The recorded run measured the graph-traversal phase only; it is not end-to-end invention latency. Values vary by host/load. No vendor quote was fetched; cost units in the BOM fixture are illustrative, not KES. The source baseline contained zero historical Core-One inventions, so production averages remain `null`.
 ## Security and lifecycle boundaries
