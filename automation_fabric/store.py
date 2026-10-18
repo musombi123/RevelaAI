@@ -120,6 +120,33 @@ def list_scopes(principal: str, *, db_path: str | None = None) -> list[dict[str,
         connection.close()
 
 
+
+def revoke_scopes(
+    principal: str,
+    scopes: list[str],
+    *,
+    db_path: str | None = None,
+) -> list[str]:
+    connection = _connect(db_path)
+    revoked: list[str] = []
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        for scope in scopes:
+            cursor = connection.execute(
+                "DELETE FROM consent_grants WHERE principal=? AND scope=?",
+                (principal, scope),
+            )
+            if cursor.rowcount:
+                revoked.append(scope)
+        connection.commit()
+    finally:
+        connection.close()
+    for scope in revoked:
+        audit_event(principal, "consent_revoked", {"scope": scope}, db_path=db_path)
+    return revoked
+
+
+
 def has_scope(principal: str, scope: str, *, db_path: str | None = None) -> bool:
     connection = _connect(db_path)
     try:
