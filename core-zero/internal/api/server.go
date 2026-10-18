@@ -14,6 +14,7 @@ import (
 
 	"usect-zero.local/core-zero/assemble"
 	"usect-zero.local/core-zero/bridge"
+	"usect-zero.local/core-zero/diagnostics"
 	"usect-zero.local/core-zero/forge"
 	"usect-zero.local/core-zero/heal"
 	"usect-zero.local/core-zero/internal/kernel"
@@ -170,6 +171,25 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if e != nil { replyJSON(w, 409, apiError{"error", "key_revocation_failed", e.Error()}); return }
 		_ = k.Audit("api_key_revoked", "human-operator", key.ID, "revoked", map[string]any{"request_id": key.RequestID})
 		replyJSON(w, 200, map[string]any{"status": "revoked", "key_id": key.ID, "revoked_at": key.RevokedAt})
+		return
+	}
+	if r.URL.Path == "/v1/diagnostics" && r.Method == http.MethodGet {
+		actor, ok := s.requireScope(w, r, "scan:read")
+		if !ok {
+			return
+		}
+		report, err := diagnostics.Run(k)
+		if err != nil {
+			replyJSON(w, 503, apiError{"error", "diagnostics_failed", "Could not complete the bounded operational diagnostics."})
+			return
+		}
+		_ = k.Audit("core_diagnostics", actor, report.Repository.ManifestSHA256, report.Status, map[string]any{
+			"baseline_status": report.Baseline.Status,
+			"added_count": report.Baseline.AddedCount,
+			"modified_count": report.Baseline.ModifiedCount,
+			"missing_count": report.Baseline.MissingCount,
+		})
+		replyJSON(w, 200, report)
 		return
 	}
 	if r.URL.Path == "/v1/scan" && r.Method == http.MethodGet {
