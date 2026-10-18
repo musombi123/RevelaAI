@@ -140,31 +140,54 @@ def test_tool_key_is_not_a_provider_key_or_admin_token(monkeypatch):
 
 
 def test_primary_brain_does_not_invoke_model_when_required_tool_is_unavailable(monkeypatch):
-    import services.ai_service as ai_service
+    import importlib
+    import sys
+    import types
 
-    monkeypatch.setattr(
-        ai_service,
-        "execute_for_message",
-        lambda *args, **kwargs: {
-            "tool": "usect_zero",
-            "name": "usect_zero_scan_repository",
-            "operation": "scan",
-            "status": "unavailable",
-            "executed": False,
-            "fallback": False,
-            "error_code": "usect_zero_disabled",
-        },
+    existing_service = sys.modules.pop("services.ai_service", None)
+    stubs = {
+        "ai.ai_client": types.ModuleType("ai.ai_client"),
+        "ai.system_prompt": types.ModuleType("ai.system_prompt"),
+        "ai.orchestrator": types.ModuleType("ai.orchestrator"),
+    }
+    stubs["ai.ai_client"].ask_hf = lambda **kwargs: pytest.fail(
+        "must not silently fall back to a model answer"
     )
-    monkeypatch.setattr(
-        ai_service,
-        "ask_hf",
-        lambda **kwargs: pytest.fail("must not silently fall back to a model answer"),
-    )
+    stubs["ai.system_prompt"].SYSTEM_PROMPT = "test system prompt"
 
-    result = ai_service.process_message(
-        "Scan this repository and diagnose its structure.",
-        intent="programming",
-    )
+    class StubOrchestrator:
+        def process_prompt(self, **kwargs):
+            pytest.fail("unavailable required tools should return before orchestration")
+
+    stubs["ai.orchestrator"].Orchestrator = StubOrchestrator
+
+    try:
+        with monkeypatch.context() as isolated:
+            for name, module in stubs.items():
+                isolated.setitem(sys.modules, name, module)
+            ai_service = importlib.import_module("services.ai_service")
+            isolated.setattr(
+                ai_service,
+                "execute_for_message",
+                lambda *args, **kwargs: {
+                    "tool": "usect_zero",
+                    "name": "usect_zero_scan_repository",
+                    "operation": "scan",
+                    "status": "unavailable",
+                    "executed": False,
+                    "fallback": False,
+                    "error_code": "usect_zero_disabled",
+                },
+            )
+
+            result = ai_service.process_message(
+                "Scan this repository and diagnose its structure.",
+                intent="programming",
+            )
+    finally:
+        sys.modules.pop("services.ai_service", None)
+        if existing_service is not None:
+            sys.modules["services.ai_service"] = existing_service
 
     assert result["error_code"] == "engineering_tool_unavailable"
     assert result["capability"] == "engineering_tool"
