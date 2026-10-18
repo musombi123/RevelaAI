@@ -32,17 +32,38 @@ type Connection struct {
 	Notes      string `json:"notes"`
 }
 
+type BoardProfile struct {
+	ID                     string `json:"id"`
+	Family                 string `json:"family"`
+	LogicVoltageMV         int    `json:"logic_voltage_mv"`
+	TypicalInputVoltageMV  int    `json:"typical_input_voltage_mv"`
+	PinMapStatus           string `json:"pin_map_status"`
+	Notes                  string `json:"notes"`
+	HardwareVerified       bool   `json:"hardware_verified"`
+}
+
+type ElectricalRequirements struct {
+	SupplyMinMV                  int    `json:"supply_min_mv,omitempty"`
+	SupplyMaxMV                  int    `json:"supply_max_mv,omitempty"`
+	LogicMinMV                   int    `json:"logic_min_mv,omitempty"`
+	LogicMaxMV                   int    `json:"logic_max_mv,omitempty"`
+	DatasheetReference           string `json:"datasheet_reference,omitempty"`
+	ManufacturerDatasheetReviewed bool   `json:"manufacturer_datasheet_reviewed"`
+}
+
 type Template struct {
-	ID            string       `json:"id"`
-	Target        string       `json:"target"`
-	Version       string       `json:"version"`
-	Title         string       `json:"title"`
-	Description   string       `json:"description"`
-	WiringPartID  string       `json:"wiring_part_id"`
-	Parts         []Part       `json:"parts"`
-	Connections   []Connection `json:"connections"`
-	SafetyNotes   []string     `json:"safety_notes"`
-	ReviewOnly    bool         `json:"review_only"`
+	ID                    string                 `json:"id"`
+	Target                string                 `json:"target"`
+	Version               string                 `json:"version"`
+	Title                 string                 `json:"title"`
+	Description           string                 `json:"description"`
+	BoardProfileID        string                 `json:"board_profile_id"`
+	Electrical            ElectricalRequirements `json:"electrical_requirements"`
+	WiringPartID          string                 `json:"wiring_part_id"`
+	Parts                 []Part                 `json:"parts"`
+	Connections           []Connection           `json:"connections"`
+	SafetyNotes           []string               `json:"safety_notes"`
+	ReviewOnly            bool                   `json:"review_only"`
 }
 
 type ValidationCheck struct {
@@ -52,34 +73,38 @@ type ValidationCheck struct {
 }
 
 type Validation struct {
-	Status string           `json:"status"`
-	Valid  bool             `json:"valid"`
-	Checks []ValidationCheck `json:"checks"`
+	Status                   string            `json:"status"`
+	Valid                    bool              `json:"valid"`
+	ElectricalReviewRequired bool              `json:"electrical_review_required"`
+	Checks                   []ValidationCheck `json:"checks"`
 }
 
 type TemplateSummary struct {
-	ID                 string `json:"id"`
-	Target             string `json:"target"`
-	Version            string `json:"version"`
-	Title              string `json:"title"`
-	PartCount          int    `json:"part_count"`
-	ConnectionCount    int    `json:"connection_count"`
-	ValidationStatus   string `json:"validation_status"`
-	HumanReviewRequired bool   `json:"human_review_required"`
+	ID                      string `json:"id"`
+	Target                  string `json:"target"`
+	Version                 string `json:"version"`
+	Title                   string `json:"title"`
+	BoardProfileID          string `json:"board_profile_id"`
+	PartCount               int    `json:"part_count"`
+	ConnectionCount         int    `json:"connection_count"`
+	ValidationStatus        string `json:"validation_status"`
+	ElectricalReviewRequired bool  `json:"electrical_review_required"`
+	HumanReviewRequired     bool   `json:"human_review_required"`
 }
 
 type Result struct {
-	Target              string       `json:"target"`
-	TemplateID          string       `json:"template_id,omitempty"`
-	TemplateVersion     string       `json:"template_version,omitempty"`
-	Status              string       `json:"status"`
-	Artifacts           []string     `json:"artifacts"`
-	Parts               []Part       `json:"parts"`
-	Connections         []Connection `json:"connections"`
-	Validation          Validation   `json:"validation"`
-	Cost                string       `json:"cost"`
-	HumanReviewRequired bool         `json:"human_review_required"`
-	SafetyNotes         []string     `json:"safety_notes"`
+	Target                  string       `json:"target"`
+	TemplateID              string       `json:"template_id,omitempty"`
+	TemplateVersion         string       `json:"template_version,omitempty"`
+	BoardProfileID          string       `json:"board_profile_id,omitempty"`
+	Status                  string       `json:"status"`
+	Artifacts               []string     `json:"artifacts"`
+	Parts                   []Part       `json:"parts"`
+	Connections             []Connection `json:"connections"`
+	Validation              Validation   `json:"validation"`
+	Cost                    string       `json:"cost"`
+	HumanReviewRequired     bool         `json:"human_review_required"`
+	SafetyNotes             []string     `json:"safety_notes"`
 }
 
 var (
@@ -88,11 +113,33 @@ var (
 	colorPattern   = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 )
 
+var boardProfiles = []BoardProfile{
+	{
+		ID: "esp32-s3-generic",
+		Family: "ESP32-S3 development-board family",
+		LogicVoltageMV: 3300,
+		TypicalInputVoltageMV: 5000,
+		PinMapStatus: "exact_board_revision_required",
+		Notes: "Generic family reference only. Input paths, regulators, pin availability and connector layouts vary by board; use the exact board manufacturer's documentation.",
+		HardwareVerified: false,
+	},
+	{
+		ID: "rp2040-pico-generic",
+		Family: "RP2040 / Pico-style development-board family",
+		LogicVoltageMV: 3300,
+		TypicalInputVoltageMV: 5000,
+		PinMapStatus: "exact_board_revision_required",
+		Notes: "Generic family reference only. Confirm the specific board revision, input path, regulator, GPIO assignment and manufacturer documentation before connecting hardware.",
+		HardwareVerified: false,
+	},
+}
+
 var registry = []Template{
 	{
 		ID: "esp32-sensor", Target: "esp32-sensor", Version: "1.0.0",
 		Title: "ESP32-S3 + BME280 I2C sensor (review draft)",
 		Description: "A generic offline example parts list and illustrative I2C wiring diagram. Exact board pin assignments and electrical compatibility are not verified.",
+		BoardProfileID: "esp32-s3-generic",
 		WiringPartID: "jumper-wire",
 		Parts: []Part{
 			{ID: "esp32-board", Name: "ESP32-S3 development board", Quantity: 1, Category: "controller", Notes: "Confirm exact board, USB connector, regulator and selected pin map."},
@@ -123,8 +170,11 @@ func ListTemplates() []TemplateSummary {
 		validation := ValidateTemplate(t)
 		out = append(out, TemplateSummary{
 			ID: t.ID, Target: t.Target, Version: t.Version, Title: t.Title,
+			BoardProfileID: t.BoardProfileID,
 			PartCount: len(t.Parts), ConnectionCount: len(t.Connections),
-			ValidationStatus: validation.Status, HumanReviewRequired: true,
+			ValidationStatus: validation.Status,
+			ElectricalReviewRequired: validation.ElectricalReviewRequired,
+			HumanReviewRequired: true,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -136,14 +186,31 @@ func ListTemplates() []TemplateSummary {
 	return out
 }
 
+// ListBoardProfiles returns safe reference profiles. They are not manufacturer-certified pin maps.
+func ListBoardProfiles() []BoardProfile {
+	out := append([]BoardProfile{}, boardProfiles...)
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func resolveBoardProfile(id string) (BoardProfile, bool) {
+	for _, profile := range boardProfiles {
+		if profile.ID == id {
+			return profile, true
+		}
+	}
+	return BoardProfile{}, false
+}
+
 // ValidateTemplate checks identifiers, part references, quantities, wiring endpoints,
 // and the consistency between the wiring plan and the BOM's wire quantity.
 func ValidateTemplate(t Template) Validation {
-	checks := make([]ValidationCheck, 0, 7)
+	checks := make([]ValidationCheck, 0, 9)
 	add := func(name, status, detail string) {
 		checks = append(checks, ValidationCheck{Name: name, Status: status, Detail: detail})
 	}
 	valid := true
+	electricalReviewRequired := true
 	fail := func(name, detail string) {
 		valid = false
 		add(name, "failed", detail)
@@ -157,6 +224,27 @@ func ValidateTemplate(t Template) Validation {
 		add("review_only_policy", "passed", "Template is explicitly marked review-only.")
 	} else {
 		fail("review_only_policy", "Template must be marked review-only.")
+	}
+
+	profile, profileFound := resolveBoardProfile(t.BoardProfileID)
+	if !idPattern.MatchString(t.BoardProfileID) || !profileFound {
+		fail("board_profile", "Template must refer to a registered board profile. Profiles are family-level references, not verified pin maps.")
+	} else {
+		add("board_profile", "passed", fmt.Sprintf("Registered profile %s declares nominal logic voltage %d mV; exact board revision and pin map remain unverified.", profile.ID, profile.LogicVoltageMV))
+	}
+
+	e := t.Electrical
+	if e.SupplyMinMV == 0 && e.SupplyMaxMV == 0 && e.LogicMinMV == 0 && e.LogicMaxMV == 0 && strings.TrimSpace(e.DatasheetReference) == "" && !e.ManufacturerDatasheetReviewed {
+		add("electrical_compatibility", "review_required", "Exact breakout supply/logic limits and manufacturer datasheet evidence are not declared. Verify the chosen breakout, I2C pull-ups, level shifting and pin map before wiring.")
+	} else if e.SupplyMinMV <= 0 || e.SupplyMaxMV < e.SupplyMinMV || e.LogicMinMV <= 0 || e.LogicMaxMV < e.LogicMinMV {
+		fail("electrical_compatibility", "Declared supply and logic voltage ranges must be positive and ordered min-to-max.")
+	} else if !profileFound || profile.LogicVoltageMV < e.SupplyMinMV || profile.LogicVoltageMV > e.SupplyMaxMV || profile.LogicVoltageMV < e.LogicMinMV || profile.LogicVoltageMV > e.LogicMaxMV {
+		fail("electrical_compatibility", "The board's nominal logic/supply level falls outside the declared sensor limits; do not generate this template as a compatible design.")
+	} else if !e.ManufacturerDatasheetReviewed || strings.TrimSpace(e.DatasheetReference) == "" {
+		add("electrical_compatibility", "review_required", "Declared ranges overlap the board profile, but manufacturer datasheet review and a source reference are missing.")
+	} else {
+		add("electrical_compatibility", "passed", "Declared voltage ranges overlap the board profile and a datasheet reference is recorded. This is a metadata check, not hardware certification.")
+		electricalReviewRequired = false
 	}
 
 	parts := make(map[string]Part, len(t.Parts))
@@ -227,7 +315,7 @@ func ValidateTemplate(t Template) Validation {
 	if !valid {
 		status = "invalid_template"
 	}
-	return Validation{Status: status, Valid: valid, Checks: checks}
+	return Validation{Status: status, Valid: valid, ElectricalReviewRequired: electricalReviewRequired, Checks: checks}
 }
 
 // Generate preserves the earlier API and uses the registered target's current version.
@@ -263,6 +351,8 @@ func GenerateVersion(target, version, outDir string) (Result, error) {
 		"template_id": template.ID,
 		"template_version": template.Version,
 		"target": template.Target,
+		"board_profile_id": template.BoardProfileID,
+		"electrical_review_required": validation.ElectricalReviewRequired,
 		"status": "review_draft_not_hardware_verified",
 		"validation": validation,
 		"template": json.RawMessage(partsJSON),
@@ -317,6 +407,7 @@ func GenerateVersion(target, version, outDir string) (Result, error) {
 	)
 	return Result{
 		Target: name, TemplateID: template.ID, TemplateVersion: template.Version,
+		BoardProfileID: template.BoardProfileID,
 		Status: "artifacts_generated_pending_review", Artifacts: names,
 		Parts: append([]Part{}, template.Parts...), Connections: append([]Connection{}, template.Connections...),
 		Validation: validation, Cost: "unverified; local supplier quote required",

@@ -92,3 +92,35 @@ def test_assembly_request_parses_optional_template_version():
 
 def test_assembly_catalog_tool_is_included_in_prompt():
     assert "usect_zero_list_assembly_templates" in brain_tools.tool_catalog_prompt()
+
+
+def test_board_profile_catalog_selects_and_dispatches_read_only_tool(monkeypatch):
+    assert brain_tools.select_tool_for_message("Show supported board profiles") == ("assemble_boards", {})
+    contract = next(item for item in brain_tools.TOOL_CATALOG if item["operation"] == "assemble_boards")
+    assert contract["scope"] == "scan:read"
+    assert contract["method"] == "GET"
+    assert contract["path"] == "/v1/assemble/boards"
+
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    monkeypatch.setenv("USECT_ZERO_BRAIN_API_KEY", "scoped-brain-key")
+    observed = {}
+
+    def fake_core(method, path, **kwargs):
+        observed.update(method=method, path=path, **kwargs)
+        return client.CoreReply(200, {
+            "status": "ok",
+            "schema_version": "usect-zero.board-profiles.v1",
+            "boards": [{"id": "esp32-s3-generic", "hardware_verified": False}],
+            "count": 1,
+            "hardware_verified": False,
+            "human_review_required": True,
+        })
+
+    monkeypatch.setattr(brain_tools, "request_core", fake_core)
+    result = brain_tools.execute_tool("assemble_boards")
+    assert result["status"] == "success"
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/v1/assemble/boards"
+    assert observed["api_key"] == "scoped-brain-key"
+    assert observed["admin"] is False
+    assert brain_tools.tool_catalog_prompt().find("usect_zero_list_assembly_board_profiles") >= 0

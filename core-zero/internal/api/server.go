@@ -227,6 +227,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		replyJSON(w, 200, p)
 		return
 	}
+	if r.URL.Path == "/v1/assemble/boards" && r.Method == http.MethodGet {
+		_, ok := s.requireScope(w, r, "scan:read")
+		if !ok {
+			return
+		}
+		profiles := assemble.ListBoardProfiles()
+		replyJSON(w, 200, map[string]any{
+			"status": "ok",
+			"schema_version": "usect-zero.board-profiles.v1",
+			"boards": profiles,
+			"count": len(profiles),
+			"hardware_verified": false,
+			"human_review_required": true,
+		})
+		return
+	}
 	if r.URL.Path == "/v1/assemble/templates" && r.Method == http.MethodGet {
 		actor, ok := s.requireScope(w, r, "scan:read")
 		if !ok {
