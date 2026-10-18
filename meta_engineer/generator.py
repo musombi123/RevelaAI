@@ -38,7 +38,7 @@ def _normalize_request(spec: str, target: str | None) -> tuple[str, str]:
             target = wrapped.group(1)
         clean = wrapped.group(2).strip()
 
-    selected = str(target or "backend").strip().lower()
+    selected = str("backend" if target is None else target).strip().lower()
     if selected not in TARGETS:
         raise ValueError("target must be one of: backend, frontend, database, fullstack")
     if not clean or len(clean) > 1000:
@@ -65,7 +65,7 @@ def _backend_artifact(spec: str, slug: str, stamp: str) -> dict[str, str]:
         "from flask import Blueprint, jsonify, request\n\n"
         "# AUTO-GENERATED " + stamp + " — proposal only; not registered in the live application.\n"
         "router = Blueprint(" + repr(slug) + ", __name__)\n\n"
-        "@router." + method + "(" + repr(endpoint) + ")\n"
+        "@router." + method + "(" + json.dumps(endpoint) + ")\n"
         "def proposed_feature():\n"
         '    """Safe scaffold. Replace the proposal payload with reviewed feature logic."""\n'
         '    if request.method in {"POST", "PUT", "PATCH"}:\n'
