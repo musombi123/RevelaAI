@@ -34,9 +34,8 @@ _RECENT_ACTIVITY: deque[dict[str, Any]] = deque(maxlen=50)
 _ACTIVITY_LOCK = Lock()
 _ACTIVITY_SUMMARY_FIELDS = (
     "file_count", "language_counts", "git_head", "manifest_sha256",
-    "read_only", "evidence_note", "target", "proposal_id", "id",
-    "status", "compiled", "artifact_count", "source_count", "summary",
-    "warnings", "errors",
+    "read_only", "target", "proposal_id", "id", "status",
+    "compiled", "artifact_count", "source_count",
 )
 
 # Public, model-readable tool contract. The runtime dispatcher below retains
