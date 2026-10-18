@@ -65,29 +65,22 @@ func TestOfflineResearchHonorsCanceledContext(t *testing.T) {
 
 func TestModelCannotDowngradeHardwareClassification(t *testing.T) {
 	e := newTestEngine(t)
-	base := deriveSpec("CCTV")
-	candidate := base
+	candidate := deriveSpec("CCTV")
 	candidate.Category = "software"
 	candidate.Industry = "general"
 	candidate.NeedsHardwareGuide = false
 	candidate.Name = "replacement"
 	candidate.Title = "Authorized camera system"
 	candidate.Purpose = "A privacy-aware, consent-based camera management proposal."
+	e.SetModel(fakeModel{output: candidate})
 	inv, err := e.Invent(context.Background(), "CCTV")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = inv
-	e2 := newTestEngine(t)
-	e2.SetModel(fakeModel{output: candidate})
-	inv, err = e2.Invent(context.Background(), "CCTV")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if inv.Name != "cctv_smart" || inv.Category != "hardware" {
 		t.Fatalf("model changed deterministic identity/classification: %+v", inv)
 	}
-	if _, err := os.Stat(filepath.Join(e2.CoreRoot, "inventions", inv.Name, "hardware_guide.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.CoreRoot, "inventions", inv.Name, "hardware_guide.md")); err != nil {
 		t.Fatalf("model incorrectly removed required hardware guide: %v", err)
 	}
 }
@@ -181,4 +174,72 @@ func TestRemoteMutationRequiresConfiguredToken(t *testing.T) {
 	if w.Code != 401 || !strings.Contains(w.Body.String(), "genesis_auth_required") {
 		t.Fatalf("unauthorized remote mutation was not denied: %d %s", w.Code, w.Body.String())
 	}
+}
+
+
+func TestGuardianPolicyFailsClosedWhenMissing(t *testing.T) {
+	e := newTestEngine(t)
+	rules := filepath.Join(e.CoreRoot, "guardian", "rules.yaml")
+	if err := os.Remove(rules); err != nil {
+		t.Fatal(err)
+	}
+	decision := e.Guardian.Check("offline file vault")
+	if decision.Allowed || decision.Code != "guardian_policy_unavailable" {
+		t.Fatalf("missing policy did not fail closed: %+v", decision)
+	}
+	if _, err := e.Invent(context.Background(), "offline file vault"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("invention should be blocked when policy is unavailable, got %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(e.CoreRoot, "inventions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".staging-") {
+			t.Fatalf("missing Guardian policy allowed an invention directory: %s", entry.Name())
+		}
+	}
+}
+
+func TestOperationalStatusReportsCoreSafetyState(t *testing.T) {
+	e := newTestEngine(t)
+	item, err := e.Enqueue("offline file vault", "status-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := e.OperationalStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status["status"] != "ok" || status["generated_code_execution"] != false || status["automatic_merge"] != false {
+		t.Fatalf("unexpected status snapshot: %#v", status)
+	}
+	queue, ok := status["queue"].(map[string]int)
+	if !ok || queue["pending"] != 1 {
+		t.Fatalf("pending queue count incorrect for %s: %#v", item.ID, status["queue"])
+	}
+}
+
+func TestCanceledQueueWorkReturnsToPending(t *testing.T) {
+	e := newTestEngine(t)
+	e.SetResearcher(cancelingResearcher{})
+	item, err := e.Enqueue("offline file vault", "cancel-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = e.ProcessQueue(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled queue cycle, got %v", err)
+	}
+	pending := filepath.Join(e.CoreRoot, "state", "queue", "pending", item.ID+".json")
+	if _, err := os.Stat(pending); err != nil {
+		t.Fatalf("canceled work was not retained for retry: %v", err)
+	}
+}
+
+type cancelingResearcher struct{}
+func (cancelingResearcher) Research(ctx context.Context, _ string) (ResearchEvidence, error) {
+	return ResearchEvidence{}, ctx.Err()
 }
