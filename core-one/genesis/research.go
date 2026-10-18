@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -45,12 +46,24 @@ func (r *WebResearcher) Research(ctx context.Context, demand string) (ResearchEv
 	}
 	e.Sources = append(e.Sources, links...)
 	if !r.Offline {
+		// Independent public sources run in parallel under one bounded deadline. Results are
+		// joined in a stable order so evidence bundles remain reproducible.
 		researchCtx, cancel := context.WithTimeout(ctx, 13*time.Second)
 		defer cancel()
-		e.Sources = append(e.Sources, r.github(researchCtx, q)...)
-		e.Sources = append(e.Sources, r.arxiv(researchCtx, q)...)
-		e.Sources = append(e.Sources, r.nvd(researchCtx, q)...)
-		e.Sources = append(e.Sources, r.kenyaRSS(researchCtx, q)...)
+		collectors := []func(context.Context, string) []ResearchSource{r.github, r.arxiv, r.nvd, r.kenyaRSS}
+		results := make([][]ResearchSource, len(collectors))
+		var wg sync.WaitGroup
+		for i, collect := range collectors {
+			wg.Add(1)
+			go func(index int, fn func(context.Context, string) []ResearchSource) {
+				defer wg.Done()
+				results[index] = fn(researchCtx, q)
+			}(i, collect)
+		}
+		wg.Wait()
+		for _, records := range results {
+			e.Sources = append(e.Sources, records...)
+		}
 	}
 	usable := 0
 	for _, s := range e.Sources {
