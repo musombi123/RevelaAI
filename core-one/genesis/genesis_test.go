@@ -22,7 +22,7 @@ func newTestEngine(t *testing.T) *Engine { t.Helper(); t.Setenv("GENESIS_OFFLINE
 func TestStandaloneOfflineInventionProducesFullProposal(t *testing.T) {
 	e:=newTestEngine(t); inv,err:=e.Invent(context.Background(),"Create tool: offline file vault"); if err!=nil{t.Fatal(err)}
 	if inv.Name!="offline_file_vault"{t.Fatalf("unexpected name %q",inv.Name)}; if inv.Status!="await_merge"{t.Fatalf("unexpected status %q",inv.Status)}
-	for _,p:=range []string{"code.go","library.go","openapi.yaml","README.md","hardware_guide.md","test.go","evidence.json","AWAIT_MERGE.md","artifact_hashes.json","sdk/go/client.go","sdk/python/client.py","sdk/js/client.js"}{if _,err:=os.Stat(filepath.Join(e.CoreRoot,"inventions",inv.Name,p));err!=nil{t.Errorf("missing generated artifact %s: %v",p,err)}}
+	for _,p:=range []string{"code.go","library.go","openapi.yaml","README.md","hardware_guide.md","test.go","evidence.json","capability_plan.json","AWAIT_MERGE.md","artifact_hashes.json","sdk/go/client.go","sdk/python/client.py","sdk/js/client.js"}{if _,err:=os.Stat(filepath.Join(e.CoreRoot,"inventions",inv.Name,p));err!=nil{t.Errorf("missing generated artifact %s: %v",p,err)}}
 	for _,p:=range []string{filepath.Join(e.CoreRoot,"libraries","created","offline_file_vault_lib","driver.go"),filepath.Join(e.CoreRoot,"models","offline_file_vault.yaml"),filepath.Join(e.CoreRoot,"research",time.Now().UTC().Format("2006-01-02")+".json")}{if _,err:=os.Stat(p);err!=nil{t.Errorf("missing pipeline output %s: %v",p,err)}}
 	data,err:=os.ReadFile(filepath.Join(e.CoreRoot,"inventions",inv.Name,"evidence.json"));if err!=nil{t.Fatal(err)};var record map[string]any;if err:=json.Unmarshal(data,&record);err!=nil{t.Fatal(err)};if record["status"]!="await_merge"{t.Fatalf("proposal should wait for merge: %v",record["status"])}
 }
@@ -243,4 +243,117 @@ type cancelingResearcher struct { cancel context.CancelFunc }
 func (r cancelingResearcher) Research(ctx context.Context, _ string) (ResearchEvidence, error) {
 	r.cancel()
 	return ResearchEvidence{}, ctx.Err()
+}
+
+
+func TestCapabilityPlannerBuildsGraphAndFlagsUnresolvedRequirements(t *testing.T) {
+	e := newTestEngine(t)
+	spec := deriveSpec("Create tool: offline payment controller with motor")
+	plan, err := BuildCapabilityPlan(spec, ResearchEvidence{
+		Mode: "offline",
+		Sources: []ResearchSource{{Name: "fixture", URL: "https://example.org/spec", Status: "retrieved", Title: "Safe engineering reference"}},
+	}, e.CoreRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Invention != spec.Name || !plan.HumanApprovalNeeded || plan.ExecutionPolicy != "proposal_only" {
+		t.Fatalf("unexpected capability plan envelope: %+v", plan)
+	}
+	required := map[string]bool{}
+	for _, req := range plan.Requirements {
+		required[req.Capability] = true
+	}
+	for _, want := range []string{
+		"offline operation",
+		"transaction idempotency and reconciliation",
+		"hardware safety and fail-safe control",
+		"hardware integration and datasheet verification",
+	} {
+		if !required[want] {
+			t.Errorf("planner omitted inferred requirement %q; requirements=%v", want, required)
+		}
+	}
+	if plan.Coverage.Required != len(plan.Requirements) || plan.Coverage.NativeCoverage < 0 || plan.Coverage.NativeCoverage > 100 {
+		t.Fatalf("invalid coverage totals: %+v", plan.Coverage)
+	}
+	if plan.Coverage.Unresolved == 0 || plan.Status != "await_merge_with_implementation_gaps" {
+		t.Fatalf("domain-specific gaps must be explicitly reported: status=%s coverage=%+v", plan.Status, plan.Coverage)
+	}
+	nodes := map[string]bool{}
+	for _, node := range plan.Nodes {
+		if nodes[node.ID] {
+			t.Errorf("duplicate capability graph node ID %q", node.ID)
+		}
+		nodes[node.ID] = true
+	}
+	if len(plan.Edges) == 0 || len(plan.AcceptanceChecks) == 0 || len(plan.UnresolvedRisks) == 0 {
+		t.Fatalf("plan should include graph edges, acceptance checks and risks: %+v", plan)
+	}
+}
+
+func TestCapabilityPlannerFindsReusableLibrariesButDoesNotTrustThem(t *testing.T) {
+	e := newTestEngine(t)
+	libDir := filepath.Join(e.CoreRoot, "libraries", "created", "shared_queue_lib")
+	if err := os.MkdirAll(libDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	meta := libraryMetadata{
+		Name: "shared_queue_lib",
+		Category: "software",
+		Industry: "general",
+		Capabilities: []string{"validate structured input", "offline operation", "durable queue recovery", "record traceable evidence"},
+		Dependencies: []string{},
+	}
+	if err := writeJSON(filepath.Join(libDir, "library.json"), meta); err != nil {
+		t.Fatal(err)
+	}
+	spec := deriveSpec("Create tool: offline durable queue storage")
+	plan, err := BuildCapabilityPlan(spec, ResearchEvidence{Mode: "offline"}, e.CoreRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCandidate := false
+	for _, candidate := range plan.ReusableCandidates {
+		if candidate.Name == meta.Name {
+			foundCandidate = candidate.Status == "candidate_unverified"
+		}
+	}
+	if !foundCandidate {
+		t.Fatalf("expected shared queue lib to be surfaced as an unverified candidate: %+v", plan.ReusableCandidates)
+	}
+	foundRequirement := false
+	for _, req := range plan.Requirements {
+		if req.Capability == "durable queue recovery" {
+			foundRequirement = true
+			if req.Status != "reuse_candidate_unverified" {
+				t.Fatalf("candidate metadata must not be reported as verified coverage: %+v", req)
+			}
+		}
+	}
+	if !foundRequirement {
+		t.Fatal("queue demand did not create a durable-queue requirement")
+	}
+}
+
+func TestCapabilityPlanIsStagedAndExposedByHTTP(t *testing.T) {
+	t.Setenv("GENESIS_ADMIN_TOKEN", "")
+	e := newTestEngine(t)
+	inv, err := e.Invent(context.Background(), "Create tool: offline file vault")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.CapabilityPlanPath == "" || inv.CapabilityCoverage.Required == 0 {
+		t.Fatalf("invention response omitted capability plan summary: %+v", inv)
+	}
+	planPath := filepath.Join(e.CoreRoot, "inventions", inv.Name, "capability_plan.json")
+	if _, err := os.Stat(planPath); err != nil {
+		t.Fatalf("capability plan artifact missing: %v", err)
+	}
+	r := httptest.NewRequest("GET", "/v1/genesis/tools/"+inv.Name+"/capability_plan", nil)
+	r.RemoteAddr = "127.0.0.1:1234"
+	w := httptest.NewRecorder()
+	(&Server{Engine: e}).ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "\"capability_plan\"") {
+		t.Fatalf("capability plan endpoint failed: %d %s", w.Code, w.Body.String())
+	}
 }
