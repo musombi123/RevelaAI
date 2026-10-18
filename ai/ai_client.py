@@ -98,10 +98,13 @@ Existing public APIs are preserved:
 
 from __future__ import annotations
 
+import copy
 import io
+import json
 import os
 import time
 import wave
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import quote
 
@@ -1266,6 +1269,8 @@ def _request_gemini(
     *,
     model: str,
     messages: list[dict[str, str]],
+    tool_declarations: list[dict[str, Any]] | None = None,
+    contents_override: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
 
     if not GEMINI_ENABLED:
@@ -1298,6 +1303,15 @@ def _request_gemini(
         )
     )
 
+    if contents_override is not None:
+        if not isinstance(contents_override, list):
+            raise AIClientError(
+                "Gemini tool conversation is invalid.",
+                provider="gemini",
+                error_code="gemini_invalid_tool_contents",
+            )
+        contents = copy.deepcopy(contents_override)
+
     if not contents:
 
         raise AIClientError(
@@ -1327,6 +1341,18 @@ def _request_gemini(
                     "text": system_instruction,
                 }
             ]
+        }
+
+    if tool_declarations:
+        payload["tools"] = [
+            {
+                "functionDeclarations": tool_declarations,
+            }
+        ]
+        payload["toolConfig"] = {
+            "functionCallingConfig": {
+                "mode": "AUTO",
+            }
         }
 
     encoded_model = quote(
@@ -1437,6 +1463,429 @@ def _request_gemini(
         )
 
     return data
+
+
+
+# =========================================================
+# NATIVE GEMINI TOOL CALLING
+# =========================================================
+
+_MAX_GEMINI_TOOL_DECLARATIONS = 32
+_MAX_GEMINI_TOOL_ROUNDS = 4
+_MAX_GEMINI_TOOL_CALLS = 8
+_MAX_GEMINI_TOOL_ARGS_BYTES = 16_000
+_MAX_GEMINI_TOOL_RESULT_BYTES = 12_000
+_GEMINI_TOOL_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+
+
+def _validate_gemini_tool_contract(
+    declarations: list[dict[str, Any]],
+    executor: Mapping[str, Callable[[dict[str, Any]], Any]],
+) -> list[dict[str, Any]]:
+    """Validate that each advertised tool maps to a trusted local handler."""
+    if not isinstance(declarations, list) or not declarations:
+        raise AIClientError(
+            "No native tool declarations were provided.",
+            provider="gemini",
+            error_code="gemini_tools_missing",
+        )
+
+    if len(declarations) > _MAX_GEMINI_TOOL_DECLARATIONS:
+        raise AIClientError(
+            "Too many native tools were registered.",
+            provider="gemini",
+            error_code="gemini_tool_count_exceeded",
+        )
+
+    if not isinstance(executor, Mapping):
+        raise AIClientError(
+            "The native tool executor is invalid.",
+            provider="gemini",
+            error_code="gemini_tool_executor_invalid",
+        )
+
+    validated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for item in declarations:
+        if not isinstance(item, dict):
+            raise AIClientError(
+                "A native tool declaration is invalid.",
+                provider="gemini",
+                error_code="gemini_tool_declaration_invalid",
+            )
+
+        name = item.get("name")
+        description = item.get("description")
+        parameters = item.get("parameters")
+
+        if (
+            not isinstance(name, str)
+            or not _GEMINI_TOOL_NAME_RE.fullmatch(name)
+            or name in seen
+        ):
+            raise AIClientError(
+                "A native tool name is invalid or duplicated.",
+                provider="gemini",
+                error_code="gemini_tool_name_invalid",
+            )
+
+        if not isinstance(description, str) or not description.strip():
+            raise AIClientError(
+                "A native tool description is missing.",
+                provider="gemini",
+                error_code="gemini_tool_description_missing",
+            )
+
+        if (
+            not isinstance(parameters, dict)
+            or parameters.get("type") != "object"
+            or not isinstance(parameters.get("properties", {}), dict)
+        ):
+            raise AIClientError(
+                "A native tool parameter schema is invalid.",
+                provider="gemini",
+                error_code="gemini_tool_schema_invalid",
+            )
+
+        if name not in executor or not callable(executor[name]):
+            raise AIClientError(
+                "A declared tool has no trusted local handler.",
+                provider="gemini",
+                error_code="gemini_tool_handler_missing",
+            )
+
+        try:
+            schema_size = len(
+                json.dumps(parameters, ensure_ascii=False).encode("utf-8")
+            )
+        except (TypeError, ValueError):
+            schema_size = _MAX_GEMINI_TOOL_ARGS_BYTES + 1
+
+        if schema_size > _MAX_GEMINI_TOOL_ARGS_BYTES:
+            raise AIClientError(
+                "A native tool schema is too large.",
+                provider="gemini",
+                error_code="gemini_tool_schema_too_large",
+            )
+
+        validated.append({
+            "name": name,
+            "description": description.strip()[:2_000],
+            "parameters": copy.deepcopy(parameters),
+        })
+        seen.add(name)
+
+    return validated
+
+
+def _bound_tool_result(value: Any) -> Any:
+    """Convert a handler result to bounded JSON before returning it to Gemini."""
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
+        )
+        encoded_bytes = encoded.encode("utf-8")
+    except (TypeError, ValueError, OverflowError):
+        return {
+            "ok": False,
+            "error": "tool_result_serialization_failed",
+        }
+
+    if len(encoded_bytes) > _MAX_GEMINI_TOOL_RESULT_BYTES:
+        return {
+            "ok": False,
+            "error": "tool_result_too_large",
+            "message": "The tool result exceeded the response size limit.",
+        }
+
+    try:
+        return json.loads(encoded)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "tool_result_serialization_failed",
+        }
+
+
+def _ask_gemini_with_tools(
+    *,
+    text: str,
+    system_prompt: str = "",
+    session_id: str | None = None,
+    context: list[dict[str, Any]] | None = None,
+    tool_declarations: list[dict[str, Any]],
+    tool_executor: Mapping[str, Callable[[dict[str, Any]], Any]],
+    max_tool_rounds: int = _MAX_GEMINI_TOOL_ROUNDS,
+    max_tool_calls: int = _MAX_GEMINI_TOOL_CALLS,
+) -> dict[str, Any]:
+    """
+    Run native Gemini function calling with a trusted server-side executor.
+
+    Model output selects among registered names only. Function arguments are
+    bounded JSON objects. A failed request after a tool round has started is
+    marked so callers do not silently replay the same operation through a
+    different model.
+    """
+    declarations = _validate_gemini_tool_contract(
+        tool_declarations,
+        tool_executor,
+    )
+
+    rounds_limit = max(1, min(int(max_tool_rounds), _MAX_GEMINI_TOOL_ROUNDS))
+    calls_limit = max(1, min(int(max_tool_calls), _MAX_GEMINI_TOOL_CALLS))
+
+    messages = build_messages(
+        text=str(text),
+        system_prompt=str(system_prompt or ""),
+        context=context,
+    )
+
+    _system_instruction, initial_contents = _messages_to_gemini_contents(messages)
+    if not initial_contents:
+        raise AIClientError(
+            "Gemini request contains no user content.",
+            provider="gemini",
+            error_code="gemini_empty_contents",
+        )
+
+    candidates: list[str] = []
+    for candidate in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
+        candidate = str(candidate or "").strip()
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    if not candidates:
+        raise AIClientError(
+            "No Gemini text model is configured.",
+            provider="gemini",
+            error_code="gemini_models_missing",
+        )
+
+    last_error: AIClientError | None = None
+    attempted_models: list[str] = []
+
+    for model_index, model in enumerate(candidates):
+        attempted_models.append(model)
+        contents = copy.deepcopy(initial_contents)
+        tool_trace: list[dict[str, Any]] = []
+        tool_interaction_started = False
+        calls_seen = 0
+
+        try:
+            for round_index in range(rounds_limit + 1):
+                data = _request_gemini(
+                    model=model,
+                    messages=messages,
+                    tool_declarations=declarations,
+                    contents_override=contents,
+                )
+
+                response_candidates = data.get("candidates")
+                if not isinstance(response_candidates, list) or not response_candidates:
+                    raise AIClientError(
+                        "Gemini returned no candidates for a tool-enabled request.",
+                        provider="gemini",
+                        error_code="gemini_no_candidates",
+                    )
+
+                first_candidate = response_candidates[0]
+                if not isinstance(first_candidate, dict):
+                    raise AIClientError(
+                        "Gemini returned an invalid candidate.",
+                        provider="gemini",
+                        error_code="gemini_invalid_candidate",
+                    )
+
+                candidate_content = first_candidate.get("content")
+                if not isinstance(candidate_content, dict):
+                    raise AIClientError(
+                        "Gemini returned no candidate content.",
+                        provider="gemini",
+                        error_code="gemini_missing_content",
+                    )
+
+                parts = candidate_content.get("parts")
+                if not isinstance(parts, list):
+                    raise AIClientError(
+                        "Gemini returned no response parts.",
+                        provider="gemini",
+                        error_code="gemini_missing_parts",
+                    )
+
+                function_calls: list[dict[str, Any]] = []
+                text_parts: list[str] = []
+
+                for part in parts:
+                    if not isinstance(part, dict):
+                        continue
+                    call = part.get("functionCall")
+                    if isinstance(call, dict):
+                        function_calls.append(call)
+                    value = part.get("text")
+                    if value:
+                        text_parts.append(str(value))
+
+                if not function_calls:
+                    response_text = "".join(text_parts).strip()
+                    if not response_text:
+                        raise AIClientError(
+                            "Gemini returned an empty response after tool orchestration.",
+                            provider="gemini",
+                            error_code="gemini_empty_tool_response",
+                        )
+
+                    return {
+                        "success": True,
+                        "response": response_text,
+                        "provider": "gemini",
+                        "model": model,
+                        "fallback_used": model_index > 0,
+                        "attempted_models": attempted_models,
+                        "session_id": session_id,
+                        "usage": data.get("usageMetadata", {}),
+                        "finish_reason": first_candidate.get("finishReason"),
+                        "tool_execution": {
+                            "enabled": True,
+                            "call_count": len(tool_trace),
+                            "trace": tool_trace,
+                        },
+                    }
+
+                tool_interaction_started = True
+
+                # A final call round is reserved for Gemini's user-facing answer.
+                if round_index >= rounds_limit:
+                    raise AIClientError(
+                        "Gemini exceeded the allowed tool-call rounds.",
+                        provider="gemini",
+                        error_code="gemini_tool_round_limit",
+                    )
+
+                # Preserve the exact model function-call content for the
+                # provider's subsequent function-response turn.
+                contents.append(copy.deepcopy(candidate_content))
+                function_response_parts: list[dict[str, Any]] = []
+
+                for call in function_calls:
+                    name = call.get("name")
+                    call_id = call.get("id")
+                    args = call.get("args", {})
+
+                    if (
+                        not isinstance(name, str)
+                        or name not in tool_executor
+                        or not callable(tool_executor.get(name))
+                    ):
+                        raise AIClientError(
+                            "Gemini requested a tool that is not registered.",
+                            provider="gemini",
+                            error_code="gemini_unregistered_tool",
+                        )
+
+                    if not isinstance(args, dict):
+                        tool_result = {
+                            "ok": False,
+                            "error": "invalid_tool_arguments",
+                            "message": "Tool arguments must be a JSON object.",
+                        }
+                    else:
+                        try:
+                            argument_bytes = len(
+                                json.dumps(
+                                    args,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                ).encode("utf-8")
+                            )
+                        except (TypeError, ValueError, OverflowError):
+                            argument_bytes = _MAX_GEMINI_TOOL_ARGS_BYTES + 1
+
+                        if argument_bytes > _MAX_GEMINI_TOOL_ARGS_BYTES:
+                            tool_result = {
+                                "ok": False,
+                                "error": "tool_arguments_too_large",
+                                "message": "Tool arguments exceeded the size limit.",
+                            }
+                        elif calls_seen >= calls_limit:
+                            tool_result = {
+                                "ok": False,
+                                "error": "tool_call_limit_reached",
+                                "message": "The request exceeded the tool-call limit.",
+                            }
+                        else:
+                            calls_seen += 1
+                            try:
+                                raw_result = tool_executor[name](args)
+                                tool_result = _bound_tool_result(raw_result)
+                            except Exception:
+                                tool_result = {
+                                    "ok": False,
+                                    "error": "tool_execution_failed",
+                                    "message": "The registered tool could not complete the request.",
+                                }
+
+                    succeeded = (
+                        isinstance(tool_result, dict)
+                        and bool(tool_result.get("ok", False))
+                    )
+                    tool_trace.append({
+                        "name": name,
+                        "ok": succeeded,
+                        "error": (
+                            str(tool_result.get("error"))[:120]
+                            if isinstance(tool_result, dict) and tool_result.get("error")
+                            else None
+                        ),
+                    })
+
+                    function_response: dict[str, Any] = {
+                        "name": name,
+                        "response": {"result": tool_result},
+                    }
+                    if isinstance(call_id, str) and call_id:
+                        function_response["id"] = call_id
+
+                    function_response_parts.append({
+                        "functionResponse": function_response,
+                    })
+
+                contents.append({
+                    "role": "user",
+                    "parts": function_response_parts,
+                })
+
+            raise AIClientError(
+                "Gemini did not produce a final answer within the tool-call limit.",
+                provider="gemini",
+                error_code="gemini_tool_loop_exhausted",
+            )
+
+        except AIClientError as exc:
+            # Do not silently replay an operation after the model has already
+            # entered the tool protocol; the caller must surface this failure.
+            setattr(exc, "tool_interaction_started", tool_interaction_started)
+            last_error = exc
+
+            if tool_interaction_started:
+                raise
+
+            if exc.status_code in {401, 403}:
+                break
+
+            continue
+
+    if last_error is None:
+        last_error = AIClientError(
+            "Gemini tool calling failed.",
+            provider="gemini",
+            error_code="gemini_tool_call_failed",
+        )
+
+    raise last_error
 
 
 # =========================================================
@@ -4054,6 +4503,10 @@ def ask_hf(
     system_prompt: str = "",
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
+    tool_declarations: list[dict[str, Any]] | None = None,
+    tool_executor: Mapping[str, Callable[[dict[str, Any]], Any]] | None = None,
+    max_tool_rounds: int = _MAX_GEMINI_TOOL_ROUNDS,
+    max_tool_calls: int = _MAX_GEMINI_TOOL_CALLS,
 ) -> dict:
 
     """
@@ -4080,6 +4533,16 @@ def ask_hf(
             "response": "",
             "error": "message is required",
             "error_code": "empty_message",
+            "provider": "revelaai",
+            "session_id": session_id,
+        }
+
+    if (tool_declarations is None) != (tool_executor is None):
+        return {
+            "success": False,
+            "response": "",
+            "error": "Both tool_declarations and tool_executor must be provided together.",
+            "error_code": "incomplete_tool_configuration",
             "provider": "revelaai",
             "session_id": session_id,
         }
@@ -4143,17 +4606,24 @@ def ask_hf(
 
             try:
 
-                result = _ask_gemini_text(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    session_id=session_id,
-                    context=context,
-                )
+                if tool_declarations is not None and tool_executor is not None:
+                    result = _ask_gemini_with_tools(
+                        text=str(text),
+                        system_prompt=str(system_prompt or ""),
+                        session_id=session_id,
+                        context=context,
+                        tool_declarations=tool_declarations,
+                        tool_executor=tool_executor,
+                        max_tool_rounds=max_tool_rounds,
+                        max_tool_calls=max_tool_calls,
+                    )
+                else:
+                    result = _ask_gemini_text(
+                        text=str(text),
+                        system_prompt=str(system_prompt or ""),
+                        session_id=session_id,
+                        context=context,
+                    )
 
                 print(
                     "TEXT PROVIDER SUCCESS | "
@@ -4166,6 +4636,24 @@ def ask_hf(
                 return result
 
             except AIClientError as exc:
+
+                if getattr(exc, "tool_interaction_started", False):
+                    print(
+                        "GEMINI TOOL INTERACTION FAILED | "
+                        f"error_code={exc.error_code}"
+                    )
+                    return {
+                        "success": False,
+                        "response": "",
+                        "error": str(exc),
+                        "error_code": exc.error_code or "gemini_tool_interaction_failed",
+                        "provider": "gemini",
+                        "session_id": session_id,
+                        "tool_execution": {
+                            "enabled": True,
+                            "failed": True,
+                        },
+                    }
 
                 print(
                     "TEXT PROVIDER FAILED | "
