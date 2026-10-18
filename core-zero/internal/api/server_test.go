@@ -105,3 +105,61 @@ func TestDiagnosticsRequiresScopedKeyAndReturnsSafeReport(t *testing.T) {
 		t.Fatalf("diagnostics storage checks missing: %v", report)
 	}
 }
+
+
+func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
+	root := t.TempDir()
+	k, err := kernel.New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(k)
+
+	code, body := call(t, h, http.MethodGet, "/v1/assemble/templates", "", nil)
+	if code != 401 || body["code"] != "api_key_or_scope_required" {
+		t.Fatalf("assembly catalog should require scan:read: %d %v", code, body)
+	}
+
+	code, requestBody := call(t, h, http.MethodPost, "/v1/keys/request", `{"name":"Assembly Test","email":"assembly@example.invalid","reason":"Need the template catalog and assembly proposal scope","scopes":["scan:read","assemble:propose"]}`, map[string]string{"Content-Type": "application/json"})
+	if code != 202 {
+		t.Fatalf("key request failed: %d %v", code, requestBody)
+	}
+	request, ok := requestBody["request"].(map[string]any)
+	if !ok {
+		t.Fatalf("request missing: %v", requestBody)
+	}
+	t.Setenv("USECT_ZERO_ADMIN_TOKEN", "test-admin-token-123")
+	id, _ := request["id"].(string)
+	code, approved := call(t, h, http.MethodPost, "/v1/keys/requests/"+id+"/approve", `{"confirmation":"ISSUE_KEY","ttl_days":30}`, map[string]string{"X-Admin-Token": "test-admin-token-123", "Content-Type": "application/json"})
+	if code != 200 {
+		t.Fatalf("key approval failed: %d %v", code, approved)
+	}
+	secret, _ := approved["api_key"].(string)
+	headers := map[string]string{"X-API-Key": secret}
+
+	code, catalog := call(t, h, http.MethodGet, "/v1/assemble/templates", "", headers)
+	if code != 200 || catalog["schema_version"] != "usect-zero.assembly-catalog.v1" {
+		t.Fatalf("catalog request failed: %d %v", code, catalog)
+	}
+	items, ok := catalog["templates"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one registered template: %v", catalog)
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok || item["version"] != "1.0.0" || item["validation_status"] != "valid_curated_template" {
+		t.Fatalf("catalog metadata invalid: %v", items)
+	}
+
+	code, generated := call(t, h, http.MethodPost, "/v1/assemble", `{"target":"esp32-sensor","template_version":"1.0.0"}`, map[string]string{"Content-Type": "application/json", "X-API-Key": secret})
+	if code != 201 || generated["template_version"] != "1.0.0" || generated["status"] != "artifacts_generated_pending_review" {
+		t.Fatalf("pinned template generation failed: %d %v", code, generated)
+	}
+	if generated["human_review_required"] != true || generated["validation"] == nil {
+		t.Fatalf("review gate or validation report missing: %v", generated)
+	}
+
+	code, unsupported := call(t, h, http.MethodPost, "/v1/assemble", `{"target":"esp32-sensor","template_version":"9.9.9"}`, map[string]string{"Content-Type": "application/json", "X-API-Key": secret})
+	if code != 422 || unsupported["status"] != "needs_curated_template" {
+		t.Fatalf("unknown template version must be rejected: %d %v", code, unsupported)
+	}
+}
