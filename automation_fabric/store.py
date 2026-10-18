@@ -24,6 +24,12 @@ def _connect(db_path: str | None = None) -> sqlite3.Connection:
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA busy_timeout = 8000")
     connection.execute("PRAGMA journal_mode = WAL")
+    # Plan arguments can contain user-authored content; keep the database private.
+    for protected_path in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
+        try:
+            protected_path.chmod(0o600)
+        except OSError:
+            pass
     connection.execute(
         """CREATE TABLE IF NOT EXISTS consent_grants (
             principal TEXT NOT NULL,
@@ -257,7 +263,8 @@ def audit_event(
     try:
         connection.execute("BEGIN IMMEDIATE")
         previous = connection.execute(
-            "SELECT event_hash FROM audit_events ORDER BY sequence DESC LIMIT 1"
+            "SELECT event_hash FROM audit_events WHERE principal=? ORDER BY sequence DESC LIMIT 1",
+            (principal,),
         ).fetchone()
         previous_hash = previous["event_hash"] if previous else "GENESIS"
         material = json.dumps(
