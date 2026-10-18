@@ -28,6 +28,7 @@ from services.usect_zero_client import (
 usect_zero_bp = Blueprint("usect_zero_bp", __name__)
 _RESOURCE_ID = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _ALLOWED_KEY_STATUSES = frozenset({"pending_approval", "approved", "rejected"})
+_ALLOWED_ISSUED_KEY_STATUSES = frozenset({"active", "revoked", "expired"})
 
 
 def _require_platform_admin():
@@ -184,6 +185,15 @@ def list_key_requests():
         return _error("invalid_status_filter", "Unsupported key-request status filter.", 400)
     query = {"status": status} if status else None
     return _admin_proxy("GET", "/v1/keys/requests", query=query)
+
+
+@usect_zero_bp.get("/keys/issued")
+def list_issued_keys():
+    status = (request.args.get("status") or "").strip()
+    if status and status not in _ALLOWED_ISSUED_KEY_STATUSES:
+        return _error("invalid_status_filter", "Unsupported issued-key status filter.", 400)
+    query = {"status": status} if status else None
+    return _admin_proxy("GET", "/v1/keys/issued", query=query)
 
 
 @usect_zero_bp.post("/keys/requests/<request_id>/approve")
