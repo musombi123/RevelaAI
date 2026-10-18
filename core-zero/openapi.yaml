@@ -1,0 +1,388 @@
+openapi: 3.1.0
+info:
+  title: USECT-ZERO Local Engineering Core API
+  version: 0.1.0
+  summary: Deterministic, offline-first repository analysis and human-gated engineering proposals.
+  description: |
+    Host System Alpha is the first implementation host. This API is model-free and
+    intentionally conservative. Proposal endpoints do not execute candidate code or
+    operate hardware. Key requests are pending until explicitly approved. The service
+    defaults to loopback and must not be exposed publicly without transport security,
+    rate limiting, and an independent deployment review.
+servers:
+  - url: http://127.0.0.1:8780
+    description: Local-only default; do not expose over an untrusted network.
+tags:
+  - name: system
+  - name: forge
+  - name: heal
+  - name: assemble
+  - name: radar
+  - name: bridge
+  - name: mind
+paths:
+  /v1/health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Read local kernel status
+      responses:
+        '200':
+          description: Local status; not proof of hardware or production health.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Health'}
+  /v1/scan:
+    get:
+      tags: [system]
+      operationId: scanRepository
+      summary: Scan the configured host repository and persist evidence
+      security: [{ApiKey: []}]
+      x-required-scope: scan:read
+      responses:
+        '200':
+          description: Deterministic source inventory and manifest digest.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ScanEvidence'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/keys/requests:
+    get:
+      tags: [forge]
+      operationId: listApiKeyRequests
+      summary: List metadata for key requests for the human review queue
+      security: [{AdminToken: []}]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [pending_approval, approved, rejected]}
+      responses:
+        '200': {description: Key-request metadata; no raw API keys are included.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/keys/request:
+    post:
+      tags: [forge]
+      operationId: requestApiKey
+      summary: Request scoped API access; does not issue a key
+      description: Requests remain pending until an authorized human operator approves them. Privileged scopes cannot be requested.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/KeyRequestInput'}
+      responses:
+        '202':
+          description: Request accepted for human review; secret_issued is false.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyRequestAccepted'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+  /v1/keys/requests/{request_id}/approve:
+    post:
+      tags: [forge]
+      operationId: approveApiKeyRequest
+      summary: Approve one pending key request and issue a one-time secret
+      description: Requires local administrator token and confirmation=ISSUE_KEY. Only a hash is persisted; the returned secret is shown once.
+      security: [{AdminToken: []}]
+      parameters:
+        - $ref: '#/components/parameters/RequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: {type: string, const: ISSUE_KEY}
+                ttl_days: {type: integer, minimum: 1, maximum: 365, default: 90}
+      responses:
+        '200':
+          description: Approved; copy api_key immediately.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyIssued'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /v1/keys/issued/{key_id}/revoke:
+    post:
+      tags: [forge]
+      operationId: revokeIssuedApiKey
+      summary: Revoke a previously issued key
+      security: [{AdminToken: []}]
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{24}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: {type: string, const: REVOKE_KEY}
+      responses:
+        '200': {description: Key revoked; subsequent scope checks fail.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /v1/heal/baseline:
+    post:
+      tags: [heal]
+      operationId: recordHealingBaseline
+      summary: Record the current repository baseline
+      description: Administrator action; requires a local Git HEAD. The state change is audit logged.
+      security: [{AdminToken: []}]
+      responses:
+        '201': {description: Baseline recorded.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/heal/proposals:
+    post:
+      tags: [heal]
+      operationId: proposeMissingFileRecovery
+      summary: Detect missing baseline files and stage recovery candidates
+      description: Only candidates whose bytes match the recorded baseline and Git HEAD are eligible. No host source file is changed.
+      security: [{ApiKey: []}]
+      x-required-scope: heal:propose
+      responses:
+        '201': {description: Proposal and sandbox evidence created.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /v1/heal/proposals/{proposal_id}/approve:
+    post:
+      tags: [heal]
+      operationId: approveFileRecovery
+      summary: Execute the explicitly approved bounded file restore
+      description: Requires administrator token and confirmation=RESTORE_TO_REPOSITORY. Does not restore individual functions or infer changelog semantics.
+      security: [{AdminToken: []}]
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{24}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: {type: string, const: RESTORE_TO_REPOSITORY}
+      responses:
+        '200': {description: Approved recovery executed and audited.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /v1/assemble:
+    post:
+      tags: [assemble]
+      operationId: proposeAssemblyArtifacts
+      summary: Generate artifacts for a registered offline fixture
+      security: [{ApiKey: []}]
+      x-required-scope: assemble:propose
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: {type: string, enum: [esp32-sensor]}
+      responses:
+        '201': {description: Artifacts generated for human review; no hardware touched.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422': {description: No curated template exists for the requested target.}
+  /v1/radar/compare:
+    post:
+      tags: [radar]
+      operationId: compareOfflineTechnologyEvidence
+      summary: Compare locally supplied version and benchmark evidence
+      security: [{ApiKey: []}]
+      x-required-scope: radar:compare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current, candidate]
+              properties:
+                current: {$ref: '#/components/schemas/RadarEvidence'}
+                candidate: {$ref: '#/components/schemas/RadarEvidence'}
+      responses:
+        '200': {description: Deterministic comparison and human-review recommendation; no network used.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/bridge/plan:
+    post:
+      tags: [bridge]
+      operationId: createBridgePlan
+      summary: Return an adapter plan without accessing a device or vendor API
+      security: [{ApiKey: []}]
+      x-required-scope: bridge:propose
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: {type: string, enum: [ros2, fpga, labview, device]}
+      responses:
+        '200': {description: Review plan; no external device or network access.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/mind/compile:
+    post:
+      tags: [mind]
+      operationId: compileRvLangPlan
+      summary: Compile a bounded RV Lang program into non-executing Go plan source
+      security: [{ApiKey: []}]
+      x-required-scope: mind:compile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: {type: string, maxLength: 65536}
+      responses:
+        '200': {description: Plan generated, not executed.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /v1/mind/ide:
+    get:
+      tags: [mind]
+      operationId: getOfflineRvLangIde
+      summary: Serve the bundled local RV Lang plan editor
+      responses:
+        '200': {description: Local HTML IDE; API requests still require an approved key.}
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Approved scoped key; never place secrets in URLs.
+    AdminToken:
+      type: apiKey
+      in: header
+      name: X-Admin-Token
+      description: Local operator token from USECT_ZERO_ADMIN_TOKEN.
+  parameters:
+    RequestId:
+      name: request_id
+      in: path
+      required: true
+      schema: {type: string, pattern: '^[a-f0-9]{24}$'}
+  responses:
+    Unauthorized:
+      description: Authentication, scope or approval requirement not satisfied.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    BadRequest:
+      description: Invalid input or unsupported configuration.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: State transition rejected; no unsafe action was executed.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unavailable:
+      description: Local state or required repository evidence unavailable.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+  schemas:
+    Error:
+      type: object
+      required: [status, code, message]
+      properties:
+        status: {type: string, const: error}
+        code: {type: string}
+        message: {type: string}
+    Health:
+      type: object
+      required: [status, service, model_free, offline_mode, execution_policy]
+      properties:
+        status: {type: string}
+        service: {type: string}
+        model_free: {type: boolean}
+        offline_mode: {type: boolean}
+        repository_root: {type: string}
+        execution_policy: {type: string}
+        hardware_actuation: {type: boolean}
+    FileRecord:
+      type: object
+      required: [path, sha256, bytes]
+      properties:
+        path: {type: string}
+        sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        bytes: {type: integer, minimum: 0}
+        language: {type: string}
+    ScanEvidence:
+      type: object
+      required: [schema_version, generated_at, repository_root, file_count, language_counts, files, manifest_sha256, read_only]
+      properties:
+        schema_version: {type: string}
+        generated_at: {type: string, format: date-time}
+        repository_root: {type: string}
+        git_head: {type: string}
+        file_count: {type: integer}
+        language_counts: {type: object, additionalProperties: {type: integer}}
+        changelog_paths: {type: array, items: {type: string}}
+        files: {type: array, items: {$ref: '#/components/schemas/FileRecord'}}
+        manifest_sha256: {type: string}
+        read_only: {type: boolean}
+        evidence_note: {type: string}
+    KeyRequestInput:
+      type: object
+      required: [name, email, reason]
+      properties:
+        name: {type: string, minLength: 2, maxLength: 120}
+        email: {type: string, format: email, maxLength: 254}
+        repository_url: {type: string, format: uri, description: Optional HTTPS repository URL.}
+        reason: {type: string, minLength: 8, maxLength: 1200}
+        scopes:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [scan:read, heal:propose, assemble:propose, radar:compare, mind:compile, bridge:propose]}
+    KeyRequestAccepted:
+      type: object
+      required: [status, request, secret_issued, message]
+      properties:
+        status: {type: string, const: pending_approval}
+        request: {type: object}
+        secret_issued: {type: boolean, const: false}
+        message: {type: string}
+    KeyIssued:
+      type: object
+      required: [status, request, api_key, shown_once, note]
+      properties:
+        status: {type: string, const: approved}
+        request: {type: object}
+        api_key: {type: string, writeOnly: true}
+        shown_once: {type: boolean, const: true}
+        note: {type: string}
+    RadarEvidence:
+      type: object
+      required: [name, version, benchmark]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
+        benchmark: {type: number, exclusiveMinimum: 0}
+        source: {type: string}
+        evidence_id: {type: string}
