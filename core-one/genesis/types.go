@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const Version = "0.2.0-alpha"
+const Version = "0.3.0-alpha"
 
 // Demand is an untrusted request to propose a new tool. It is never executed as code.
 type Demand struct {
@@ -63,8 +63,10 @@ type Invention struct {
 	Category  string           `json:"category"`
 	Industry  string           `json:"industry"`
 	Files     []string         `json:"files"`
-	Evidence  ResearchEvidence `json:"evidence"`
-	Summary   string           `json:"summary"`
+	Evidence          ResearchEvidence `json:"evidence"`
+	Summary           string           `json:"summary"`
+	CapabilityPlanPath string           `json:"capability_plan_path"`
+	CapabilityCoverage CapabilityCoverage `json:"capability_coverage"`
 }
 
 type Event struct {
