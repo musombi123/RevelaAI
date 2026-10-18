@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
-from flask import Blueprint, Response, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from services.usect_zero_client import (
     MAX_REQUEST_BYTES,
@@ -138,12 +137,11 @@ def usect_zero_health():
             "model_free": True,
         }), 503
 
-    try:
-        reply = request_core("GET", "/v1/health")
-    except USECTZeroError:
-        return _proxy("GET", "/v1/health")
+    response, status_code = _proxy("GET", "/v1/health")
+    if status_code >= 400:
+        return response
 
-    core = reply.payload
+    core = response.get_json(silent=True) or {}
     safe = {
         "status": str(core.get("status") or "unknown"),
         "module": "usect-zero",
@@ -153,7 +151,7 @@ def usect_zero_health():
         "execution_policy": str(core.get("execution_policy") or "human-gated"),
         "hardware_actuation": bool(core.get("hardware_actuation", False)),
     }
-    return jsonify(safe), reply.status_code
+    return jsonify(safe), status_code
 
 
 @usect_zero_bp.post("/keys/request")
