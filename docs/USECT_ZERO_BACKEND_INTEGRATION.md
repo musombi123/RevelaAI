@@ -47,6 +47,7 @@ Mounted under `/api/usect-zero`:
 | `GET /health` | `GET /v1/health` | Public; absolute repository path is removed |
 | `POST /keys/request` | `POST /v1/keys/request` | Public intake; request stays pending, no key issued |
 | `GET /keys/requests` | `GET /v1/keys/requests` | Existing authoritative platform-admin check |
+| `GET /keys/issued?status=active` (also `revoked` or `expired`) | `GET /v1/keys/issued` | Platform admin + server-side admin token; metadata only, no key hashes or raw secrets |
 | `POST /keys/requests/{id}/approve` | Core approval route | Platform admin + server-side admin token + explicit `ISSUE_KEY` confirmation |
 | `POST /keys/issued/{id}/revoke` | Core revocation route | Platform admin + server-side admin token + explicit `REVOKE_KEY` confirmation |
 | `GET /scan` | `GET /v1/scan` | Go core validates the external developer key and `scan:read` scope |
@@ -64,7 +65,7 @@ Requests and responses are bounded; the Flask blueprint exposes an explicit set 
 
 - It does not start or compile the Go process inside the Flask worker.
 - It does not create a Render service or change deployment infrastructure automatically.
-- It does not integrate a frontend dashboard.
+- The React admin console consumes the Flask gateway; the core service itself does not serve a separate admin dashboard.
 - It does not make the existing Meta-Engineer or Brain OS routes depend on USECT-ZERO.
 
 Deploy and test the Go core as a private service first, then enable the Flask adapter with the environment variables above. Keep the feature flag off until the private core service and secret are configured.

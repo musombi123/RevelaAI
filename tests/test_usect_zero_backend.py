@@ -287,3 +287,38 @@ def test_client_uses_server_side_admin_token_without_forwarding_authorization(mo
     assert "X-API-Key" not in observed["headers"]
     assert observed["allow_redirects"] is False
     assert observed["stream"] is True
+
+def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypatch, test_client):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    monkeypatch.setattr(routes, "_require_platform_admin", lambda: ("admin-user-42", None))
+    observed = {}
+
+    def fake_core(method, path, **kwargs):
+        observed.update(method=method, path=path, **kwargs)
+        return client.CoreReply(
+            200,
+            {
+                "status": "ok",
+                "keys": [
+                    {
+                        "id": "key_123",
+                        "request_id": "request_456",
+                        "scopes": ["scan:read"],
+                        "status": "active",
+                    }
+                ],
+                "count": 1,
+            },
+        )
+
+    monkeypatch.setattr(routes, "request_core", fake_core)
+    response = test_client.get("/api/usect-zero/keys/issued?status=active")
+
+    assert response.status_code == 200
+    assert response.get_json()["keys"][0]["id"] == "key_123"
+    assert "key_hash" not in response.get_data(as_text=True).lower()
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/v1/keys/issued"
+    assert observed["query"] == {"status": "active"}
+    assert observed["admin"] is True
+    assert observed["api_key"] is None
