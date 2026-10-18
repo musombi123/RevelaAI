@@ -357,3 +357,38 @@ func TestCapabilityPlanIsStagedAndExposedByHTTP(t *testing.T) {
 		t.Fatalf("capability plan endpoint failed: %d %s", w.Code, w.Body.String())
 	}
 }
+
+
+func TestGuardianScreensUntrustedLibraryMetadataInCapabilityPlan(t *testing.T) {
+	e := newTestEngine(t)
+	libDir := filepath.Join(e.CoreRoot, "libraries", "created", "untrusted_catalog_entry")
+	if err := os.MkdirAll(libDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	meta := libraryMetadata{
+		Name: "untrusted_catalog_entry",
+		Category: "software",
+		Industry: "general",
+		Capabilities: []string{"weapon design", "validate structured input", "record traceable evidence"},
+		Dependencies: []string{},
+	}
+	if err := writeJSON(filepath.Join(libDir, "library.json"), meta); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.Invent(context.Background(), "Create tool: offline file vault")
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("unsafe reusable-library metadata should block the proposal: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(e.CoreRoot, "inventions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && !strings.HasPrefix(entry.Name(), ".staging-") {
+			t.Fatalf("Guardian allowed invention generation from unsafe capability metadata: %s", entry.Name())
+		}
+	}
+	if _, err := os.Stat(filepath.Join(e.CoreRoot, "guardian", "blocked.log")); err != nil {
+		t.Fatalf("expected a blocked-plan audit entry: %v", err)
+	}
+}
