@@ -76,6 +76,46 @@ func (m *KeyManager) ListRequests(status string) ([]KeyRequest,error) {
 	for _,entry:=range entries { if entry.IsDir()||!strings.HasSuffix(entry.Name(),".json"){continue};var request KeyRequest;if err:=read(filepath.Join(m.Root,"state","keys","requests",entry.Name()),&request);err!=nil{continue};if status==""||request.Status==status{items=append(items,request)} }
 	sort.Slice(items,func(i,j int)bool{return items[i].CreatedAt.After(items[j].CreatedAt)});return items,nil
 }
+func (m *KeyManager) ListIssued(status string) ([]IssuedKey, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.dirs(); err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(filepath.Join(m.Root, "state", "keys", "issued"))
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	items := make([]IssuedKey, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		var key IssuedKey
+		if err := read(filepath.Join(m.Root, "state", "keys", "issued", entry.Name()), &key); err != nil {
+			continue
+		}
+		effectiveStatus := key.Status
+		if effectiveStatus == "active" && !now.Before(key.ExpiresAt) {
+			effectiveStatus = "expired"
+		}
+		if status != "" && effectiveStatus != status {
+			continue
+		}
+		// Return a copy with the effective status. The caller must explicitly
+		// project public fields before exposing this struct over HTTP.
+		key.Status = effectiveStatus
+		items = append(items, key)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items, nil
+}
+
 func (m *KeyManager) Revoke(id,actor string) (IssuedKey,error) {
 	m.mu.Lock();defer m.mu.Unlock();if err:=m.dirs();err!=nil{return IssuedKey{},err};if strings.ContainsAny(id,"/\\\x00")||id==""{return IssuedKey{},os.ErrNotExist}
 	path:=filepath.Join(m.Root,"state","keys","issued",id+".json");var key IssuedKey;if err:=read(path,&key);err!=nil{return key,err};if key.Status!="active"{return key,errors.New("key is not active")};now:=time.Now().UTC();key.Status="revoked";key.RevokedAt=&now;key.RevokedBy=strings.TrimSpace(actor);if err:=write(path,key);err!=nil{return key,err};return key,nil
