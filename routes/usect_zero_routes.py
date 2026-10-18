@@ -238,6 +238,12 @@ def approve_healing(proposal_id: str):
     return _admin_proxy("POST", f"/v1/heal/proposals/{proposal_id}/approve")
 
 
+@usect_zero_bp.get("/assemble/templates")
+def list_assembly_templates():
+    """List versioned, validated assembly templates using the read-only scan scope."""
+    return _proxy("GET", "/v1/assemble/templates")
+
+
 @usect_zero_bp.post("/assemble")
 def assemble_proposal():
     return _proxy("POST", "/v1/assemble")
