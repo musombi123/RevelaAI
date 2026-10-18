@@ -72,8 +72,10 @@ class SciCoreSafetyTests(unittest.TestCase):
         app = Flask("sci-core-admin-gate-test")
         app.register_blueprint(sci_router, url_prefix="/api/sci")
         client = app.test_client()
-        denied = (jsonify({"status": "error", "code": "admin_required"}), 403)
-        with patch("revelai.routers.sci_core._authenticated_admin", return_value=(None, denied)) as admin_check:
+        def deny_admin():
+            return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
+
+        with patch("revelai.routers.sci_core._authenticated_admin", side_effect=deny_admin) as admin_check:
             response = client.get("/api/sci/shield/status")
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.get_json()["code"], "admin_required")
