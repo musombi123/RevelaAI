@@ -3712,6 +3712,35 @@ def ai_assistant():
 
             orchestrator_data = {}
 
+        core_mesh_data = orchestrator_data.get("core_mesh", {})
+        if not isinstance(core_mesh_data, dict):
+            core_mesh_data = {}
+        else:
+            core_mesh_data = {
+                "mode": str(core_mesh_data.get("mode") or "advisory_only")[:40],
+                "selected_core": str(core_mesh_data.get("selected_core") or "orchestrator")[:40],
+                "route_reason": str(core_mesh_data.get("route_reason") or "")[:280],
+                "domain": str(core_mesh_data.get("domain") or "general")[:80],
+                "intent": str(core_mesh_data.get("intent") or "general")[:80],
+                "mesh_status": str(core_mesh_data.get("mesh_status") or "not_probed")[:40],
+                "cores": {
+                    str(name)[:16]: {
+                        "id": str(info.get("id") or "")[:40],
+                        "status": str(info.get("status") or "unknown")[:40],
+                        "reachable": info.get("reachable") if info.get("reachable") in (True, False, None) else None,
+                        "version": str(info.get("version") or "")[:40],
+                    }
+                    for name, info in core_mesh_data.get("cores", {}).items()
+                    if isinstance(name, str) and isinstance(info, dict)
+                } if isinstance(core_mesh_data.get("cores"), dict) else {},
+                "safety": {
+                    "operation_executed": False,
+                    "human_approval_required": True,
+                    "automatic_merge": False,
+                    "automatic_execution": False,
+                },
+            }
+
         online_data = (
             orchestrator_data.get(
                 "online",
@@ -3891,6 +3920,8 @@ def ai_assistant():
             ),
 
             "usect_zero_tool": usect_tool_metadata,
+
+            "core_mesh": core_mesh_data,
 
             "build_id": REVELAAI_BUILD_ID,
         }
