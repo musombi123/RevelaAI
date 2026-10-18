@@ -26,6 +26,7 @@ func NewWebResearcher() *WebResearcher {
 
 func (r *WebResearcher) Research(ctx context.Context, demand string) (ResearchEvidence, error) {
 	if ctx == nil { ctx = context.Background() }
+	select { case <-ctx.Done(): return ResearchEvidence{}, ctx.Err(); default: }
 	now := time.Now().UTC()
 	q := strings.TrimSpace(demand)
 	e := ResearchEvidence{ID: newID("research"), Query: q, CollectedAt: now, Mode: "online-with-offline-fallback", Sources: []ResearchSource{}, Findings: []string{}}
