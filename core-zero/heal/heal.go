@@ -378,8 +378,12 @@ func ApproveRestore(k *kernel.Kernel, id, confirmation string) (Proposal, error)
 		if err := os.Rename(item.tempPath, item.target); err != nil {
 			if item.state == "modified" && item.rollbackPath != "" {
 				if restoreErr := os.Rename(item.rollbackPath, item.target); restoreErr != nil {
+					rollbackErr := rollbackApplied()
 					cleanupTemps()
-					return p, fmt.Errorf("replacement failed and original target could not be put back: %v (replacement error: %w)", restoreErr, err)
+					if rollbackErr != nil {
+						return p, fmt.Errorf("replacement failed; original target remains in rollback storage and previous changes could not be fully rolled back: %v; %w", rollbackErr, restoreErr)
+					}
+					return p, fmt.Errorf("replacement failed and original target could not be put back; original remains at the recorded rollback path: %v (replacement error: %w)", restoreErr, err)
 				}
 				item.rollbackPath = ""
 			}
@@ -397,14 +401,15 @@ func ApproveRestore(k *kernel.Kernel, id, confirmation string) (Proposal, error)
 
 	// Evidence backups are durable; the short-lived in-tree rollback copies are removed.
 	for _, item := range prepared {
+		cleanupWarning := ""
 		if item.state == "modified" && item.rollbackPath != "" {
 			if err := os.Remove(item.rollbackPath); err != nil {
-				p.Items[item.index].Note = "Restored after approval; evidence backup is saved, but an extra rollback copy remains in the target directory"
+				cleanupWarning = "; an extra rollback copy remains in the target directory"
 			}
 		}
 		p.Items[item.index].Status = "restored_after_approval"
 		if item.state == "modified" {
-			p.Items[item.index].Note = "Modified file replaced after approval; previous bytes and hash are preserved in the evidence backup"
+			p.Items[item.index].Note = "Modified file replaced after approval; previous bytes and hash are preserved in the evidence backup" + cleanupWarning
 		} else {
 			p.Items[item.index].Note = "Missing tracked file restored from the recorded Git baseline after explicit approval"
 		}
