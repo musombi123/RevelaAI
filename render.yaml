@@ -1,10 +1,11 @@
 services:
-  # Public Flask gateway. USECT-ZERO itself stays on Render's private network.
+  # Existing public Flask gateway. Keep this name aligned with the live
+  # Render service so a Blueprint can manage the intended service.
   - type: web
-    name: revelaai-backend
-    env: python
+    name: RevelaAI
+    runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 app:app
     envVars:
       - key: GROQ_API_KEY
         sync: false
