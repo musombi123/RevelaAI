@@ -13,9 +13,9 @@ import (
 )
 
 type fakeResearcher struct{ evidence ResearchEvidence }
-func (f fakeResearcher) Research(demand string) (ResearchEvidence, error) { out:=f.evidence; out.Query=demand; if out.ID==""{out.ID="test-research"}; if out.CollectedAt.IsZero(){out.CollectedAt=time.Now().UTC()}; if out.Sources==nil{out.Sources=[]ResearchSource{{Name:"offline fixture",URL:"https://example.org/research",Status:"retrieved",Title:"Safe reference",Retrieved:time.Now().UTC()}}}; return out,nil }
+func (f fakeResearcher) Research(_ context.Context, demand string) (ResearchEvidence, error) { out:=f.evidence; out.Query=demand; if out.ID==""{out.ID="test-research"}; if out.CollectedAt.IsZero(){out.CollectedAt=time.Now().UTC()}; if out.Sources==nil{out.Sources=[]ResearchSource{{Name:"offline fixture",URL:"https://example.org/research",Status:"retrieved",Title:"Safe reference",Retrieved:time.Now().UTC()}}}; return out,nil }
 type fakeModel struct{ output ToolSpec }
-func (m fakeModel) Suggest(_ string, _ ResearchEvidence, fallback ToolSpec) (ToolSpec, error) { if m.output.Name==""{return fallback,nil}; return m.output,nil }
+func (m fakeModel) Suggest(_ context.Context, _ string, _ ResearchEvidence, fallback ToolSpec) (ToolSpec, error) { if m.output.Name==""{return fallback,nil}; return m.output,nil }
 func newTestEngine(t *testing.T) *Engine { t.Helper(); t.Setenv("GENESIS_OFFLINE","1"); e,err:=NewEngine(t.TempDir()); if err!=nil{t.Fatal(err)}; e.SetResearcher(fakeResearcher{evidence:ResearchEvidence{Mode:"offline",Findings:[]string{"fixture research; no network used"}}}); e.SetModel(nil); return e }
 
 func TestStandaloneOfflineInventionProducesFullProposal(t *testing.T) {
