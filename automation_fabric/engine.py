@@ -180,6 +180,21 @@ def execute_plan(
     outcome = "completed"
     for step in plan.get("steps", []):
         name = step["tool"]
+        missing_scopes = [
+            scope for scope in step.get("required_scopes", [])
+            if not store.has_scope(principal, scope, db_path=db_path)
+        ]
+        if missing_scopes:
+            outcome = "partial_failed" if outputs else "failed"
+            outputs.append({
+                "step_id": step["id"], "tool": name, "ok": False,
+                "error": {"code": "consent_revoked_or_expired", "message": "Required consent is no longer active."},
+            })
+            store.audit_event(principal, "tool_blocked_by_policy", {
+                "plan_id": plan_id, "step_id": step["id"], "tool": name,
+                "missing_scopes": missing_scopes,
+            }, db_path=db_path)
+            break
         store.audit_event(principal, "tool_started", {
             "plan_id": plan_id, "step_id": step["id"], "tool": name,
             "arg_keys": sorted(step.get("args", {}).keys()),
