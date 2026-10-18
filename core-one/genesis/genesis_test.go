@@ -222,13 +222,13 @@ func TestOperationalStatusReportsCoreSafetyState(t *testing.T) {
 
 func TestCanceledQueueWorkReturnsToPending(t *testing.T) {
 	e := newTestEngine(t)
-	e.SetResearcher(cancelingResearcher{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	e.SetResearcher(cancelingResearcher{cancel: cancel})
 	item, err := e.Enqueue("offline file vault", "cancel-test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	err = e.ProcessQueue(ctx)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected canceled queue cycle, got %v", err)
@@ -239,7 +239,8 @@ func TestCanceledQueueWorkReturnsToPending(t *testing.T) {
 	}
 }
 
-type cancelingResearcher struct{}
-func (cancelingResearcher) Research(ctx context.Context, _ string) (ResearchEvidence, error) {
+type cancelingResearcher struct { cancel context.CancelFunc }
+func (r cancelingResearcher) Research(ctx context.Context, _ string) (ResearchEvidence, error) {
+	r.cancel()
 	return ResearchEvidence{}, ctx.Err()
 }
