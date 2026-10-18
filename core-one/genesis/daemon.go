@@ -45,8 +45,8 @@ func (e *Engine) runCycle(ctx context.Context) {
 func (e *Engine) ProcessQueue(ctx context.Context) error {
 	e.queueMu.Lock();defer e.queueMu.Unlock()
 	root:=filepath.Join(e.CoreRoot,"state","queue");pending:=filepath.Join(root,"pending");processing:=filepath.Join(root,"processing")
-	if err:=os.MkdirAll(pending,0700);err!=nil{return err};if err:=os.MkdirAll(processing,0700);err!=nil{return err}
-	firstErr:=e.recoverProcessing(root,pending,processing)
+	if err:=os.MkdirAll(pending,0700);err!=nil{return err};if err:=os.MkdirAll(processing,0700);err!=nil{return err};if err:=os.MkdirAll(filepath.Join(root,"failed"),0700);err!=nil{return err}
+	firstErr:e.recoverProcessing(root,pending,processing)
 	entries,err:=os.ReadDir(pending);if err!=nil{return err}
 	sort.Slice(entries,func(i,j int)bool{return entries[i].Name()<entries[j].Name()})
 	for _,entry:=range entries {
@@ -70,6 +70,12 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 		item.Status="processing";item.Error=""
 		if err:=writeJSON(claim,item);err!=nil{if firstErr==nil{firstErr=fmt.Errorf("persist processing state: %w",err)};_ = os.Rename(claim,src);continue}
 		inv,inventErr:=e.Invent(ctx,item.Demand)
+		if errors.Is(inventErr,context.Canceled)||errors.Is(inventErr,context.DeadlineExceeded) {
+			item.Status="queued";item.Error="processing interrupted; demand returned to pending queue"
+			if err:=writeJSON(claim,item);err!=nil { if firstErr==nil { firstErr=fmt.Errorf("persist interrupted queue state: %w",err) }; return firstErr }
+			if err:=os.Rename(claim,src);err!=nil { if firstErr==nil { firstErr=fmt.Errorf("requeue interrupted demand: %w",err) }; return firstErr }
+			return inventErr
+		}
 		if inventErr!=nil&&errors.Is(inventErr,ErrAlreadyExists){
 			if existingName,sameDemand:=e.findExistingInvention(item.Demand);sameDemand{item.Status="await_merge";item.Source=existingName}else{item.Status="failed";item.Error="an invention with the derived name already exists for a different demand; inspect it manually"}
 		}else if inventErr!=nil{
