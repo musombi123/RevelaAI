@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"os/exec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,4 +51,134 @@ func TestModelSuggestionCannotOverrideNameOrSafetyBoundary(t *testing.T) {
 }
 func TestEyeAutomaticallyTriggersInventionAfterRepeatedWorkaroundThreshold(t *testing.T) {
 	e:=newTestEngine(t);project:=filepath.Join(e.RepoRoot,"sample_project");if err:=os.MkdirAll(project,0o755);err!=nil{t.Fatal(err)};var repeats strings.Builder;for i:=0;i<6;i++{repeats.WriteString("// TODO: replace repeated adapter retry workaround\n")};if err:=os.WriteFile(filepath.Join(project,"sample.go"),[]byte(repeats.String()),0o644);err!=nil{t.Fatal(err)};if err:=e.EyeScan(context.Background());err!=nil{t.Fatal(err)};entries,err:=os.ReadDir(filepath.Join(e.CoreRoot,"inventions"));if err!=nil{t.Fatal(err)};found:=false;for _,entry:=range entries{if entry.IsDir()&&strings.HasPrefix(entry.Name(),"generic_remediation_tool"){found=true}};if !found{t.Fatalf("eye did not trigger a proposal for a repeated workaround; entries=%v",entries)};if _,err:=os.Stat(filepath.Join(e.CoreRoot,"state","eye","triggered.json"));err!=nil{t.Fatalf("missing deduplication state: %v",err)}
+}
+
+
+func TestOfflineResearchHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (&WebResearcher{Offline: true}).Research(ctx, "offline file vault")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled research to stop immediately, got %v", err)
+	}
+}
+
+func TestModelCannotDowngradeHardwareClassification(t *testing.T) {
+	e := newTestEngine(t)
+	base := deriveSpec("CCTV")
+	candidate := base
+	candidate.Category = "software"
+	candidate.Industry = "general"
+	candidate.NeedsHardwareGuide = false
+	candidate.Name = "replacement"
+	candidate.Title = "Authorized camera system"
+	candidate.Purpose = "A privacy-aware, consent-based camera management proposal."
+	inv, err := e.Invent(context.Background(), "CCTV")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = inv
+	e2 := newTestEngine(t)
+	e2.SetModel(fakeModel{output: candidate})
+	inv, err = e2.Invent(context.Background(), "CCTV")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.Name != "cctv_smart" || inv.Category != "hardware" {
+		t.Fatalf("model changed deterministic identity/classification: %+v", inv)
+	}
+	if _, err := os.Stat(filepath.Join(e2.CoreRoot, "inventions", inv.Name, "hardware_guide.md")); err != nil {
+		t.Fatalf("model incorrectly removed required hardware guide: %v", err)
+	}
+}
+
+func TestResearchFindingIsGuardianScreened(t *testing.T) {
+	e := newTestEngine(t)
+	e.SetResearcher(fakeResearcher{evidence: ResearchEvidence{
+		Mode: "fixture",
+		Findings: []string{"Malware construction instructions found in untrusted research."},
+		Sources: []ResearchSource{{Name: "safe index", URL: "https://example.org", Status: "retrieved", Title: "index"}},
+	}})
+	_, err := e.Invent(context.Background(), "offline research notebook")
+	if !errors.Is(err, ErrBlocked) {
+		t.Fatalf("expected research finding to be blocked, got %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(e.CoreRoot, "inventions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != ".staging-" {
+			t.Fatalf("blocked finding left invention artifact %s", entry.Name())
+		}
+	}
+}
+
+func TestQueueRecoversInterruptedClaim(t *testing.T) {
+	e := newTestEngine(t)
+	item, err := e.Enqueue("offline file vault", "recovery-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := filepath.Join(e.CoreRoot, "state", "queue", "pending", item.ID+".json")
+	processingDir := filepath.Join(e.CoreRoot, "state", "queue", "processing")
+	if err := os.MkdirAll(processingDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	processing := filepath.Join(processingDir, item.ID+".json")
+	if err := os.Rename(pending, processing); err != nil {
+		t.Fatal(err)
+	}
+	item.Status = "processing"
+	item.Error = ""
+	raw, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(processing, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ProcessQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(e.CoreRoot, "state", "queue", "await_merge", item.ID+".json")); err != nil {
+		t.Fatalf("interrupted queue item did not recover to await_merge: %v", err)
+	}
+	if _, err := os.Stat(processing); !os.IsNotExist(err) {
+		t.Fatalf("processing claim was not cleaned up: %v", err)
+	}
+}
+
+func TestGeneratedPackagesCompileAndCompose(t *testing.T) {
+	e := newTestEngine(t)
+	module := []byte("module revela-genesis.local/core-one\n\ngo 1.23\n")
+	if err := os.WriteFile(filepath.Join(e.CoreRoot, "go.mod"), module, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, demand := range []string{"Create tool: offline file vault", "offline second file vault"} {
+		if _, err := e.Invent(context.Background(), demand); err != nil {
+			t.Fatalf("generate %q: %v", demand, err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "test", "./...")
+	cmd.Dir = e.CoreRoot
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated Go packages did not compile/test: %v\n%s", err, out)
+	}
+}
+
+func TestRemoteMutationRequiresConfiguredToken(t *testing.T) {
+	t.Setenv("GENESIS_ADMIN_TOKEN", "long-test-token")
+	e := newTestEngine(t)
+	r := httptest.NewRequest("POST", "/v1/genesis/invent", strings.NewReader(`{"demand":"offline file vault"}`))
+	r.RemoteAddr = "203.0.113.20:3456"
+	w := httptest.NewRecorder()
+	(&Server{Engine: e}).ServeHTTP(w, r)
+	if w.Code != 401 || !strings.Contains(w.Body.String(), "genesis_auth_required") {
+		t.Fatalf("unauthorized remote mutation was not denied: %d %s", w.Code, w.Body.String())
+	}
 }
