@@ -151,7 +151,7 @@ func TestModifiedTargetChangedAfterProposalIsRejected(t *testing.T) {
 }
 
 func TestModifiedSymlinkTargetIsNotFollowed(t *testing.T) {
-	root, k, path := newGitRepoWithFile(t)
+	_, k, path := newGitRepoWithFile(t)
 	outside := filepath.Join(t.TempDir(), "outside.py")
 	if err := os.WriteFile(outside, []byte("DO NOT CHANGE\n"), 0600); err != nil {
 		t.Fatal(err)
