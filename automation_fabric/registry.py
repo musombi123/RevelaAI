@@ -327,7 +327,7 @@ def _allowed_research_hosts() -> set[str]:
     return {part.strip().lower().strip(".") for part in configured.split(",") if part.strip()}
 
 
-def _validate_public_url(raw_url: str) -> str:
+def _validate_public_url(raw_url: str, *, resolve_dns: bool = False) -> str:
     parsed = urllib.parse.urlparse(raw_url.strip())
     if parsed.scheme.lower() != "https" or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError("research URLs must be public HTTPS URLs without embedded credentials")
@@ -335,19 +335,22 @@ def _validate_public_url(raw_url: str) -> str:
     allowlist = _allowed_research_hosts()
     if not any(host == item or host.endswith("." + item) for item in allowlist):
         raise ValueError("host is not on REVELAAI_AUTOMATION_ALLOWED_HOSTS")
-    try:
-        addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-    except OSError as exc:
-        raise ValueError("research host could not be resolved") from exc
-    if not addresses:
-        raise ValueError("research host did not resolve to a public address")
-    for item in addresses:
+    # Planning only validates syntax and the explicit host allowlist. Do not
+    # cause even DNS/network activity until consent is granted and execution starts.
+    if resolve_dns:
         try:
-            address = ipaddress.ip_address(item[4][0])
-        except ValueError as exc:
-            raise ValueError("research host resolved to an invalid address") from exc
-        if not address.is_global:
-            raise ValueError("research host resolved to a non-public address")
+            addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        except OSError as exc:
+            raise ValueError("research host could not be resolved") from exc
+        if not addresses:
+            raise ValueError("research host did not resolve to a public address")
+        for item in addresses:
+            try:
+                address = ipaddress.ip_address(item[4][0])
+            except ValueError as exc:
+                raise ValueError("research host resolved to an invalid address") from exc
+            if not address.is_global:
+                raise ValueError("research host resolved to a non-public address")
     return urllib.parse.urlunparse(("https", host, parsed.path or "/", parsed.params, parsed.query, ""))
 
 
@@ -390,7 +393,8 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _fetch_public_page(raw_url: str) -> dict[str, Any]:
-    url = _validate_public_url(raw_url)
+    # Called only during approved execution; resolve and reject non-public DNS targets here.
+    url = _validate_public_url(raw_url, resolve_dns=True)
     opener = urllib.request.build_opener(_NoRedirect)
     response = None
     for _ in range(4):
@@ -408,7 +412,7 @@ def _fetch_public_page(raw_url: str) -> dict[str, Any]:
                 exc.close()
                 if not location:
                     raise ValueError("research redirect omitted Location")
-                url = _validate_public_url(urllib.parse.urljoin(url, location))
+                url = _validate_public_url(urllib.parse.urljoin(url, location), resolve_dns=True)
                 continue
             raise ValueError(f"research server returned HTTP {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
