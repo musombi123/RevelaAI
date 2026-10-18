@@ -31,6 +31,13 @@ The HTTP URL above is suitable only when both processes share the same host/netw
 
 The backend's `USECT_ZERO_ADMIN_TOKEN` must match the Go core secret. The Flask route only sends it after the existing authoritative platform-admin check succeeds. Do not send this token from the browser. Never forward the frontend's bearer JWT to the Go service.
 
+## Production prerequisites before enabling the feature flag
+
+- Put the Go service on a private network. Do not publish its admin-token endpoints directly.
+- Configure gateway/ingress rate limits for the public `POST /api/usect-zero/keys/request` route before accepting external traffic. The adapter bounds payloads but does not implement a shared, multi-instance rate limiter.
+- The current Go core persists key requests, issued-key hashes, baseline, evidence and audit events as files under `core-zero/state/`, `core-zero/evidence/` and `core-zero/audit_log/`. On a host with ephemeral storage, those records can be lost on restart/redeploy. Use persistent storage with restricted permissions and backups, or move the storage layer to a durable database before production key issuance.
+- Keep the feature flag off until the private service, persistent storage, rate limit and matching secret are verified.
+
 ## Backend routes
 
 Mounted under `/api/usect-zero`:
