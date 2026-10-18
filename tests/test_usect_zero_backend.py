@@ -356,3 +356,41 @@ def test_diagnostics_route_uses_scoped_developer_key_channel(monkeypatch, test_c
     assert observed["path"] == "/v1/diagnostics"
     assert observed["admin"] is False
     assert observed["api_key"] == "scoped-developer-key"
+
+
+def test_assembly_template_catalog_uses_scoped_read_channel(monkeypatch, test_client):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    observed = {}
+
+    def fake_core(method, path, **kwargs):
+        observed.update(method=method, path=path, **kwargs)
+        return client.CoreReply(
+            200,
+            {
+                "status": "ok",
+                "schema_version": "usect-zero.assembly-catalog.v1",
+                "templates": [
+                    {
+                        "id": "esp32-sensor",
+                        "target": "esp32-sensor",
+                        "version": "1.0.0",
+                        "validation_status": "valid_curated_template",
+                    }
+                ],
+                "count": 1,
+                "human_review_required": True,
+            },
+        )
+
+    monkeypatch.setattr(routes, "request_core", fake_core)
+    response = test_client.get(
+        "/api/usect-zero/assemble/templates",
+        headers={"X-API-Key": "scoped-read-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["schema_version"] == "usect-zero.assembly-catalog.v1"
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/v1/assemble/templates"
+    assert observed["admin"] is False
+    assert observed["api_key"] == "scoped-read-key"
