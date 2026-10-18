@@ -28,6 +28,59 @@ class SciCoreSafetyTests(unittest.TestCase):
         self.assertIn("firmware.cpp", result["artifacts"])
         self.assertIn("safety.md", result["artifacts"])
 
+
+    def test_browser_cors_preflight_is_allowed_without_bearer_token(self):
+        from flask import Flask
+        from flask_cors import CORS
+
+        app = Flask("sci-core-preflight-test")
+        CORS(
+            app,
+            origins=["https://revelacode-frontend.onrender.com"],
+            allow_headers=["Authorization", "Content-Type"],
+            methods=["GET", "POST", "OPTIONS"],
+        )
+        app.register_blueprint(sci_router, url_prefix="/api/sci")
+        client = app.test_client()
+
+        # The browser's OPTIONS request advertises Authorization but does not send
+        # the bearer token itself. It must finish CORS negotiation without granting
+        # access to the actual protected endpoint.
+        with patch("revelai.routers.sci_core._authenticated_admin") as admin_check:
+            response = client.options(
+                "/api/sci/shield/status",
+                headers={
+                    "Origin": "https://revelacode-frontend.onrender.com",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "authorization",
+                },
+            )
+        self.assertIn(response.status_code, (200, 204))
+        self.assertEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            "https://revelacode-frontend.onrender.com",
+        )
+        self.assertIn(
+            "authorization",
+            (response.headers.get("Access-Control-Allow-Headers") or "").lower(),
+        )
+        admin_check.assert_not_called()
+
+    def test_actual_sci_core_request_remains_admin_protected(self):
+        from flask import Flask, jsonify
+
+        app = Flask("sci-core-admin-gate-test")
+        app.register_blueprint(sci_router, url_prefix="/api/sci")
+        client = app.test_client()
+        def deny_admin():
+            return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
+
+        with patch("revelai.routers.sci_core._authenticated_admin", side_effect=deny_admin) as admin_check:
+            response = client.get("/api/sci/shield/status")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()["code"], "admin_required")
+        admin_check.assert_called_once()
+
     def test_routes_are_registered(self):
         self.assertGreater(len(sci_router.deferred_functions), 0)
 
