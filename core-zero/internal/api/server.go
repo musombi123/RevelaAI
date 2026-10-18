@@ -101,6 +101,37 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		replyJSON(w, 200, map[string]any{"status": "ok", "requests": items, "count": len(items)})
 		return
 	}
+	if r.URL.Path == "/v1/keys/issued" && r.Method == http.MethodGet {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		status := strings.TrimSpace(r.URL.Query().Get("status"))
+		if status != "" && status != "active" && status != "revoked" && status != "expired" {
+			replyJSON(w, 400, apiError{"error", "invalid_status_filter", "Supported issued-key status filters: active, revoked, expired."})
+			return
+		}
+		items, err := s.Keys.ListIssued(status)
+		if err != nil {
+			replyJSON(w, 503, apiError{"error", "issued_keys_unavailable", "Could not read issued-key metadata."})
+			return
+		}
+		// Never serialize IssuedKey directly: it contains the persisted key hash.
+		publicKeys := make([]map[string]any, 0, len(items))
+		for _, key := range items {
+			publicKeys = append(publicKeys, map[string]any{
+				"id":         key.ID,
+				"request_id": key.RequestID,
+				"scopes":     key.Scopes,
+				"status":     key.Status,
+				"created_at": key.CreatedAt,
+				"expires_at": key.ExpiresAt,
+				"revoked_at": key.RevokedAt,
+				"revoked_by": key.RevokedBy,
+			})
+		}
+		replyJSON(w, 200, map[string]any{"status": "ok", "keys": publicKeys, "count": len(publicKeys)})
+		return
+	}
 	if r.URL.Path == "/v1/keys/request" && r.Method == http.MethodPost {
 		var in struct {
 			Name string `json:"name"`
