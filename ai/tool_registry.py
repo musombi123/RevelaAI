@@ -12,9 +12,8 @@ import math
 import operator
 import os
 from collections.abc import Callable, Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from ai.tools import web_search as _existing_web_search
 
@@ -212,10 +211,10 @@ def _search_web(arguments: dict[str, Any]) -> dict[str, Any]:
 def _current_datetime(arguments: dict[str, Any]) -> dict[str, Any]:
     if arguments:
         return {"ok": False, "error": "This tool takes no arguments."}
-    try:
-        local = datetime.now(ZoneInfo("Africa/Nairobi"))
-    except Exception:
-        return {"ok": False, "error": "Africa/Nairobi timezone is unavailable."}
+    # Kenya uses UTC+03:00 year-round; use a fixed offset so Windows
+    # development environments do not need an external tzdata package.
+    nairobi_tz = timezone(timedelta(hours=3), name="Africa/Nairobi")
+    local = datetime.now(nairobi_tz)
     return {
         "ok": True,
         "timezone": "Africa/Nairobi",
