@@ -6,7 +6,10 @@ on:
       - "core-zero/**"
       - "routes/usect_zero_routes.py"
       - "services/usect_zero_client.py"
+      - "ai/usect_zero_tools.py"
+      - "services/ai_service.py"
       - "tests/test_usect_zero_backend.py"
+      - "tests/test_usect_zero_brain_tool.py"
       - "app.py"
       - ".github/workflows/usect-zero-ci.yml"
   pull_request:
@@ -14,7 +17,10 @@ on:
       - "core-zero/**"
       - "routes/usect_zero_routes.py"
       - "services/usect_zero_client.py"
+      - "ai/usect_zero_tools.py"
+      - "services/ai_service.py"
       - "tests/test_usect_zero_backend.py"
+      - "tests/test_usect_zero_brain_tool.py"
       - "app.py"
       - ".github/workflows/usect-zero-ci.yml"
 
@@ -48,6 +54,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install adapter test dependencies
-        run: python -m pip install "Flask>=2.3,<4" "requests>=2.31" "pytest>=8,<9"
-      - name: Run adapter tests
-        run: python -m pytest -q tests/test_usect_zero_backend.py
+        run: python -m pip install "Flask>=2.3,<4" "requests>=2.31" "python-dotenv>=1.0" "pytest>=8,<9"
+      - name: Run adapter and brain-tool tests
+        run: python -m pytest -q tests/test_usect_zero_backend.py tests/test_usect_zero_brain_tool.py
