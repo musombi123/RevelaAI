@@ -1,6 +1,7 @@
 """Review-gated Meta-Engineer API for the existing Flask application."""
 from __future__ import annotations
 import os
+import importlib.util
 from datetime import datetime, timezone
 import requests
 from flask import Blueprint, current_app, jsonify, request
@@ -64,8 +65,36 @@ def _authenticated_admin():
 
 @meta_engineer_bp.get("/health")
 def meta_health():
-    return jsonify({"status": "ok", "module": "meta-engineer", "mode": "proposal-only",
-                    "auto_deploy": False, "auto_delete": False})
+    """Report core prerequisites without exposing credentials or role details."""
+    from meta_engineer.integrator import db
+
+    pytest_available = importlib.util.find_spec("pytest") is not None
+    psutil_available = importlib.util.find_spec("psutil") is not None
+    storage = "not_configured"
+    if db is not None:
+        try:
+            db.command("ping")
+            storage = "connected"
+        except Exception:
+            storage = "unreachable"
+
+    checks = {
+        "proposal_generator": "ready",
+        "sandbox_pytest": "available" if pytest_available else "missing",
+        "sandbox_memory_monitor": "available" if psutil_available else "missing",
+        "audit_storage": storage,
+    }
+    ready = pytest_available and psutil_available and storage == "connected"
+    return jsonify({
+        "status": "ok" if ready else "degraded",
+        "module": "meta-engineer",
+        "mode": "target-aware-proposal-builder",
+        "checks": checks,
+        "candidate_execution": False,
+        "auto_deploy": False,
+        "auto_delete": False,
+    })
+
 
 @meta_engineer_bp.get("/scan")
 def scan():
@@ -123,8 +152,8 @@ def propose():
             })
         tests = {
             "passed": bool(artifact_results) and all(item["passed"] for item in artifact_results),
-            "logs": "\\n\\n".join(
-                "=== " + item["path"] + " (" + ("PASS" if item["passed"] else "FAIL") + ") ===\\n" + item["logs"]
+            "logs": "\n\n".join(
+                "=== " + item["path"] + " (" + ("PASS" if item["passed"] else "FAIL") + ") ===\n" + item["logs"]
                 for item in artifact_results
             )[:40000],
             "coverage": 0.0,
@@ -164,21 +193,22 @@ def propose():
             # Only Markdown is written; generated source never enters the live import path.
             from pathlib import Path
             root = Path(__file__).resolve().parents[1]
-            target = (root / changelog_path).resolve()
-            if root not in target.parents:
+            target_path = (root / changelog_path).resolve()
+            if root not in target_path.parents:
                 raise ValueError("invalid changelog path")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(changelog, encoding="utf-8")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(changelog, encoding="utf-8")
             return jsonify({"status": "ready for review", "ideaId": idea_id, "idea_status": status,
                 "changelog_path": changelog_path, "changelog": changelog, "test_logs": tests.get("logs", ""),
                 "code_path": generated["code_path"], "generated_code": generated["code"], "generated_files": generated.get("files", []), "auto_deploy": False}), 201
-        return jsonify({"status": "failed_test", "ideaId": idea_id, "changelog_path": changelog_path,
-            "test_logs": tests.get("logs", ""), "auto_deploy": False}), 422
+        return jsonify({"status": "failed_test", "ideaId": idea_id, "idea_status": status, "changelog_path": changelog_path,
+            "test_logs": tests.get("logs", ""), "code_path": generated["code_path"], "generated_code": generated["code"], "generated_files": generated.get("files", []), "auto_deploy": False}), 422
     except ValueError as exc:
         return jsonify({"status": "error", "code": "invalid_spec", "message": str(exc)}), 400
     except Exception:
+        current_app.logger.exception("Meta-Engineer proposal pipeline failed")
         return jsonify({"status": "error", "code": "meta_engineer_failed",
-            "message": "Proposal could not be persisted or audited."}), 503
+            "message": "Build failed during validation or persistence. Check the server logs and Meta-Engineer health."}), 503
 
 @meta_engineer_bp.post("/approve/<idea_id>")
 def approve(idea_id):
