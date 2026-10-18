@@ -65,6 +65,7 @@ func (r *WebResearcher) Research(ctx context.Context, demand string) (ResearchEv
 			e.Sources = append(e.Sources, records...)
 		}
 	}
+	if err := ctx.Err(); err != nil { return ResearchEvidence{}, err }
 	usable := 0
 	for _, s := range e.Sources {
 		if s.Status == "retrieved" || s.Status == "reference_link" {
