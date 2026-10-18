@@ -20,7 +20,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	switch {
 	case r.URL.Path == "/v1/mind/health" && r.Method == http.MethodGet:
-		writeJSON(w, 200, map[string]any{"status": "ok", "service": "USECT-TWO", "version": Version, "model_free": true, "integration": s.IntegrationStatus()})
+		mirror, _ := os.ReadFile(filepath.Join(s.CoreRoot, "metrics", "mirror.json"))
+		var mirrorStatus any
+		if len(mirror) > 0 { _ = json.Unmarshal(mirror, &mirrorStatus) }
+		writeJSON(w, 200, map[string]any{"status": "ok", "service": "USECT-TWO", "version": Version, "model_free": true, "integration": s.IntegrationStatus(), "mirror": mirrorStatus})
 	case r.URL.Path == "/v1/mind/metrics" && r.Method == http.MethodGet:
 		result, err := s.Scan(r.Context())
 		if err != nil { writeAPIError(w, 503, "metrics_unavailable", err.Error()); return }
@@ -32,6 +35,13 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result, err := s.Evolve(r.Context(), req)
 		if err != nil { if errors.Is(err, ErrGuardianBlocked) { writeAPIError(w, 403, "guardian_blocked", "Guardian blocked the request before creating any mutation or evolution files."); return }; if errors.Is(err, ErrNoQualifiedMutation) { writeAPIError(w, 422, "no_qualified_mutation", err.Error()); return }; writeAPIError(w, 500, "evolution_failed", err.Error()); return }
 		writeJSON(w, 202, result)
+	case r.URL.Path == "/v1/mind/learning" && r.Method == http.MethodGet:
+		summary, err := s.learningSummary(); if err != nil { writeAPIError(w, 503, "learning_unavailable", "Could not read the human-feedback ledger."); return }; writeJSON(w, 200, summary)
+	case r.URL.Path == "/v1/mind/feedback" && r.Method == http.MethodPost:
+		if !s.allowMutation(w, r) { return }
+		var feedback LearningFeedback
+		if err := decodeJSON(w, r, &feedback); err != nil { writeAPIError(w, 400, "invalid_json", err.Error()); return }
+		summary, err := s.RecordFeedback(feedback); if err != nil { writeAPIError(w, 422, "feedback_rejected", err.Error()); return }; writeJSON(w, 201, summary)
 	case r.URL.Path == "/v1/mind/evolutions" && r.Method == http.MethodGet:
 		items, err := s.listEvolutions(); if err != nil { writeAPIError(w, 503, "evolutions_unavailable", err.Error()); return }; writeJSON(w, 200, map[string]any{"status": "ok", "evolutions": items, "count": len(items)})
 	case strings.HasPrefix(r.URL.Path, "/v1/mind/tools/") && strings.HasSuffix(r.URL.Path, "/improvement") && r.Method == http.MethodGet:
@@ -84,7 +94,7 @@ func (s *Service) proxyCore(w http.ResponseWriter, r *http.Request, which string
 
 func (s *Service) serveStream(w http.ResponseWriter, r *http.Request) {
 	flusher,ok:=w.(http.Flusher);if !ok{writeAPIError(w,500,"stream_unsupported","Server does not support streaming.");return};w.Header().Set("Content-Type","text/event-stream");w.Header().Set("Connection","keep-alive");w.Header().Set("X-Accel-Buffering","no");w.WriteHeader(200);flusher.Flush();ticker:=time.NewTicker(15*time.Second);defer ticker.Stop()
-	emit:=func(){evolutions,_:=s.listEvolutions();if len(evolutions)>5{evolutions=evolutions[:5]};data:=map[string]any{"at":time.Now().UTC(),"integration":s.IntegrationStatus(),"recent_events":s.recentEvents(),"recent_evolutions":evolutions,"model_free":true,"automatic_merge":false};b,_:=json.Marshal(data);_,_=fmt.Fprintf(w,"event: mind_snapshot\ndata: %s\n\n",b);flusher.Flush()};emit()
+	emit:=func(){evolutions,_:=s.listEvolutions();if len(evolutions)>5{evolutions=evolutions[:5]};data:=map[string]any{"at":time.Now().UTC(),"integration":s.IntegrationStatus(),"recent_events":s.recentEvents(),"mirror":s.readMirrorSnapshot(),"learning":s.learningSummarySnapshot(),"recent_evolutions":evolutions,"model_free":true,"automatic_merge":false};b,_:=json.Marshal(data);_,_=fmt.Fprintf(w,"event: mind_snapshot\ndata: %s\n\n",b);flusher.Flush()};emit()
 	for{select{case<-r.Context().Done():return;case<-ticker.C:emit()}}
 }
 
@@ -92,3 +102,6 @@ func (s *Service) listEvolutions() ([]map[string]any,error){entries,err:=os.Read
 
 func (s *Service) logBlocked(stage,input,reason string)error{path:=filepath.Join(s.CoreRoot,"guardian","blocked.log");if err:=os.MkdirAll(filepath.Dir(path),0o700);err!=nil{return err};entry:=map[string]any{"at":time.Now().UTC(),"stage":stage,"input_sha256":hashString(input),"reason":reason,"mutation_files_created":false};b,err:=json.Marshal(entry);if err!=nil{return err};f,err:=os.OpenFile(path,os.O_APPEND|os.O_CREATE|os.O_WRONLY,0o600);if err!=nil{return err};defer f.Close();_,err=f.Write(append(b,'\n'));return err}
 func (s *Service) publish(event string,data map[string]any){s.mu.Lock();defer s.mu.Unlock();if s.events==nil{s.events=[]map[string]any{}};s.events=append(s.events,map[string]any{"event":event,"at":time.Now().UTC(),"data":data});if len(s.events)>100{s.events=append([]map[string]any(nil),s.events[len(s.events)-100:]...)}}
+
+func(s *Service)readMirrorSnapshot()any{raw,err:=os.ReadFile(filepath.Join(s.CoreRoot,"metrics","mirror.json"));if err!=nil{return map[string]any{"status":"not_observed_yet"}};var value any;if json.Unmarshal(raw,&value)!=nil{return map[string]any{"status":"invalid_saved_snapshot"}};return value}
+func(s *Service)learningSummarySnapshot()any{value,err:=s.learningSummary();if err!=nil{return map[string]any{"status":"unavailable"}};return value}

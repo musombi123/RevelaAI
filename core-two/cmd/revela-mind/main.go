@@ -39,7 +39,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *daemon { go service.RunDaemon(ctx, *interval) }
-	server := &http.Server{Addr:*listen, Handler:service, ReadHeaderTimeout:5*time.Second, ReadTimeout:30*time.Second, WriteTimeout:0, IdleTimeout:60*time.Second, MaxHeaderBytes:1<<20}
+	server := &http.Server{Addr:*listen, Handler:service.WithTelemetry(service), ReadHeaderTimeout:5*time.Second, ReadTimeout:30*time.Second, WriteTimeout:0, IdleTimeout:60*time.Second, MaxHeaderBytes:1<<20}
 	go func(){ <-ctx.Done(); shutdown,cancel:=context.WithTimeout(context.Background(),8*time.Second); defer cancel(); _=server.Shutdown(shutdown) }()
 	fmt.Fprintf(os.Stderr,"USECT-TWO %s listening on %s; model_free=true; daemon=%t; auto_merge=false\n",mind.Version,*listen,*daemon)
 	fmt.Fprintln(os.Stderr,"Evolutions are review-only. Set MIND_ADMIN_TOKEN for authenticated mutations; keep public exposure behind TLS and rate limits.")

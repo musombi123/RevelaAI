@@ -29,6 +29,10 @@ type Service struct {
 	ZeroRoot string
 	One      *genesis.Engine
 	mu       sync.RWMutex
+	scanMu   sync.Mutex
+	evolveMu sync.Mutex
+	mirrorMu sync.Mutex
+	learningMu sync.Mutex
 	events   []map[string]any
 }
 
@@ -43,6 +47,8 @@ type EvolveResult struct {
 	Version            string                `json:"version"`
 	ToolName           string                `json:"tool_name"`
 	SelectedMutation   string                `json:"selected_mutation"`
+	SelectionReason    string                `json:"selection_reason"`
+	LearningScores     map[string]float64    `json:"learning_scores"`
 	MutationBatch      string                `json:"mutation_batch"`
 	MutationCount      int                   `json:"mutation_count"`
 	CandidateResults   []CandidateEvaluation `json:"candidate_results"`
@@ -119,10 +125,15 @@ func (s *Service) IntegrationStatus() map[string]any {
 }
 
 func (s *Service) Scan(ctx context.Context) (map[string]any, error) {
+	s.scanMu.Lock()
+	defer s.scanMu.Unlock()
 	if ctx == nil { ctx = context.Background() }
 	select { case <-ctx.Done(): return nil, ctx.Err(); default: }
 	inventory, err := s.scanRepositoryInventory()
 	if err != nil { return nil, fmt.Errorf("scan repository evidence tree: %w", err) }
+	mirror, err := s.observeMirror(ctx)
+	if err != nil { return nil, fmt.Errorf("mirror ZERO/ONE operational evidence: %w", err) }
+	if err := writeJSONFile(filepath.Join(s.CoreRoot, "metrics", "mirror.json"), mirror, 0o600); err != nil { return nil, err }
 	items, err := s.One.ListInventions()
 	if err != nil { return nil, fmt.Errorf("list Core-One inventions: %w", err) }
 	metrics := make([]ToolMetrics, 0, len(items))
@@ -145,13 +156,13 @@ func (s *Service) Scan(ctx context.Context) (map[string]any, error) {
 	research := map[string]any{
 		"schema_version":"usect-two.research-evidence.v1", "observed_at":time.Now().UTC(),
 		"repository_snapshot":map[string]any{"baseline_commit":"40dc1caf07419ad14f771be88fc238baa51d4480","source":"GitHub repository scan before Core-Two branch changes"},
-		"integration":s.IntegrationStatus(), "repository_inventory":inventory, "production_invention_count":len(items), "observed_inventions":items,
+		"integration":s.IntegrationStatus(), "repository_inventory":inventory, "mirror":mirror, "production_invention_count":len(items), "observed_inventions":items,
 		"average_time_to_invent_ms":avgTime, "average_bom_cost_kes":avgBOM, "average_safety_score":avgSafety, "average_human_merge_time_ms":avgMerge,
 		"data_quality":map[string]any{"historical_time_measurements_available":len(times)>0,"verified_bom_costs_available":len(boms)>0,"zero_guardian_policy_file_present":fileExists(filepath.Join(s.ZeroRoot,"guardian","rules.yaml")),"synthetic_fixture_counted_as_production_tool":false},
 		"note":"No invention evidence.json files were present under core-one/inventions in the scanned source snapshot. Production averages remain null until the existing system records the values. The offline_vault fixture is synthetic and is not counted as a Core-One invention.",
 	}
 	if err:=writeJSONFile(filepath.Join(s.CoreRoot,"research_evidence.json"),research,0o600);err!=nil{return nil,err}
-	return map[string]any{"status":"ok","observed_tool_count":len(items),"metrics":metrics,"research_evidence_path":"core-two/research_evidence.json","repository_inventory":inventory,"integration":s.IntegrationStatus()},nil
+	return map[string]any{"status":"ok","observed_tool_count":len(items),"metrics":metrics,"research_evidence_path":"core-two/research_evidence.json","repository_inventory":inventory,"mirror":mirror,"integration":s.IntegrationStatus()},nil
 }
 
 func (s *Service) metricForTool(name string) ToolMetrics {
@@ -169,6 +180,6 @@ func (s *Service) metricForTool(name string) ToolMetrics {
 	m.LibraryFiles=countSourceFiles(filepath.Join(s.OneRoot,"libraries","created",name))
 	m.GuardianBlockCount,_=countLogLines(filepath.Join(s.OneRoot,"guardian","blocked.log"),"")
 	m.ZeroHealingEvents,_=countLogLines(filepath.Join(s.ZeroRoot,"audit_log","events.jsonl"),"heal|recovery|restore")
-	m.EndpointUsageCount,m.EndpointUsageObserved=countEndpointUsage(filepath.Join(s.OneRoot,"state","events","events.jsonl"))
+	m.EndpointUsageCount,m.EndpointUsageObserved=countToolEndpointUsage(filepath.Join(s.CoreRoot,"state","http_metrics.jsonl"),name)
 	return m
 }

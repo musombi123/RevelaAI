@@ -17,6 +17,8 @@ import (
 )
 
 func (s *Service) Evolve(ctx context.Context, request EvolveRequest) (EvolveResult, error) {
+	s.evolveMu.Lock()
+	defer s.evolveMu.Unlock()
 	if ctx == nil { ctx = context.Background() }
 	objective := strings.TrimSpace(request.Objective)
 	if objective == "" { objective = "improve offline_vault graph traversal efficiency" }
@@ -31,13 +33,13 @@ func (s *Service) Evolve(ctx context.Context, request EvolveRequest) (EvolveResu
 	select{case<-ctx.Done():return EvolveResult{},ctx.Err();default:}
 	if _,err:=s.Scan(ctx);err!=nil{return EvolveResult{},err}
 	evals,bench,err:=evaluateCatalog(ctx);if err!=nil{return EvolveResult{},fmt.Errorf("sandbox evaluation failed: %w",err)}
-	selected,ok:=selectCandidate(objective,evals);if !ok{return EvolveResult{},ErrNoQualifiedMutation}
+	selected,selectionReason,learningScores,ok:=s.selectCandidateWithLearning(objective,evals);if !ok{return EvolveResult{},ErrNoQualifiedMutation}
 	mutationBatch,mutationCount,err:=s.stageMutationBatch(objective,evals,bench);if err!=nil{return EvolveResult{},err}
 	version,awaitPath,err:=s.stageEvolution(toolName,objective,selected,mutationBatch,evals,bench);if err!=nil{_ = os.RemoveAll(filepath.Join(s.CoreRoot,"mutations",mutationBatch));return EvolveResult{},err}
 	protectionOK,protectionNote:=rvx.Probe();if !protectionOK{_ = os.RemoveAll(filepath.Join(s.CoreRoot,"evolutions",version));_ = os.RemoveAll(filepath.Join(s.CoreRoot,"mutations",mutationBatch));return EvolveResult{},errors.New("RVX protection self-test failed after staging; candidate discarded")}
 	metric:=map[string]any{"tool_name":toolName,"observed_at":time.Now().UTC(),"fixture_only":true,"evidence_status":"synthetic_fixture_replay_not_production_invention","time_to_invent_ms":nil,"bom_cost_kes":nil,"human_merge_time_ms":nil,"graph_traversal_benchmark":bench,"selected_mutation":selected.ID,"improvement_type":selected.ImprovementType,"improvement_percent":selected.ImprovementPct,"production_tool_count":s.productionToolCount()}
 	if err:=writeJSONFile(filepath.Join(s.CoreRoot,"metrics",toolName+".json"),metric,0o600);err!=nil{return EvolveResult{},err}
-	result:=EvolveResult{Status:"await_merge",Version:version,ToolName:toolName,SelectedMutation:selected.ID,MutationBatch:mutationBatch,MutationCount:mutationCount,CandidateResults:evals,Benchmark:bench,RVXProtection:map[string]any{"passed":protectionOK,"status":protectionNote,"baseline_encryption_protection_present":false,"candidate_primitive":"AES-256-GCM","external_key_required":true,"tamper_detection_tested":true,"numeric_security_score":nil,"score_note":"Control presence is recorded; no ungrounded cryptographic strength score is invented."},ProductionEvidence:map[string]any{"core_one_historical_inventions":s.productionToolCount(),"real_time_to_invent_available":false,"verified_bom_cost_kes_available":false,"synthetic_fixture_only":true},AwaitMergePath:awaitPath,CreatedAt:time.Now().UTC()}
+	result:=EvolveResult{Status:"await_merge",Version:version,ToolName:toolName,SelectedMutation:selected.ID,SelectionReason:selectionReason,LearningScores:learningScores,MutationBatch:mutationBatch,MutationCount:mutationCount,CandidateResults:evals,Benchmark:bench,RVXProtection:map[string]any{"passed":protectionOK,"status":protectionNote,"baseline_encryption_protection_present":false,"candidate_primitive":"AES-256-GCM","external_key_required":true,"tamper_detection_tested":true,"numeric_security_score":nil,"score_note":"Control presence is recorded; no ungrounded cryptographic strength score is invented."},ProductionEvidence:map[string]any{"core_one_historical_inventions":s.productionToolCount(),"real_time_to_invent_available":false,"verified_bom_cost_kes_available":false,"synthetic_fixture_only":true},AwaitMergePath:awaitPath,CreatedAt:time.Now().UTC()}
 	mesh:=provider.FromEnvironment();if mesh.Configured(){if mesh.NotifyEvolution(ctx,map[string]any{"version":version,"tool_name":toolName,"mutation":selected.ID,"status":"await_merge"})==nil{result.ProviderNotified=true}}
 	s.publish("evolution_proposed",map[string]any{"version":version,"tool_name":toolName,"selected_mutation":selected.ID,"status":"await_merge"})
 	return result,nil
