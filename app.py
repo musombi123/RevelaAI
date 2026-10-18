@@ -315,6 +315,8 @@ from routes.meta_engineer_routes import (
     meta_engineer_bp,
 )
 
+from routes.automation_fabric_routes import automation_fabric_bp
+
 from revelai.routers.sci_core import sci_router
 from revelai.routers.agi_router import agi_router
 from revelai.core.agi_manifest import get_self_description_answer
@@ -5949,6 +5951,22 @@ except Exception as exc:
 
     app.logger.warning(
         "agi_router registration failed | error=%s",
+        exc,
+    )
+
+
+
+try:
+
+    app.register_blueprint(
+        automation_fabric_bp,
+        url_prefix="/api/automation-fabric",
+    )
+
+except Exception as exc:
+
+    app.logger.warning(
+        "automation_fabric_bp registration failed | error=%s",
         exc,
     )
 
