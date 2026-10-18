@@ -213,3 +213,77 @@ def test_core_response_stream_is_capped(monkeypatch):
 
     with pytest.raises(client.USECTZeroResponseTooLarge):
         client.request_core("GET", "/v1/health")
+
+
+def test_health_response_does_not_expose_repository_path(monkeypatch, test_client):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    monkeypatch.setattr(
+        routes,
+        "request_core",
+        lambda *args, **kwargs: client.CoreReply(
+            200,
+            {
+                "status": "ok",
+                "service": "USECT-ZERO",
+                "model_free": True,
+                "offline_mode": True,
+                "repository_root": "/srv/private/repository",
+                "execution_policy": "human-gated",
+                "hardware_actuation": False,
+            },
+        ),
+    )
+
+    response = test_client.get("/api/usect-zero/health")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["model_free"] is True
+    assert payload["offline_mode"] is True
+    assert "repository_root" not in payload
+    assert "/srv/private/repository" not in response.get_data(as_text=True)
+
+
+def test_health_when_disabled_does_not_call_core(monkeypatch, test_client):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
+    monkeypatch.setattr(
+        routes,
+        "request_core",
+        lambda *args, **kwargs: pytest.fail("disabled health must not call the core"),
+    )
+
+    response = test_client.get("/api/usect-zero/health")
+
+    assert response.status_code == 503
+    assert response.get_json()["status"] == "disabled"
+
+
+def test_client_uses_server_side_admin_token_without_forwarding_authorization(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    monkeypatch.setenv("USECT_ZERO_ADMIN_TOKEN", "server-side-admin-secret")
+    monkeypatch.setenv("USECT_ZERO_URL", "http://127.0.0.1:8780")
+    observed = {}
+
+    class FakeHTTPResponse:
+        status_code = 200
+
+        def iter_content(self, chunk_size=65536):
+            yield b'{"status":"baseline_recorded"}'
+
+        @staticmethod
+        def close():
+            return None
+
+    def fake_http(method, url, **kwargs):
+        observed.update(method=method, url=url, **kwargs)
+        return FakeHTTPResponse()
+
+    monkeypatch.setattr(client.requests, "request", fake_http)
+    reply = client.request_core("POST", "/v1/heal/baseline", admin=True)
+
+    assert reply.status_code == 200
+    assert observed["headers"]["X-Admin-Token"] == "server-side-admin-secret"
+    assert "Authorization" not in observed["headers"]
+    assert "X-API-Key" not in observed["headers"]
+    assert observed["allow_redirects"] is False
+    assert observed["stream"] is True
