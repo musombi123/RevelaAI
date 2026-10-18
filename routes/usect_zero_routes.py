@@ -20,6 +20,7 @@ from services.usect_zero_client import (
     USECTZeroDisabled,
     USECTZeroError,
     USECTZeroPayloadTooLarge,
+    USECTZeroResponseTooLarge,
     USECTZeroUnavailable,
     is_enabled,
     request_core,
@@ -46,7 +47,7 @@ def _validate_post_body():
     if request.content_length is not None and request.content_length > MAX_REQUEST_BYTES:
         return None, _error("payload_too_large", "Request body exceeds the 1 MiB limit.", 413)
 
-    body = request.get_data(cache=True) or b""
+    body = request.stream.read(MAX_REQUEST_BYTES + 1) or b""
     if len(body) > MAX_REQUEST_BYTES:
         return None, _error("payload_too_large", "Request body exceeds the 1 MiB limit.", 413)
 
@@ -101,7 +102,9 @@ def _proxy(
             503,
         )
     except USECTZeroPayloadTooLarge:
-        return _error("payload_too_large", "The request or core response exceeded the size limit.", 413)
+        return _error("payload_too_large", "Request body exceeds the 1 MiB limit.", 413)
+    except USECTZeroResponseTooLarge:
+        return _error("usect_zero_response_too_large", "The core response exceeded the adapter limit.", 502)
     except USECTZeroConfigurationError:
         current_app.logger.error("USECT-ZERO has invalid server-side configuration.")
         return _error("usect_zero_misconfigured", "USECT-ZERO is not configured correctly.", 503)
