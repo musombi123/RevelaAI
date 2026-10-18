@@ -1,0 +1,32 @@
+version: 1
+sources:
+  - id: github
+    purpose: public repository search
+    mode: API query
+  - id: arxiv
+    purpose: research-paper discovery
+    mode: Atom API query
+  - id: nvd
+    purpose: defensive vulnerability-awareness metadata
+    mode: CVE API query
+  - id: kenya_news
+    purpose: emerging Kenyan technology-demand signals
+    mode: RSS query
+  - id: wipo_patentscope
+    purpose: patent search lead only
+    mode: reference link; verify independently
+  - id: iso
+    purpose: standards search lead only
+    mode: reference link; standards text/licensing may require access
+  - id: kebs
+    purpose: Kenya standards catalogue lead only
+    mode: reference link; verify current standard and scope
+  - id: jumia_kenya
+    purpose: consumer-market/product-price research lead
+    mode: search link; live price not asserted
+  - id: mouser
+    purpose: electronics BOM/component search lead
+    mode: search link; live price not asserted
+  - id: digikey
+    purpose: semiconductor/component catalogue lead
+    mode: reference link; live availability not asserted
