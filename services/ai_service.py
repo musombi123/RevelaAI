@@ -70,6 +70,7 @@ from typing import Any
 from ai.ai_client import ask_hf
 from ai.system_prompt import SYSTEM_PROMPT
 from ai.orchestrator import Orchestrator
+from ai.tool_registry import get_tool_declarations, get_tool_executor
 
 
 # =========================================================
@@ -873,6 +874,82 @@ def determine_confidence(
     return "low"
 
 
+
+# =========================================================
+# NATIVE TOOL SELECTION
+# =========================================================
+
+_NATIVE_TOOL_MATH_RE = re.compile(
+    r"\d[\d,._]*\s*(?:[+\-*/%^]|\bplus\b|\bminus\b|\btimes\b|"
+    r"\bmultiplied\s+by\b|\bdivided\s+by\b)\s*\d",
+    re.IGNORECASE,
+)
+
+_NATIVE_TOOL_REQUEST_RE = re.compile(
+    r"\b(calculate|compute|evaluate|solve|work\s+out|"
+    r"search|look\s+up|browse|research|verify|fact[- ]?check|"
+    r"find\s+(?:sources|evidence|studies)|latest|current|today|"
+    r"yesterday|tomorrow|right\s+now|at\s+present|as\s+of|"
+    r"this\s+week|this\s+month|exchange\s+rate|weather\s+forecast|"
+    r"market\s+price|price\s+today|breaking\s+news)\b",
+    re.IGNORECASE,
+)
+
+_NATIVE_TOOL_TIME_RE = re.compile(
+    r"\b(current\s+time|what\s+time\s+is\s+it|today'?s\s+date|"
+    r"date\s+today|what\s+date\s+is\s+it|time\s+in\s+\w+)\b",
+    re.IGNORECASE,
+)
+
+
+def should_offer_native_tools(
+    message: str,
+    orchestrator_data: dict[str, Any] | None = None,
+) -> bool:
+    """
+    Enable server-side function calling for requests likely to need a tool.
+
+    Ordinary conversation stays on the existing provider path. Arithmetic,
+    explicit research/current-information requests and date/time lookups can
+    use the trusted native tool registry.
+    """
+    text = str(message or "").strip()
+    if not text:
+        return False
+
+    metadata = orchestrator_data if isinstance(orchestrator_data, dict) else {}
+    online = metadata.get("online")
+    online = online if isinstance(online, dict) else {}
+
+    if bool(metadata.get("requires_online_data")) or bool(online.get("required")):
+        return True
+
+    if _NATIVE_TOOL_TIME_RE.search(text):
+        return True
+
+    if _NATIVE_TOOL_MATH_RE.search(text):
+        return True
+
+    if _NATIVE_TOOL_REQUEST_RE.search(text):
+        return True
+
+    lowered = text.casefold()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "what is the percentage",
+            "what percentage",
+            "percentage of",
+            "percent of",
+            "calculate my profit",
+            "calculate the total",
+            "check today's",
+            "check the latest",
+            "look for current",
+        )
+    )
+
+
 # =========================================================
 # MAIN PIPELINE
 # =========================================================
@@ -1155,6 +1232,11 @@ def process_message(
     # TEXT MODEL
     # =====================================================
 
+    native_tools_requested = should_offer_native_tools(
+        normalized_message,
+        orchestrator_data,
+    )
+
     try:
 
         result = ask_hf(
@@ -1162,6 +1244,18 @@ def process_message(
             system_prompt=model_system_prompt,
             session_id=session_id,
             context=conversation_context,
+            tool_declarations=(
+                get_tool_declarations()
+                if native_tools_requested
+                else None
+            ),
+            tool_executor=(
+                get_tool_executor()
+                if native_tools_requested
+                else None
+            ),
+            max_tool_rounds=4,
+            max_tool_calls=8,
         )
 
     except Exception as exc:
@@ -1280,6 +1374,13 @@ def process_message(
                 "error_code",
                 "model_request_failed",
             ),
+            "tool_execution": result.get(
+                "tool_execution",
+                {
+                    "enabled": native_tools_requested,
+                    "called": False,
+                },
+            ),
         }
 
     # =====================================================
@@ -1396,6 +1497,14 @@ def process_message(
         "usage": result.get(
             "usage",
             {},
+        ),
+
+        "tool_execution": result.get(
+            "tool_execution",
+            {
+                "enabled": native_tools_requested,
+                "called": False,
+            },
         ),
 
         "orchestrator": orchestrator_data,
