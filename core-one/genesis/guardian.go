@@ -41,6 +41,9 @@ func (g Guardian) Check(text string) GuardianDecision {
 	if lower == "" {
 		return GuardianDecision{Allowed: false, Code: "empty_input", Reason: "A non-empty demand or evidence item is required."}
 	}
+	if ok, reason := g.policyReady(); !ok {
+		return GuardianDecision{Allowed: false, Code: "guardian_policy_unavailable", Reason: reason}
+	}
 	for _, pattern := range harmfulPatterns {
 		if pattern.MatchString(lower) {
 			return GuardianDecision{Allowed: false, Code: "guardian_block", Reason: "The request or source matches a prohibited harm pattern."}
@@ -54,6 +57,34 @@ func (g Guardian) Check(text string) GuardianDecision {
 		}
 	}
 	return GuardianDecision{Allowed: true, Code: "allowed", Reason: "No prohibited intent pattern was detected; normal review gates still apply."}
+}
+
+
+func (g Guardian) policyReady() (bool, string) {
+	path := filepath.Join(g.CoreRoot, "guardian", "rules.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false, "Guardian policy is unavailable; fail-closed mode blocks the request."
+	}
+	if len(raw) == 0 || len(raw) > 64*1024 {
+		return false, "Guardian policy is empty or exceeds the safe size limit; fail-closed mode blocks the request."
+	}
+	policy := strings.ToLower(string(raw))
+	required := []string{
+		"mode: fail_closed",
+		"core_law:",
+		"weapons",
+		"warfare",
+		"explosives",
+		"malware_and_credential_theft",
+		"privacy_violations",
+	}
+	for _, marker := range required {
+		if !strings.Contains(policy, marker) {
+			return false, "Guardian policy is missing required safety controls; fail-closed mode blocks the request."
+		}
+	}
+	return true, ""
 }
 
 func (g Guardian) extraTerms() []string {
