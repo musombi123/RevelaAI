@@ -68,6 +68,7 @@ def _proxy(
     *,
     admin: bool = False,
     query: dict[str, str] | None = None,
+    forward_api_key: bool = True,
 ):
     body = None
     if method.upper() == "POST":
@@ -77,7 +78,7 @@ def _proxy(
 
     # Only X-API-Key is passed for developer operations. The client's
     # Authorization bearer token is deliberately never passed to the core.
-    api_key = None if admin else request.headers.get("X-API-Key")
+    api_key = None if admin or not forward_api_key else request.headers.get("X-API-Key")
     try:
         reply: CoreReply = request_core(
             method,
@@ -157,7 +158,7 @@ def usect_zero_health():
 @usect_zero_bp.post("/keys/request")
 def request_developer_key():
     """Public intake only: the Go core creates a pending request, never a key."""
-    return _proxy("POST", "/v1/keys/request")
+    return _proxy("POST", "/v1/keys/request", forward_api_key=False)
 
 
 @usect_zero_bp.get("/keys/requests")
