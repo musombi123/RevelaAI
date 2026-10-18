@@ -142,6 +142,11 @@ def _extract_json_object(message: str) -> dict[str, Any] | None:
     """Accept one complete JSON object, optionally inside a fenced block."""
     candidates = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", message, re.I | re.S)
     candidates.append(message.strip())
+    # Also accept one complete evidence object embedded in a short natural-language instruction.
+    first_brace = message.find("{")
+    last_brace = message.rfind("}")
+    if first_brace >= 0 and last_brace > first_brace:
+        candidates.append(message[first_brace:last_brace + 1])
     for candidate in candidates:
         if len(candidate) > MAX_TOOL_INPUT_CHARS:
             continue
