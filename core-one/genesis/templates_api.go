@@ -79,6 +79,7 @@ Genesis has generated a proposal. It intentionally does not merge, install, exec
 ## Required before merge
 
 - [ ] Review demand, research provenance, and evidence.json; verify external claims independently.
+- [ ] Review capability_plan.json and assign an owner/test to every unresolved capability.
 - [ ] Review every generated source file and the reusable library driver.
 - [ ] Run go test ./... from core-one/.
 - [ ] Run static analysis, dependency/license checks, secret scanning, and security tests.
