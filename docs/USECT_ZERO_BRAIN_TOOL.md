@@ -1,6 +1,6 @@
 # USECT-ZERO as a first-class brain tool
 
-USECT-ZERO is wired into the primary `services/ai_service.py` request pipeline. The brain does not treat it as a text-model fallback: the server's engineering-tool dispatcher runs before ordinary model generation, and the catalog of supported operations is included in the model instructions on every turn. When a supported engineering task is selected but the core/key is unavailable, the request returns an explicit tool-unavailable result instead of pretending to have completed the operation with a generic answer.
+USECT-ZERO is wired into the primary `services/ai_service.py` request pipeline. The brain does not treat it as a text-model fallback: the server's engineering-tool dispatcher runs before ordinary model generation, and the catalog of supported operations is included in each ordinary text-model turn. When a supported engineering task is selected but the core/key is unavailable, the request returns an explicit tool-unavailable result instead of pretending to have completed the operation with a generic answer.
 
 ## Required runtime configuration
 
