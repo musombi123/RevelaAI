@@ -94,6 +94,7 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 	if err != nil {
 		return Invention{}, fmt.Errorf("research failed: %w", err)
 	}
+	if err := ctx.Err(); err != nil { return Invention{}, err }
 	if len(evidence.Sources) > 200 || len(evidence.Findings) > 100 {
 		return Invention{}, errors.New("research evidence exceeded configured item limits; invention refused")
 	}
@@ -138,6 +139,7 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 			spec.ModelNote = "Configured model adapter was unavailable; deterministic model-free specification used: " + limitText(modelErr.Error(), 160)
 		}
 	}
+	if err := ctx.Err(); err != nil { return Invention{}, err }
 	if d := e.Guardian.Check(spec.Title + " " + spec.Purpose + " " + strings.Join(spec.Capabilities, " ") + " " + strings.Join(spec.Safeguards, " ")); !d.Allowed {
 		_ = e.Guardian.LogBlocked("final_specification", demand, d.Reason)
 		return Invention{}, ErrBlocked
