@@ -65,6 +65,23 @@ func New(root string) (*Kernel, error) {
 	if err != nil { return nil, err }
 	if !info.IsDir() { return nil, errors.New("repository root is not a directory") }
 	core := filepath.Join(abs, "core-zero")
+	if configured := strings.TrimSpace(os.Getenv("USECT_ZERO_DATA_DIR")); configured != "" {
+		dataRoot, err := filepath.Abs(configured)
+		if err != nil {
+			return nil, fmt.Errorf("resolve USECT_ZERO_DATA_DIR: %w", err)
+		}
+		if err := os.MkdirAll(dataRoot, 0700); err != nil {
+			return nil, fmt.Errorf("create USECT_ZERO_DATA_DIR: %w", err)
+		}
+		info, err := os.Stat(dataRoot)
+		if err != nil {
+			return nil, fmt.Errorf("inspect USECT_ZERO_DATA_DIR: %w", err)
+		}
+		if !info.IsDir() {
+			return nil, errors.New("USECT_ZERO_DATA_DIR must point to a directory")
+		}
+		core = dataRoot
+	}
 	for _, d := range []string{"state", "evidence", "audit_log"} {
 		if err := os.MkdirAll(filepath.Join(core, d), 0700); err != nil { return nil, err }
 	}

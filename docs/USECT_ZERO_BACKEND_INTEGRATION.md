@@ -27,6 +27,18 @@ USECT_ZERO_ADMIN_TOKEN=<same secret configured for the Go core>
 USECT_ZERO_TIMEOUT_SECONDS=5
 ```
 
+For a private Render service, `USECT_ZERO_URL` may instead be the internal `host:port` value supplied by a Blueprint `fromService.property: hostport` reference. The adapter validates that host/port value and adds the internal HTTP scheme. Keep the Go core private; do not point this variable at a public URL unless you have deliberately reviewed and secured that exposure.
+
+## Render Blueprint
+
+The repository's `render.yaml` now describes two services: the public Flask gateway (`revelaai-backend`) and private Go service (`usect-zero-core`). The backend receives the core's private host/port and the same server-side admin token through Render service references. The Go service stores runtime state under `/var/data/usect-zero`, backed by a persistent disk, so key requests, issued-key records, approvals, evidence and audit logs survive routine restarts/redeployments.
+
+- Both services must be in the same Render workspace and region for private networking.
+- The private Go service and persistent disk use paid Render resources (`starter` plan and 1 GB disk in this Blueprint). Review the current cost/plan in Render before syncing the Blueprint.
+- After syncing and deploying, verify `GET /api/usect-zero/health` returns HTTP 200, then reload the admin key-request and issued-key views.
+- The new persistent store starts empty. Records that existed only in a previous ephemeral or unreachable core instance are not automatically migrated; preserve/export them from that instance first if it is still available.
+
+
 The HTTP URL above is suitable only when both processes share the same host/network namespace. For production, run the Go core as a private internal service and set `USECT_ZERO_URL` to its private HTTP(S) address. Do not expose the Go admin endpoints directly to the public internet. If the service crosses an untrusted network, use TLS and network access controls.
 
 The backend's `USECT_ZERO_ADMIN_TOKEN` must match the Go core secret. The Flask route only sends it after the existing authoritative platform-admin check succeeds. Do not send this token from the browser. Never forward the frontend's bearer JWT to the Go service.
@@ -56,12 +68,13 @@ Mounted under `/api/usect-zero`:
 | `POST /heal/proposals` | `POST /v1/heal/proposals` | Go core validates `heal:propose` scope |
 | `POST /heal/proposals/{id}/approve` | Core restore approval route | Platform admin + server-side admin token and core confirmation rules |
 | `GET /assemble/templates` | `GET /v1/assemble/templates` | Go core validates `scan:read`; read-only versioned catalog and template validation status |
+| `GET /assemble/boards` | `GET /v1/assemble/boards` | Go core validates `scan:read`; generic board-family profiles, voltage metadata and explicit unverified pin-map status |
 | `POST /assemble` | `POST /v1/assemble` | Go core validates `assemble:propose`; optional exact `template_version`, registry/BOM/wiring validation and review-only manifest |
 | `POST /radar/compare` | `POST /v1/radar/compare` | Go core validates `radar:compare` scope |
 | `POST /bridge/plan` | `POST /v1/bridge/plan` | Go core validates `bridge:propose` scope |
 | `POST /mind/compile` | `POST /v1/mind/compile` | Go core validates `mind:compile` scope |
 
-The diagnostics report samples at most 50 paths per drift category while retaining full counts, omits absolute repository roots, and only probes USECT-ZERO data directories with temporary files that are removed immediately. Drift is informational and is never automatically repaired. Assembly is driven by the versioned in-code curated registry; invalid or unregistered target/version pairs are rejected, BOM wire quantities are checked against connection count, pin endpoints and connection references are validated, and the generated manifest records that hardware has not been verified. Existing files are not overwritten. Requests and responses are bounded; the Flask blueprint exposes an explicit set of routes mapped to `/v1/` endpoints, and the client rejects non-versioned or traversal paths; redirects are not followed; HTTP calls have short timeouts. The adapter forwards only `X-API-Key` for external developer operations. Admin operations use a separately configured server-side token and do not forward user Authorization headers.
+The diagnostics report samples at most 50 paths per drift category while retaining full counts, omits absolute repository roots, and only probes USECT-ZERO data directories with temporary files that are removed immediately. Drift is informational and is never automatically repaired. Assembly is driven by the versioned in-code curated registry; invalid or unregistered target/version pairs are rejected, BOM wire quantities are checked against connection count, pin endpoints and connection references are validated, and the generated manifest records that hardware has not been verified. Board profiles are generic family-level references rather than exact manufacturer pin maps. If a template includes manufacturer-backed supply and logic limits, declared voltage conflicts block generation; missing limits or datasheet review are marked for human verification. These checks do not certify hardware compatibility. Existing files are not overwritten. Requests and responses are bounded; the Flask blueprint exposes an explicit set of routes mapped to `/v1/` endpoints, and the client rejects non-versioned or traversal paths; redirects are not followed; HTTP calls have short timeouts. The adapter forwards only `X-API-Key` for external developer operations. Admin operations use a separately configured server-side token and do not forward user Authorization headers.
 
 ## What this first backend pass does not do
 

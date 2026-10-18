@@ -18,9 +18,18 @@ This upgrade hardens the foundation before adding broader invention capabilities
 
 These checks raise confidence; they do not replace an integration review or a production deployment test.
 
+## Module upgrade — Capability Graph + Requirement Planner (v0.3.0-alpha)
+
+Genesis now builds a deterministic capability graph and requirement plan for every accepted invention before creating files. The graph maps demand-derived requirements to Core-One contract primitives, surfaces metadata-compatible reusable libraries as **unverified candidates**, records dependency edges, identifies unresolved capabilities, and generates explicit acceptance criteria and residual risks.
+
+Every staged invention receives `capability_plan.json`; the invention response returns its plan path and coverage summary. The host API exposes `GET /v1/genesis/tools/{name}/capability_plan`. The generated tool OpenAPI proposal also includes a capability-plan route.
+
+Important interpretation: “native contract available” means a reusable planning/guardrail contract exists, not that a domain-specific production implementation exists. Candidate library matching does not prove correctness, compatible licensing, or safe behavior. The plan's unresolved items must be assigned implementation and test work before release.
+
 ## What it does today
 
 - **Eye:** research cycles query GitHub repository search, arXiv, NVD CVE search, and a Kenya-focused RSS query. Each evidence packet also contains direct research links for WIPO PATENTSCOPE, ISO, KEBS, Jumia Kenya, Mouser, and DigiKey. Direct links are leads, not verified prices, patent clearance, legal advice, standards compliance, or proof of market demand. Repository scanning fingerprints repeated TODO/FIXME/workaround lines without executing source code or copying whole source files into model prompts.
+- **Capability Graph + Requirement Planner:** runs before file staging; extracts general and demand-specific requirements, ranks existing library metadata, draws requirement/dependency edges, lists uncovered capabilities, and adds acceptance checks. It is deterministic and works without a model. Every library reuse is labelled unverified until separately tested.
 - **Genesis:** accepts arbitrary text demands and derives a bounded generic tool specification without a model. It creates reviewable Go scaffolds, tests, an OpenAPI proposal, hardware guide, evidence bundle, merge checklist, and Go/Python/JavaScript SDK proposals. Tool-specific production logic still requires validated requirements and implementation work; the engine does not pretend a generic template is a finished factory controller, medical device, or surveillance deployment.
 - **Library Forge:** creates a reusable proposal-only Go contract library with driver, tests, and documentation.
 - **Model Forge:** creates a YAML blueprint for a new tool family. A configured model endpoint can enrich metadata; source code emitted by a model is never executed or copied into runtime code files.
@@ -93,6 +102,7 @@ The full local contract is in `openapi.yaml`:
 - `GET /v1/genesis/tools`
 - `GET /v1/genesis/tools/{name}`
 - `GET /v1/genesis/tools/{name}/hardware_guide`
+- `GET /v1/genesis/tools/{name}/capability_plan` — view graph, candidate libraries, gaps and acceptance checks
 - `GET /v1/genesis/stream` — server-sent engineering events
 - `GET|POST /v1/genesis/key` — provider-key request/status only; no bearer secret is minted or disclosed here
 - `POST /v1/rvx/compile` — RVX to bounded JSON IR

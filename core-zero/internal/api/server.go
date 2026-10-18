@@ -227,6 +227,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		replyJSON(w, 200, p)
 		return
 	}
+	if r.URL.Path == "/v1/assemble/boards" && r.Method == http.MethodGet {
+		_, ok := s.requireScope(w, r, "scan:read")
+		if !ok {
+			return
+		}
+		profiles := assemble.ListBoardProfiles()
+		replyJSON(w, 200, map[string]any{
+			"status": "ok",
+			"schema_version": "usect-zero.board-profiles.v1",
+			"boards": profiles,
+			"count": len(profiles),
+			"hardware_verified": false,
+			"human_review_required": true,
+		})
+		return
+	}
 	if r.URL.Path == "/v1/assemble/templates" && r.Method == http.MethodGet {
 		actor, ok := s.requireScope(w, r, "scan:read")
 		if !ok {
@@ -254,7 +270,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		out := filepath.Join(k.CoreRoot, "evidence", "assemble", time.Now().UTC().Format("20060102T150405.000000000Z"))
 		res, e := assemble.GenerateVersion(in.Target, in.TemplateVersion, out)
 		if e != nil { replyJSON(w, 422, map[string]any{"status": "needs_curated_template", "error": e.Error(), "result": res}); return }
-		for i, p := range res.Artifacts { rel, er := filepath.Rel(k.Root, p); if er == nil { res.Artifacts[i] = filepath.ToSlash(rel) } }
+		for i, p := range res.Artifacts {
+			rel, relErr := filepath.Rel(k.Root, p)
+			if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				res.Artifacts[i] = filepath.ToSlash(rel)
+				continue
+			}
+			// A configured persistent data directory may live outside the repository.
+			// Return a stable, non-absolute logical path instead of exposing filesystem paths.
+			dataRel, dataErr := filepath.Rel(k.CoreRoot, p)
+			if dataErr == nil && dataRel != ".." && !strings.HasPrefix(dataRel, ".."+string(filepath.Separator)) {
+				res.Artifacts[i] = filepath.ToSlash(filepath.Join("usect-zero-data", dataRel))
+			}
+		}
 		_ = k.Audit("assemble_proposal", actor, in.Target, res.Status, map[string]any{"artifact_count": len(res.Artifacts)})
 		replyJSON(w, 201, res)
 		return

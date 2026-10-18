@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"usect-zero.local/core-zero/forge"
@@ -109,6 +111,8 @@ func TestDiagnosticsRequiresScopedKeyAndReturnsSafeReport(t *testing.T) {
 
 func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
 	root := t.TempDir()
+	dataRoot := filepath.Join(t.TempDir(), "persistent", "usect-zero")
+	t.Setenv("USECT_ZERO_DATA_DIR", dataRoot)
 	k, err := kernel.New(root)
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +122,10 @@ func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
 	code, body := call(t, h, http.MethodGet, "/v1/assemble/templates", "", nil)
 	if code != 401 || body["code"] != "api_key_or_scope_required" {
 		t.Fatalf("assembly catalog should require scan:read: %d %v", code, body)
+	}
+	code, body = call(t, h, http.MethodGet, "/v1/assemble/boards", "", nil)
+	if code != 401 || body["code"] != "api_key_or_scope_required" {
+		t.Fatalf("board profile catalog should require scan:read: %d %v", code, body)
 	}
 
 	code, requestBody := call(t, h, http.MethodPost, "/v1/keys/request", `{"name":"Assembly Test","email":"assembly@example.invalid","reason":"Need the template catalog and assembly proposal scope","scopes":["scan:read","assemble:propose"]}`, map[string]string{"Content-Type": "application/json"})
@@ -146,8 +154,19 @@ func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
 		t.Fatalf("expected one registered template: %v", catalog)
 	}
 	item, ok := items[0].(map[string]any)
-	if !ok || item["version"] != "1.0.0" || item["validation_status"] != "valid_curated_template" {
+	if !ok || item["version"] != "1.0.0" || item["validation_status"] != "valid_curated_template" || item["board_profile_id"] != "esp32-s3-generic" || item["electrical_review_required"] != true {
 		t.Fatalf("catalog metadata invalid: %v", items)
+	}
+	code, boards := call(t, h, http.MethodGet, "/v1/assemble/boards", "", headers)
+	if code != 200 || boards["schema_version"] != "usect-zero.board-profiles.v1" || boards["hardware_verified"] != false {
+		t.Fatalf("board profile catalogue should remain explicitly unverified: %d %v", code, boards)
+	}
+	boardItems, ok := boards["boards"].([]any)
+	if !ok || len(boardItems) < 1 {
+		t.Fatalf("expected registered reference board profiles: %v", boards)
+	}
+	if board, ok := boardItems[0].(map[string]any); !ok || board["hardware_verified"] != false {
+		t.Fatalf("board profile must not claim hardware verification: %v", boardItems[0])
 	}
 
 	code, generated := call(t, h, http.MethodPost, "/v1/assemble", `{"target":"esp32-sensor","template_version":"1.0.0"}`, map[string]string{"Content-Type": "application/json", "X-API-Key": secret})
@@ -156,6 +175,14 @@ func TestAssemblyCatalogIsScopedAndGenerationPinsTemplateVersion(t *testing.T) {
 	}
 	if generated["human_review_required"] != true || generated["validation"] == nil {
 		t.Fatalf("review gate or validation report missing: %v", generated)
+	}
+	artifacts, ok := generated["artifacts"].([]any)
+	if !ok || len(artifacts) != 6 {
+		t.Fatalf("expected six generated artifact references: %v", generated["artifacts"])
+	}
+	firstArtifact, ok := artifacts[0].(string)
+	if !ok || !strings.HasPrefix(firstArtifact, "usect-zero-data/evidence/assemble/") || strings.Contains(firstArtifact, "..") {
+		t.Fatalf("external persistent storage must return a safe logical path: %v", artifacts[0])
 	}
 
 	code, unsupported := call(t, h, http.MethodPost, "/v1/assemble", `{"target":"esp32-sensor","template_version":"9.9.9"}`, map[string]string{"Content-Type": "application/json", "X-API-Key": secret})

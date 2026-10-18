@@ -60,6 +60,15 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
+        "name": "usect_zero_list_assembly_board_profiles",
+        "description": "List registered generic board-family profiles with nominal voltage metadata and exact-revision warnings. Profiles are explicitly unverified references, not certified pin maps or compatibility guarantees.",
+        "operation": "assemble_boards",
+        "scope": "scan:read",
+        "method": "GET",
+        "path": "/v1/assemble/boards",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
         "name": "usect_zero_diagnostics",
         "description": "Check USECT-ZERO runtime details, data-directory write readiness, and added/modified/missing repository files versus the saved baseline. This is a read-only report; it never repairs drift.",
         "operation": "diagnostics",
@@ -155,7 +164,7 @@ def tool_catalog_prompt() -> str:
     lines = [
         "FIRST-CLASS ENGINEERING TOOL — USECT-ZERO",
         "USECT-ZERO is a named engineering tool in the primary brain pipeline, not a model/provider fallback.",
-        "For repository scans and core diagnostics, engineering recovery proposals, registered assembly fixtures, version-evidence comparison, adapter planning, or RV Lang compilation, use the matching USECT-ZERO tool outcome supplied by the server.",
+        "For repository scans and core diagnostics, engineering recovery proposals, registered assembly fixtures and board-profile references, version-evidence comparison, adapter planning, or RV Lang compilation, use the matching USECT-ZERO tool outcome supplied by the server.",
         "Never claim a USECT-ZERO operation occurred unless the current turn contains its tool_execution result.",
         "When a required USECT-ZERO tool is unavailable, report that blocker; do not silently answer as though the tool ran or downgrade the task to an ordinary answer.",
         "The server only dispatches a bounded allowlist. Admin approval, recovery application, code execution, deployment, and hardware actuation are not brain tools.",
@@ -242,6 +251,12 @@ def select_tool_for_message(message: str, intent: str = "general") -> tuple[str,
         target = next((name for name, pattern in _BRIDGE_TARGETS.items() if pattern.search(text)), None)
         if target:
             return "bridge", {"target": target}
+
+    if re.search(
+        r"\b(?:board profiles?|hardware board profiles?|supported boards?|board catalog(?:ue)?)\b|\b(?:list|show|available|registered)\b.{0,40}\b(?:board profiles?|board families)\b",
+        lowered,
+    ):
+        return "assemble_boards", {}
 
     if re.search(
         r"\b(?:assembly|assemble)\s+(?:template|templates|catalog|catalogue)|\b(?:list|show|available|registered|supported)\b.{0,50}\b(?:assembly templates?|assemble templates?|hardware templates?|design templates?)\b|\bwhat (?:assembly|hardware) templates? (?:are )?available\b",
@@ -411,7 +426,7 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
 
     try:
         method = spec["method"]
-        if operation in {"scan", "diagnostics", "assemble_templates"}:
+        if operation in {"scan", "diagnostics", "assemble_templates", "assemble_boards"}:
             body = None
         elif operation == "heal":
             body = b"{}"

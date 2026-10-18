@@ -394,3 +394,53 @@ def test_assembly_template_catalog_uses_scoped_read_channel(monkeypatch, test_cl
     assert observed["path"] == "/v1/assemble/templates"
     assert observed["admin"] is False
     assert observed["api_key"] == "scoped-read-key"
+
+
+def test_assembly_board_profiles_proxy_through_scoped_gateway(monkeypatch, test_client):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    observed = {}
+
+    def fake_core(method, path, **kwargs):
+        observed.update(method=method, path=path, **kwargs)
+        return client.CoreReply(200, {
+            "status": "ok",
+            "schema_version": "usect-zero.board-profiles.v1",
+            "boards": [{"id": "esp32-s3-generic", "hardware_verified": False}],
+            "count": 1,
+            "hardware_verified": False,
+            "human_review_required": True,
+        })
+
+    monkeypatch.setattr(routes, "request_core", fake_core)
+    response = test_client.get(
+        "/api/usect-zero/assemble/boards",
+        headers={"X-API-Key": "scoped-read-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["hardware_verified"] is False
+    assert observed["method"] == "GET"
+    assert observed["path"] == "/v1/assemble/boards"
+    assert observed["api_key"] == "scoped-read-key"
+    assert observed["admin"] is False
+
+
+def test_client_accepts_render_private_service_hostport(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_URL", "usect-zero-core-host:10000")
+    assert client._base_url() == "http://usect-zero-core-host:10000"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "usect-zero-core-host",
+        "usect-zero-core-host:not-a-port",
+        "usect-zero-core-host:10000/path",
+        "user:pass@usect-zero-core-host:10000",
+        "ftp://usect-zero-core-host:10000",
+    ],
+)
+def test_client_rejects_malformed_render_service_reference(monkeypatch, value):
+    monkeypatch.setenv("USECT_ZERO_URL", value)
+    with pytest.raises(client.USECTZeroConfigurationError):
+        client._base_url()
