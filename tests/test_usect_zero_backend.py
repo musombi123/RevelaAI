@@ -322,4 +322,3 @@ def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypa
     assert observed["query"] == {"status": "active"}
     assert observed["admin"] is True
     assert observed["api_key"] is None
-
