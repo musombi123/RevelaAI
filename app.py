@@ -2464,8 +2464,6 @@ def generate_image_response(
                 ] == "png"
                 else None
             ),
-            "usect_zero_tool": usect_tool_metadata,
-
             "build_id": REVELAAI_BUILD_ID,
             "image_engine": asset[
                 "image_plan"
@@ -3752,6 +3750,8 @@ def ai_assistant():
                     {},
                 )
             ),
+
+            "usect_zero_tool": usect_tool_metadata,
 
             "build_id": REVELAAI_BUILD_ID,
         }
