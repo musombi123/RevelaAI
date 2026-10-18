@@ -392,3 +392,40 @@ func TestGuardianScreensUntrustedLibraryMetadataInCapabilityPlan(t *testing.T) {
 		t.Fatalf("expected a blocked-plan audit entry: %v", err)
 	}
 }
+
+
+func TestModelEnrichmentCannotDeleteCoreCapabilityRequirements(t *testing.T) {
+	base := deriveSpec("Create tool: offline file vault")
+	proposed := ToolSpec{
+		Name: "overridden_name",
+		Category: "software",
+		Industry: "general",
+		Capabilities: []string{"invented optional capability"},
+		Inputs: []string{"extra optional input"},
+		Outputs: []string{"extra optional output"},
+		Safeguards: []string{"extra optional safeguard"},
+	}
+	merged := overlayModelMetadata(base, proposed)
+	assertContainsAll := func(label string, required, actual []string) {
+		t.Helper()
+		present := map[string]bool{}
+		for _, item := range actual {
+			present[strings.ToLower(item)] = true
+		}
+		for _, item := range required {
+			if !present[strings.ToLower(item)] {
+				t.Errorf("model enrichment deleted required %s entry %q; actual=%v", label, item, actual)
+			}
+		}
+	}
+	assertContainsAll("capability", base.Capabilities, merged.Capabilities)
+	assertContainsAll("input", base.Inputs, merged.Inputs)
+	assertContainsAll("output", base.Outputs, merged.Outputs)
+	assertContainsAll("safeguard", base.Safeguards, merged.Safeguards)
+	if !containsAny(strings.ToLower(strings.Join(merged.Capabilities, " ")), "invented optional capability") {
+		t.Fatal("safe model enrichment was not appended to the baseline")
+	}
+	if merged.Name != base.Name || merged.Category != base.Category || merged.Industry != base.Industry || merged.NeedsHardwareGuide != base.NeedsHardwareGuide {
+		t.Fatalf("model enrichment changed deterministic identity or classification: %+v", merged)
+	}
+}
