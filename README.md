@@ -99,6 +99,18 @@ Full-Stack Developer | Tech-Faith Innovator
 🔗
 
  
+## USECT Core Mesh: Core-Zero + Genesis (Core-One) + Infinite Mind (Core-Two)
+
+RevelaAI exposes a server-side Core Mesh integration for authenticated status, orchestrator routing metadata, and operator-triggered proposals:
+
+- `GET /api/core-mesh/dashboard` — safe, credential-free status for ZERO, Genesis, and Infinite Mind.
+- `POST /api/core-mesh/genesis/invent` — submit an invention demand to Genesis through the Mind proxy; returns a proposal only.
+- `POST /api/core-mesh/mind/evolve` — request a guarded Core-Two evolution proposal; it does not merge or deploy it.
+
+Configure service origins in the RevelaAI service environment (never commit tokens): `USECT_ZERO_BASE_URL`, `GENESIS_BASE_URL`, and `MIND_BASE_URL`. Local defaults use loopback ports 8780/8781/8782 and are only suitable when all daemons share the same host. For separately deployed services, set each origin to its HTTPS service URL. The Mind service also needs its existing `USECT_ZERO_BASE_URL` and `GENESIS_BASE_URL` values so its proxy can reach both cores.
+
+The RevelaAI server uses `MIND_ADMIN_TOKEN` for proposal requests and `GENESIS_ADMIN_TOKEN` (or `GENESIS_TOKEN`) for Genesis proxy authentication. These must match the server-side settings of the corresponding core services. Add comma-separated approved operator user IDs in `CORE_MESH_ADMIN_USER_IDS` to enable proposal controls; `META_ENGINEER_ADMIN_USER_IDS` is accepted as a fallback. The browser never receives these secrets. Normal chat/orchestration only produces advisory routing metadata and cannot trigger an invention/evolution. Guardians remain authoritative, and all proposed changes require human review; automatic execution and automatic merge remain disabled.
+
 ## RevelaAI Smart Memory v2 — deployment configuration
 
 RevelaAI stores filtered conversation memory in the separate MongoDB database `revelai`. It does not read or write `revelacode.users`; user existence is verified through the protected RevelaCode endpoint.

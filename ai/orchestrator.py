@@ -49,6 +49,7 @@ from typing import Any
 from ai.emotion import detect_emotion
 from ai.ecosystem import ecosystem
 from ai.platform_knowledge import get_platform_knowledge
+from ai.core_mesh import orchestrator_core_context
 
 from services.scraper import (
     extract_urls,
@@ -2202,6 +2203,12 @@ class Orchestrator:
         # -------------------------------------------------
 
         return {
+            "core_mesh": orchestrator_core_context(
+                message=normalized_message,
+                domain=primary_domain,
+                intent=normalized_intent,
+            ),
+
             "domain": primary_domain,
 
             "domains": domains,
