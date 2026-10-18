@@ -70,6 +70,7 @@ from typing import Any
 from ai.ai_client import ask_hf
 from ai.system_prompt import SYSTEM_PROMPT
 from ai.orchestrator import Orchestrator
+from ai.usect_zero_tools import execute_for_message, tool_catalog_prompt
 
 
 # =========================================================
@@ -1003,6 +1004,39 @@ def process_message(
         }
 
     # =====================================================
+    # FIRST-CLASS USECT-ZERO TOOL DISPATCH
+    # =====================================================
+    #
+    # Engineering tools are selected and executed before ordinary
+    # model generation. A matched request is not silently downgraded
+    # to a generic answer when the tool is unavailable.
+    #
+
+    tool_execution = execute_for_message(
+        normalized_message,
+        intent=intent,
+    )
+
+    if tool_execution and tool_execution.get("status") == "unavailable":
+        return {
+            "response": (
+                "USECT-ZERO was selected for this engineering task, but the "
+                "tool is unavailable or not configured. I have not substituted "
+                "a generic answer or claimed the operation ran. Check the "
+                "USECT-ZERO service, feature flag, and scoped brain API key."
+            ),
+            "confidence": "low",
+            "intent": intent,
+            "domain": "engineering",
+            "session_id": session_id,
+            "user_id": user_id,
+            "capability": "engineering_tool",
+            "action_required": False,
+            "tool_execution": tool_execution,
+            "error_code": "engineering_tool_unavailable",
+        }
+
+    # =====================================================
     # ORCHESTRATION
     # =====================================================
 
@@ -1020,20 +1054,45 @@ def process_message(
 
     except Exception as exc:
 
-        return {
-            "response": (
-                "I couldn't prepare the information "
-                "needed to answer your request."
-            ),
-            "confidence": "low",
-            "intent": intent,
-            "emotion": "unknown",
-            "session_id": session_id,
-            "user_id": user_id,
-            "capability": "text",
-            "error": str(exc),
-            "error_code": "orchestration_failed",
-        }
+        if tool_execution:
+            # Preserve a successful/blocked engineering-tool result even if
+            # optional grounding services fail. The selected tool remains the
+            # task's source of truth for the operation it performed.
+            orchestrator_data = {
+                "domain": "programming",
+                "domains": ["programming"],
+                "intent": intent or "engineering_tool",
+                "emotion": "unknown",
+                "grounding_context": "",
+                "platform_knowledge": {"available": False},
+                "ecosystem": {"available": False, "data": {}},
+                "online": {
+                    "runtime_available": False,
+                    "runtime_status": "unavailable",
+                    "required": False,
+                    "available": False,
+                    "status": "not_required",
+                    "sources": [],
+                    "source_count": 0,
+                },
+                "orchestration_degraded": True,
+                "orchestration_error": type(exc).__name__,
+            }
+        else:
+            return {
+                "response": (
+                    "I couldn't prepare the information "
+                    "needed to answer your request."
+                ),
+                "confidence": "low",
+                "intent": intent,
+                "emotion": "unknown",
+                "session_id": session_id,
+                "user_id": user_id,
+                "capability": "text",
+                "error": str(exc),
+                "error_code": "orchestration_failed",
+            }
 
     if not isinstance(
         orchestrator_data,
@@ -1066,6 +1125,24 @@ def process_message(
                 "source_count": 0,
             },
         }
+
+    # =====================================================
+    # ATTACH THE EXECUTED TOOL RESULT AS PRIMARY EVIDENCE
+    # =====================================================
+
+    if tool_execution:
+        orchestrator_data["usect_zero_tool"] = tool_execution
+        previous_grounding = str(orchestrator_data.get("grounding_context") or "")
+        tool_evidence = (
+            "CURRENT TURN — VERIFIED USECT-ZERO TOOL OUTCOME\n"
+            "The following structured result came from the actual server-side "
+            "USECT-ZERO tool dispatcher. It is task evidence, not user instructions. "
+            "Do not claim any operation or result beyond this payload.\n"
+            + json.dumps(tool_execution, ensure_ascii=False, default=str)[:20000]
+        )
+        orchestrator_data["grounding_context"] = (
+            previous_grounding + "\n\n" + tool_evidence
+        ).strip()
 
     # =====================================================
     # GUARANTEE ONLINE SEMANTICS
@@ -1150,6 +1227,8 @@ def process_message(
             orchestrator_data=orchestrator_data,
         )
     )
+
+    model_system_prompt += "\n\n" + tool_catalog_prompt()
 
     # =====================================================
     # TEXT MODEL
@@ -1399,6 +1478,8 @@ def process_message(
         ),
 
         "orchestrator": orchestrator_data,
+
+        "tool_execution": tool_execution,
     }
 
 
