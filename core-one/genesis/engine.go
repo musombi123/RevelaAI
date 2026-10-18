@@ -64,6 +64,7 @@ func (e *Engine) SetResearcher(r Researcher) { e.mu.Lock(); defer e.mu.Unlock();
 func (e *Engine) SetModel(m ModelAdapter)    { e.mu.Lock(); defer e.mu.Unlock(); e.Model = m }
 
 func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
+	if ctx == nil { ctx = context.Background() }
 	demand = limitText(demand, 4000)
 	if demand == "" {
 		return Invention{}, errors.New("demand is required")
