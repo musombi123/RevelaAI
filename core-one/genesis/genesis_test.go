@@ -293,21 +293,21 @@ func TestCapabilityPlannerBuildsGraphAndFlagsUnresolvedRequirements(t *testing.T
 
 func TestCapabilityPlannerFindsReusableLibrariesButDoesNotTrustThem(t *testing.T) {
 	e := newTestEngine(t)
-	libDir := filepath.Join(e.CoreRoot, "libraries", "created", "shared_queue_lib")
+	libDir := filepath.Join(e.CoreRoot, "libraries", "created", "transaction_idempotency_lib")
 	if err := os.MkdirAll(libDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	meta := libraryMetadata{
-		Name: "shared_queue_lib",
+		Name: "transaction_idempotency_lib",
 		Category: "software",
-		Industry: "general",
-		Capabilities: []string{"validate structured input", "offline operation", "durable queue recovery", "record traceable evidence"},
+		Industry: "commerce",
+		Capabilities: []string{"validate structured input", "record traceable evidence", "transaction idempotency and reconciliation"},
 		Dependencies: []string{},
 	}
 	if err := writeJSON(filepath.Join(libDir, "library.json"), meta); err != nil {
 		t.Fatal(err)
 	}
-	spec := deriveSpec("Create tool: offline durable queue storage")
+	spec := deriveSpec("Create tool: offline payment provider connector")
 	plan, err := BuildCapabilityPlan(spec, ResearchEvidence{Mode: "offline"}, e.CoreRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -319,11 +319,11 @@ func TestCapabilityPlannerFindsReusableLibrariesButDoesNotTrustThem(t *testing.T
 		}
 	}
 	if !foundCandidate {
-		t.Fatalf("expected shared queue lib to be surfaced as an unverified candidate: %+v", plan.ReusableCandidates)
+		t.Fatalf("expected transaction library to be surfaced as an unverified candidate: %+v", plan.ReusableCandidates)
 	}
 	foundRequirement := false
 	for _, req := range plan.Requirements {
-		if req.Capability == "durable queue recovery" {
+		if req.Capability == "transaction idempotency and reconciliation" {
 			foundRequirement = true
 			if req.Status != "reuse_candidate_unverified" {
 				t.Fatalf("candidate metadata must not be reported as verified coverage: %+v", req)
@@ -331,7 +331,7 @@ func TestCapabilityPlannerFindsReusableLibrariesButDoesNotTrustThem(t *testing.T
 		}
 	}
 	if !foundRequirement {
-		t.Fatal("queue demand did not create a durable-queue requirement")
+		t.Fatal("payment demand did not create a transaction-idempotency requirement")
 	}
 }
 
