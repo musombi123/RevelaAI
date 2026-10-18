@@ -150,3 +150,21 @@ func cleanModelList(in []string, maxItems, maxLen int, fallback []string) []stri
 	}
 	return out
 }
+
+
+// mergeModelList appends bounded model metadata without deleting required deterministic entries.
+func mergeModelList(base, proposed []string, maxItems, maxLen int) []string {
+	out := make([]string, 0, min(maxItems, len(base)+len(proposed)))
+	seen := map[string]bool{}
+	for _, group := range [][]string{base, proposed} {
+		for _, raw := range group {
+			value := cleanModelString(raw, maxLen)
+			key := strings.ToLower(strings.TrimSpace(value))
+			if key == "" || seen[key] { continue }
+			seen[key] = true
+			out = append(out, value)
+			if len(out) >= maxItems { return out }
+		}
+	}
+	return out
+}
