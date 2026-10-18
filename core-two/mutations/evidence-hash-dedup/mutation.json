@@ -1,0 +1,10 @@
+{
+  "id": "evidence-hash-dedup",
+  "category": "evidence",
+  "purpose": "Remove exact duplicate evidence using SHA-256 fingerprints",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

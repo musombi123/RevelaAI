@@ -1,0 +1,10 @@
+{
+  "id": "bom-cost-ranked",
+  "category": "bom_search",
+  "purpose": "Compare already supplied local quotes by total cost and stock status",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

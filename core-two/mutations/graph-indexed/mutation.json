@@ -1,0 +1,10 @@
+{
+  "id": "graph-indexed",
+  "category": "graph_traversal",
+  "purpose": "Indexed visited-node set for deterministic reachability",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

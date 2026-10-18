@@ -1,0 +1,10 @@
+{
+  "id": "hardware-guide-structured",
+  "category": "hardware_guide",
+  "purpose": "Structured safety-first hardware guide with prerequisites, steps, verification and stop conditions",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

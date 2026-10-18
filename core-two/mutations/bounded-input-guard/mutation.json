@@ -1,0 +1,10 @@
+{
+  "id": "bounded-input-guard",
+  "category": "input_safety",
+  "purpose": "Reject empty, oversized, null-byte, absolute and path-traversal inputs before mutation",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}
