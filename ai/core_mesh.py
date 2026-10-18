@@ -335,8 +335,23 @@ def propose_mind_evolution(objective: str, tool_name: str) -> dict:
     return _public_proposal(payload)
 
 
+def get_cached_core_mesh_dashboard() -> dict:
+    """Return the last read-only snapshot without adding network latency to chat."""
+    with _cache_lock:
+        if _cache_value is not None:
+            return deepcopy(_cache_value)
+    return {
+        "status": "not_probed",
+        "cores": {
+            "zero": {"id": "USECT-ZERO", "status": "not_probed", "reachable": None, "version": None},
+            "one": {"id": "USECT-ONE", "status": "not_probed", "reachable": None, "version": None},
+            "two": {"id": "USECT-TWO", "status": "not_probed", "reachable": None, "version": None},
+        },
+    }
+
+
 def orchestrator_core_context(message: str, domain: str = "general", intent: str = "general") -> dict:
-    """Return advisory routing and public core health; never execute a mutation."""
+    """Return advisory routing and public status; never execute a mutation."""
     text = str(message or "").strip().lower()
     selected = "orchestrator"
     reason = "The existing RevelaAI orchestrator retains normal domain and provider routing."
@@ -350,7 +365,11 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
         selected = "core-zero"
         reason = "A diagnostic/recovery request maps to ZERO's read-only checks or human-gated recovery proposals."
 
-    dashboard = get_core_mesh_dashboard()
+    # Normal chat must not fan out to nine HTTP probes. Refresh the real mesh only
+    # when the user is asking about one of these cores; otherwise reuse the last
+    # admin/status snapshot, or expose an explicit not_probed state.
+    asks_about_mesh = bool(re.search(r"\b(core[- ]?mesh|usect|genesis|infinite mind|core[- ]?(zero|one|two))\b", text))
+    dashboard = get_core_mesh_dashboard() if selected != "orchestrator" or asks_about_mesh else get_cached_core_mesh_dashboard()
     cores = dashboard.get("cores", {})
     return {
         "mode": "advisory_only",
@@ -358,11 +377,12 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
         "route_reason": reason,
         "domain": str(domain or "general"),
         "intent": str(intent or "general"),
+        "mesh_status": dashboard.get("status", "unknown"),
         "cores": {
             name: {
                 "id": core.get("id"),
                 "status": core.get("status", "unknown"),
-                "reachable": bool(core.get("reachable")),
+                "reachable": core.get("reachable"),
                 "version": core.get("version"),
             }
             for name, core in cores.items()
