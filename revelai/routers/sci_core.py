@@ -1,6 +1,6 @@
 """Sci-Core route registration and administrator-only oversight dashboard."""
 DEFENSIVE_ONLY = True
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from routes.meta_engineer_routes import _authenticated_admin
 from ..sci_core import research_engine, defensive_shield, disaster_manager, hardware_lab
 from ..sci_core.storage import collection
@@ -8,6 +8,11 @@ sci_router=Blueprint("sci_core",__name__)
 
 @sci_router.before_request
 def require_admin_for_sci_core():
+    # Browser preflight requests do not carry the Authorization bearer token.
+    # Permit OPTIONS to complete CORS negotiation; every actual request still
+    # passes through the administrator authorization gate below.
+    if request.method == "OPTIONS":
+        return None
     actor, error = _authenticated_admin()
     if error:
         return error
