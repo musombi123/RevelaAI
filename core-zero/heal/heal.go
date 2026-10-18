@@ -273,7 +273,12 @@ func ApproveRestore(k *kernel.Kernel, id, confirmation string) (Proposal, error)
 
 	// Stage replacement bytes beside each target so renames stay on the same filesystem.
 	for _, item := range prepared {
-		if err := verifyPathComponents(k.Root, filepath.ToSlash(filepath.Rel(k.Root, item.target)), false); err != nil {
+		relativeTarget, relErr := filepath.Rel(k.Root, item.target)
+		if relErr != nil {
+			cleanupTemps()
+			return p, relErr
+		}
+		if err := verifyPathComponents(k.Root, filepath.ToSlash(relativeTarget), false); err != nil {
 			cleanupTemps()
 			return p, fmt.Errorf("target parent path became unsafe: %w", err)
 		}
