@@ -8,6 +8,7 @@ The tool catalog is included in the model instructions on every turn.
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -212,7 +213,7 @@ def select_tool_for_message(message: str, intent: str = "general") -> tuple[str,
         return "assemble", {"target": target}
 
     if re.search(
-        r"\b(?:scan|inspect|inventory|map)\b.{0,60}\b(?:repository|repo|codebase|project files|architecture|tracked files)\b|\b(?:repository|repo|codebase)\b.{0,60}\b(?:scan|inspect|inventory|architecture map)\b|\bwhat files (?:are|exist) in (?:this|the) (?:repo|repository|codebase)\b",
+        r"\b(?:scan|inspect|inventory|map)\b.{0,60}\b(?:repository|repo|codebase|project files|architecture|structure|tracked files)\b|\b(?:repository|repo|codebase)\b.{0,60}\b(?:scan|inspect|inventory|architecture map)\b|\bwhat files (?:are|exist) in (?:this|the) (?:repo|repository|codebase)\b",
         text,
         re.I,
     ) or re.search(r"\b(?:usect[- ]zero|usect0)\b.{0,45}\b(?:scan|inspect|inventory)\b", text, re.I):
@@ -296,7 +297,7 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
         })
         return result
 
-    api_key = __import__("os").getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
+    api_key = os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
     if not api_key:
         result.update({
             "status": "unavailable",
