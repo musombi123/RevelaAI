@@ -1,9 +1,9 @@
 # USECT-ZERO — Pre-implementation repository evidence
 
-**Snapshot time:** 2026-10-18 (Africa/Nairobi; UTC date aligned)  
-**Repository:** https://github.com/musombi123/RevelaAI  
-**Inspected ref:** `main`  
-**Observed latest commit SHA via GitHub commit search:** `db9723467a2d20ab36de4f5d8e0d2a78fbaa7ae8`  
+**Snapshot time:** 2026-10-18 (Africa/Nairobi; UTC date aligned)
+**Repository:** https://github.com/musombi123/RevelaAI
+**Inspected ref:** `main`
+**Observed latest commit SHA via GitHub commit search:** `db9723467a2d20ab36de4f5d8e0d2a78fbaa7ae8`
 **Method:** GitHub repository metadata, root contents listing, directory contents listing for the first-party source/test/docs/config directories, and targeted searches for `core-zero`, `changelog`, self-heal/AST restoration, OpenAPI/API-key request, `semver_compare`, and `benchmark_runner`. This is source-host evidence, not a local checkout, clean-working-tree proof, or runtime/hardware test.
 
 ## Repository metadata observed
