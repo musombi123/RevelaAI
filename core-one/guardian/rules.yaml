@@ -1,0 +1,27 @@
+version: 1
+mode: fail_closed
+core_law: "Protect, not destroy. Human review is mandatory for generated artifacts."
+block_categories:
+  - weapons
+  - warfare
+  - explosives
+  - malware_and_credential_theft
+  - covert_surveillance
+  - privacy_violations
+  - illegal_operation
+checks:
+  - screen demand before research
+  - screen retrieved source titles and descriptions before evidence is saved
+  - screen model-suggested metadata before artifact generation
+  - never execute or auto-merge generated code
+notes:
+  - "Pattern screening is a safety layer, not a perfect semantic classifier."
+  - "Hardware guides require exact-part datasheet and qualified integration review."
+extra_terms:
+  - "weapon"
+  - "warfare"
+  - "explosives"
+  - "ransomware"
+  - "spyware"
+  - "credential theft"
+  - "covert surveillance"

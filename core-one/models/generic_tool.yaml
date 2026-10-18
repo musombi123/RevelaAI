@@ -1,0 +1,9 @@
+name: generic_tool_blueprint
+version: 1
+purpose: "A model family specification from which safe, reviewable tool scaffolds can be derived."
+inputs: [demand, research_evidence, policy_constraints]
+outputs: [tool_specification, source_scaffold, tests, openapi, hardware_guide, sdk_proposals, evidence, merge_checklist]
+execution: proposal_only
+required_gates: [guardian, tests, human_review, explicit_merge]
+model_optional: true
+automatic_self_import: false

@@ -1,0 +1,116 @@
+openapi: 3.1.0
+info:
+  title: Revela Genesis Core-One API
+  version: 0.1.0-alpha
+  description: Standalone, model-optional tool-invention service. Generated tool paths remain proposals until human merge and registration.
+servers:
+  - url: http://127.0.0.1:8781
+    description: Local-only default; remote access requires configuration and review.
+paths:
+  /v1/genesis/health:
+    get:
+      summary: Health and execution-mode status
+      responses:
+        '200': {description: Engine is responsive; no claim about external source reachability}
+  /v1/genesis/invent:
+    post:
+      summary: Research and create a new reviewable tool proposal
+      security: [{GenesisToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [demand]
+              properties:
+                demand: {type: string, minLength: 1, maxLength: 3999}
+      responses:
+        '201': {description: Proposal generated and awaiting merge}
+        '403': {description: Guardian blocked demand or source}
+        '409': {description: Proposal already exists; overwrite is prohibited}
+        '422': {description: Research or generation failed}
+  /v1/genesis/queue:
+    post:
+      summary: Queue a demand for the daemon
+      security: [{GenesisToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [demand]
+              properties:
+                demand: {type: string, minLength: 1, maxLength: 3999}
+                source: {type: string, maxLength: 100}
+      responses:
+        '202': {description: Demand persisted for next scheduled scan}
+        '403': {description: Guardian blocked demand}
+  /v1/genesis/tools:
+    get:
+      summary: List generated invention proposals
+      responses:
+        '200': {description: Proposal list}
+  /v1/genesis/tools/{name}:
+    get:
+      summary: Read a proposal manifest
+      parameters:
+        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
+      responses:
+        '200': {description: Proposal metadata and evidence summary}
+        '404': {description: Proposal not found}
+  /v1/genesis/tools/{name}/hardware_guide:
+    get:
+      summary: Read the proposal's hardware integration guide
+      parameters:
+        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
+      responses:
+        '200': {description: Hardware guide; wiring must be verified against exact part datasheets}
+        '404': {description: Guide not found}
+  /v1/genesis/stream:
+    get:
+      summary: Server-sent stream of research, queue, Guardian, and invention events
+      responses:
+        '200': {description: text/event-stream}
+  /v1/genesis/key:
+    get:
+      summary: Read key-request endpoint status; does not reveal secrets
+      responses:
+        '200': {description: Status}
+    post:
+      summary: Submit a provider-key request for human approval
+      security: [{GenesisToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, reason]
+              properties:
+                client_id: {type: string, maxLength: 120}
+                reason: {type: string, maxLength: 500}
+      responses:
+        '202': {description: Request recorded as pending approval; no secret issued}
+  /v1/rvx/compile:
+    post:
+      summary: Compile RVX to a bounded JSON intermediate representation
+      security: [{GenesisToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: {type: string, maxLength: 16384}
+      responses:
+        '200': {description: Parsed declarative JSON IR; no code executed and no WASM emitted}
+        '422': {description: Invalid RVX program}
+components:
+  securitySchemes:
+    GenesisToken:
+      type: http
+      scheme: bearer
