@@ -19,3 +19,42 @@ func TestScanHashesFilesAndSkipsGeneratedState(t *testing.T) {
 	if scan.FileCount != 1 || scan.LanguageCounts["Python"] != 1 { t.Fatalf("unexpected scan: %#v", scan) }
 	if scan.ManifestSHA256 == "" { t.Fatal("manifest hash missing") }
 }
+
+
+func TestConfiguredDataDirectoryKeepsRuntimeStateOutsideRepository(t *testing.T) {
+	root := t.TempDir()
+	dataRoot := filepath.Join(t.TempDir(), "persistent", "usect-zero")
+	t.Setenv("USECT_ZERO_DATA_DIR", dataRoot)
+
+	k, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k.CoreRoot != dataRoot {
+		t.Fatalf("expected configured data root %q, got %q", dataRoot, k.CoreRoot)
+	}
+	for _, dir := range []string{"state", "evidence", "audit_log"} {
+		info, err := os.Stat(filepath.Join(dataRoot, dir))
+		if err != nil {
+			t.Fatalf("runtime data directory %s missing: %v", dir, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("runtime path %s is not a directory", dir)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "core-zero", "state")); !os.IsNotExist(err) {
+		t.Fatalf("configured persistent data should not silently write state into repository: %v", err)
+	}
+}
+
+func TestConfiguredDataDirectoryRejectsFilePath(t *testing.T) {
+	root := t.TempDir()
+	dataRoot := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(dataRoot, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("USECT_ZERO_DATA_DIR", dataRoot)
+	if _, err := New(root); err == nil {
+		t.Fatal("configured data directory must be a directory")
+	}
+}
