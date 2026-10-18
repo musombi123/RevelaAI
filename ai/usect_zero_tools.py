@@ -61,7 +61,7 @@ TOOL_CATALOG: tuple[dict[str, Any], ...] = (
     },
     {
         "name": "usect_zero_propose_healing",
-        "description": "Ask USECT-ZERO to check for missing tracked files against its recorded baseline and create a review-only healing proposal. Never approves or restores files automatically.",
+        "description": "Compare tracked baseline files with the working tree and stage verified recovery candidates for missing or modified files. Modified targets are hash-checked again and backed up before any human-approved replacement; this tool never approves or restores automatically.",
         "operation": "heal",
         "scope": "heal:propose",
         "method": "POST",
@@ -231,7 +231,7 @@ def select_tool_for_message(message: str, intent: str = "general") -> tuple[str,
         if target:
             return "bridge", {"target": target}
 
-    if re.search(r"\b(?:heal proposal|propose healing|recover deleted file|restore missing file|restore a missing file|missing tracked files|repository recovery)\b|/heal\b", lowered):
+    if re.search(r"\b(?:heal proposal|propose healing|recover deleted file|recover modified file|restore missing file|restore a missing file|missing tracked files|modified tracked files|modified baseline file|repository recovery|code recovery)\b|/heal\b", lowered):
         return "heal", {}
 
     if re.search(
