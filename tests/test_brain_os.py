@@ -14,7 +14,6 @@ from revelai.core.brain_os import (
     simulate_recovery_action,
     evaluate_routing_shadow,
 )
-from revelai.routers.agi_router import agi_router
 from asgi import app
 
 
@@ -474,7 +473,17 @@ def test_diagnostics_are_bounded_and_never_claim_automatic_recovery():
 
 
 def test_brain_os_routes_are_registered():
-    assert len(agi_router.deferred_functions) >= 6
+    paths = {route.path for route in app.routes}
+    expected = {
+        "/api/agi/brain-os/status",
+        "/api/agi/brain-os/outcomes",
+        "/api/agi/brain-os/routing/shadow-evaluate",
+        "/api/agi/brain-os/heal/actions",
+        "/api/agi/brain-os/heal/actions/simulate",
+        "/api/agi/brain-os/heal/diagnose",
+        "/api/agi/brain-os/engineering/guardrails",
+    }
+    assert expected <= paths
 
 def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails():
     from fastapi.testclient import TestClient
