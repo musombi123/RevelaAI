@@ -1,22 +1,16 @@
-# FastAPI / ASGI runtime
+# Native FastAPI / ASGI application
 fastapi>=0.115,<1
-uvicorn>=0.30,<1
+uvicorn[standard]>=0.30,<1
 python-multipart>=0.0.9
 
-# TEMPORARY compatibility layer.
-# Keep these while legacy/sector routes still use app.py and the root WSGI mount.
-# Remove all three only after the manual sector-route migration is complete,
-# native route parity tests pass, and asgi.py no longer imports/mounts Flask.
-Flask>=2.3,<4
-flask-cors>=4.0
-a2wsgi>=1.10,<2
-
-# Deployment, configuration, networking, and persistence
+# Deployment, configuration, networking, persistence
 gunicorn>=21.2
 python-dotenv>=1.0
 requests>=2.31
 httpx>=0.27
 pymongo>=4.6
+SQLAlchemy>=2.0,<3
+psycopg[binary]>=3.2,<4
 
 # Document processing and report generation
 PyMuPDF>=1.26.0
@@ -32,14 +26,11 @@ huggingface_hub>=1.26.0
 Pillow>=10.0.0
 PyJWT>=2.8.0
 
+# Crypto / validation / existing security-service exception types
+pydantic>=2.7,<3
+cryptography>=42,<47
+Werkzeug>=3.0,<4
+
 # Tests and bounded process monitoring
 pytest>=8.0,<9
 psutil>=5.9,<8
-
-# Python-native RVX security, billing and platform API
-fastapi>=0.115,<1
-uvicorn[standard]>=0.30,<1
-pydantic>=2.7,<3
-SQLAlchemy>=2.0,<3
-cryptography>=42,<47
-psycopg[binary]>=3.2,<4
