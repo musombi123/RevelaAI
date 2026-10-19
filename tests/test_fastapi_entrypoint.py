@@ -24,6 +24,9 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     schema = schema_response.json()
     assert schema["info"]["title"] == "RevelaAI API"
     assert "/api/chat" in schema["paths"]
+    assert "/api/research" in schema["paths"]
+    assert "/api/users" in schema["paths"]
+    assert "/api/users/{user_id}" in schema["paths"]
     assert "/api/vision/analyze" in schema["paths"]
     assert "/voice" in schema["paths"]
     assert "/api/revelaai/v2/brain/chat" in schema["paths"]
@@ -202,6 +205,54 @@ def test_core_mesh_routes_keep_authentication_boundary() -> None:
     known = client.get("/v1/learn/known")
     assert known.status_code == 401
     assert known.json()["error"]["code"] == "authentication_required"
+
+
+
+def test_native_research_validates_query_and_returns_source_results(monkeypatch) -> None:
+    from fastapi_routes import research as research_module
+
+    monkeypatch.setattr(
+        research_module,
+        "_search_feeds",
+        lambda query: [{"source": "test", "title": f"Result for {query}", "url": "https://example.org", "snippet": "test"}],
+    )
+    invalid = client.post("/api/research", json={"query": "   "})
+    assert invalid.status_code == 400
+    assert invalid.json() == {"error": "query is required"}
+
+    response = client.post("/api/research", json={"query": "climate"})
+    assert response.status_code == 200
+    assert response.json()["query"] == "climate"
+    assert response.json()["realtime"] is True
+    assert response.json()["sources"][0]["title"] == "Result for climate"
+
+
+def test_native_users_directory_create_get_and_validation() -> None:
+    from fastapi_routes.users import USERS
+
+    USERS.clear()
+    invalid = client.post("/api/users", json={"email": "test@example.org"})
+    assert invalid.status_code == 400
+    assert invalid.json() == {"status": "error", "message": "User name is required"}
+
+    created = client.post(
+        "/api/users",
+        json={"name": "Migration Test", "email": "test@example.org"},
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["status"] == "success"
+    assert body["data"]["name"] == "Migration Test"
+    assert body["data"]["email"] == "test@example.org"
+    user_id = body["data"]["_id"]
+
+    retrieved = client.get(f"/api/users/{user_id}")
+    assert retrieved.status_code == 200
+    assert retrieved.json()["data"]["_id"] == user_id
+
+    missing = client.get("/api/users/000000000000000000000000")
+    assert missing.status_code == 404
+    assert missing.json() == {"status": "error", "message": "User not found"}
 
 
 def test_native_system_routes_keep_response_contracts() -> None:
