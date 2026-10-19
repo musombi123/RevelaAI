@@ -131,6 +131,45 @@ paths:
         '200': {description: Key revoked; subsequent scope checks fail.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
+  /v1/heal/global-classify:
+    post:
+      tags: [heal]
+      operationId: classifyWorldwideFailure
+      summary: Classify a sanitized error against the curated worldwide diagnostic library
+      description: |
+        Country/language context localizes the metadata only. This is an advisory
+        pattern match, not root-cause proof. It never repairs a host, executes code,
+        or actuates hardware. Requires an API key with scan:read.
+      security: [{ApiKey: []}]
+      x-required-scope: scan:read
+      parameters:
+        - name: country
+          in: query
+          required: false
+          schema: {type: string, default: KE}
+        - name: lang
+          in: query
+          required: false
+          schema: {type: string, enum: [en, de, zh, ja, fr, es, sw]}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [error_text]
+              properties:
+                error_text: {type: string, minLength: 1, maxLength: 8192}
+                country: {type: string, default: KE}
+                language: {type: string, enum: [en, de, zh, ja, fr, es, sw]}
+      responses:
+        '200':
+          description: Curated pattern match or no-match advice. Automatic repair is always false.
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '422':
+          description: Invalid country/language or diagnostic library unavailable; fail closed.
   /v1/heal/baseline:
     post:
       tags: [heal]
