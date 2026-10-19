@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -33,18 +33,19 @@ const (
 )
 
 type mirrorCursorStore struct {
-	SchemaVersion int                               `json:"schema_version,omitempty"`
-	Sources       map[string]mirrorSourceCursor     `json:"sources"`
+	SchemaVersion int                           `json:"schema_version,omitempty"`
+	Sources       map[string]mirrorSourceCursor `json:"sources"`
 }
 
 type mirrorSourceCursor struct {
-	Offset            int64             `json:"offset"`
-	TotalRecords      int64             `json:"total_records"`
-	Counts            map[string]int64  `json:"event_counts"`
-	LastObservedAt    time.Time         `json:"last_observed_at"`
-	Recent            []map[string]any  `json:"recent_summaries"`
-	PrefixSHA256      string            `json:"prefix_sha256,omitempty"`
-	TailSHA256        string            `json:"tail_sha256,omitempty"`
+	Offset         int64            `json:"offset"`
+	ObservedSize   int64            `json:"observed_size,omitempty"`
+	TotalRecords   int64            `json:"total_records"`
+	Counts         map[string]int64 `json:"event_counts"`
+	LastObservedAt time.Time        `json:"last_observed_at"`
+	Recent         []map[string]any `json:"recent_summaries"`
+	PrefixSHA256   string           `json:"prefix_sha256,omitempty"`
+	TailSHA256     string           `json:"tail_sha256,omitempty"`
 }
 
 type mirrorSourceStatus struct {
@@ -80,25 +81,28 @@ type mirrorFingerprints struct {
 	TailSHA256   string
 }
 
-// observeMirror consumes append-only Core-One/Core-Zero evidence using saved
-// byte offsets. It never executes source, reads arbitrary upstream URLs, or
-// returns raw log lines. Each source is advanced only through complete,
-// successfully parsed newline-terminated records.
+// observeMirror incrementally reads approved Core-One and Core-Zero JSONL
+// sources. It never executes source code or exposes raw log lines.
+//
+// A cursor advances only after complete lines have been parsed and the
+// consumed bytes and source identity have been checked. Legacy cursors lacking
+// fingerprints are supported but explicitly marked as unverified.
 func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 	if s == nil {
 		return nil, errors.New("mirror service is required")
 	}
-
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !directoryExists(s.CoreRoot) {
+		return nil, errors.New("Core-Two root is missing or unsafe")
 	}
 
 	s.mirrorMu.Lock()
 	defer s.mirrorMu.Unlock()
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 
 	cursorRelative := filepath.Join("state", "mirror-cursor.json")
 	cursorPath := filepath.Join(s.CoreRoot, cursorRelative)
@@ -139,33 +143,27 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 				"saved mirror cursor is invalid JSON; refusing to overwrite it",
 			)
 		}
-
 		if store.SchemaVersion != 0 && store.SchemaVersion != 1 {
 			return nil, fmt.Errorf(
 				"unsupported mirror cursor schema version %d",
 				store.SchemaVersion,
 			)
 		}
-
 		if store.Sources == nil {
 			store.Sources = make(map[string]mirrorSourceCursor)
 		}
 
 	case os.IsNotExist(cursorErr):
-		// First observation: start from the beginning of each available log.
+		// First observation starts from the beginning of each available source.
 
 	default:
-		return nil, fmt.Errorf(
-			"read mirror cursor safely: %w",
-			cursorErr,
-		)
+		return nil, fmt.Errorf("read mirror cursor safely: %w", cursorErr)
 	}
 
 	allowedKeys := make(map[string]bool, len(sources))
 	for _, source := range sources {
 		allowedKeys[source.key] = true
 	}
-
 	if len(store.Sources) > maxMirrorCursorSources {
 		return nil, errors.New(
 			"mirror cursor contains more sources than the current schema permits",
@@ -179,20 +177,13 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 				key,
 			)
 		}
-
 		if err := validateMirrorCursor(cursor); err != nil {
-			return nil, fmt.Errorf(
-				"invalid cursor for %q: %w",
-				key,
-				err,
-			)
+			return nil, fmt.Errorf("invalid cursor for %q: %w", key, err)
 		}
-
 		store.Sources[key] = sanitizeMirrorCursor(key, cursor)
 	}
 
 	statuses := make([]mirrorSourceStatus, 0, len(sources))
-	recent := make([]map[string]any, 0, maxMirrorCursorSources*maxMirrorEventsPerSource)
 
 	for _, source := range sources {
 		if err := ctx.Err(); err != nil {
@@ -211,33 +202,45 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 			Offset:       cursor.Offset,
 		}
 
-		absPath, info, err := mirrorSourceInfo(source.root, source.relative)
+		absPath, initialInfo, err := mirrorSourceInfo(
+			source.root,
+			source.relative,
+		)
+
 		if os.IsNotExist(err) {
-			// An absent log is unavailable evidence, not proof of zero events.
+			// Missing evidence is unavailable, not proof of zero events.
 			statuses = append(statuses, status)
 			store.Sources[source.key] = cursor
 			continue
 		}
-
 		if err != nil {
-			status.Error = "source file is unavailable or failed safe-path validation"
+			status.Error = "source is unavailable or failed safe-path validation"
 			statuses = append(statuses, status)
 			store.Sources[source.key] = cursor
 			continue
 		}
 
 		status.Available = true
-		status.Bytes = info.Size()
+		status.Bytes = initialInfo.Size()
 
-		if info.Size() < 0 {
+		if initialInfo.Size() < 0 {
 			status.Error = "source has an invalid size"
 			statuses = append(statuses, status)
 			store.Sources[source.key] = cursor
 			continue
 		}
 
-		if cursor.Offset < 0 || cursor.Offset > info.Size() {
-			status.Error = "source length is inconsistent with the saved cursor; manual cursor reset is required"
+		// Detect shrinkage even when the saved offset would still fit within
+		// the shorter file. Do not silently reset and recount the log.
+		if cursor.ObservedSize > 0 && initialInfo.Size() < cursor.ObservedSize {
+			status.Error = "source was truncated below its previously observed size; manual review is required"
+			statuses = append(statuses, status)
+			store.Sources[source.key] = cursor
+			continue
+		}
+
+		if cursor.Offset < 0 || cursor.Offset > initialInfo.Size() {
+			status.Error = "source length is inconsistent with the saved cursor; manual review is required"
 			statuses = append(statuses, status)
 			store.Sources[source.key] = cursor
 			continue
@@ -254,14 +257,12 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 			continue
 		}
 
-		continuityVerified := false
-		workingCursor := cloneMirrorCursor(cursor)
-
-		currentFingerprint, fpErr := calculateMirrorFingerprints(
+		working := cloneMirrorCursor(cursor)
+		currentFingerprint, err := calculateMirrorFingerprints(
 			file,
 			cursor.Offset,
 		)
-		if fpErr != nil {
+		if err != nil {
 			_ = file.Close()
 			status.Error = "could not validate source continuity"
 			statuses = append(statuses, status)
@@ -271,28 +272,25 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 
 		switch {
 		case cursor.Offset == 0:
-			continuityVerified = true
+			status.ContinuityVerified = true
 
 		case cursor.PrefixSHA256 == "" || cursor.TailSHA256 == "":
-			// Backward-compatible initialization for cursors created before
-			// fingerprints existed. Past content cannot be proven unchanged.
-			status.Warning = "legacy cursor has no complete source fingerprints; current bytes were adopted as a continuity baseline"
+			status.Warning = "legacy cursor lacks source fingerprints; previously consumed bytes cannot be verified"
+			status.ContinuityVerified = false
 
 		case cursor.PrefixSHA256 != currentFingerprint.PrefixSHA256 ||
 			cursor.TailSHA256 != currentFingerprint.TailSHA256:
 			_ = file.Close()
-			status.Error = "source content before the saved cursor has changed; cursor retained and manual review is required"
+			status.Error = "source content before the saved cursor changed; cursor retained for manual review"
 			statuses = append(statuses, status)
 			store.Sources[source.key] = cursor
 			continue
 
 		default:
-			continuityVerified = true
+			status.ContinuityVerified = true
 		}
 
-		// Restrict this pass to the file size observed before reading. Bytes
-		// appended concurrently will be consumed on a later observation.
-		availableBytes := info.Size() - cursor.Offset
+		availableBytes := initialInfo.Size() - cursor.Offset
 		readLimit := availableBytes
 		if readLimit > maxMirrorBytesPerSource {
 			readLimit = maxMirrorBytesPerSource
@@ -311,13 +309,12 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 			chunk = chunk[:n]
 		}
 
-		// Process only complete lines. A partially written final line remains
-		// pending and is not parsed or counted yet.
 		lastNL := bytes.LastIndexByte(chunk, '\n')
 
 		if lastNL < 0 {
+			// No complete record is available. Keep the byte offset unchanged.
 			if availableBytes > int64(len(chunk)) {
-				status.Error = "no newline found within the source byte limit; cursor not advanced"
+				status.Error = "no newline found within the per-source byte limit; cursor not advanced"
 			} else if len(chunk) > 0 {
 				status.Warning = appendMirrorWarning(
 					status.Warning,
@@ -332,41 +329,45 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 				openedInfo,
 			); err != nil {
 				status.Error = "source identity changed during observation"
+				_ = file.Close()
+				statuses = append(statuses, status)
+				store.Sources[source.key] = cursor
+				continue
+			}
+
+			// Fingerprints are computed while the file remains open. This
+			// avoids the closed-file bug in the previous version.
+			working.PrefixSHA256 = currentFingerprint.PrefixSHA256
+			working.TailSHA256 = currentFingerprint.TailSHA256
+			working.LastObservedAt = time.Now().UTC()
+
+			fileInfo, statErr := file.Stat()
+			if statErr == nil {
+				working.ObservedSize = fileInfo.Size()
 			}
 
 			_ = file.Close()
 
-			if status.Error == "" {
-				fp, e := calculateMirrorFingerprints(file, cursor.Offset)
-				if e == nil {
-					workingCursor.PrefixSHA256 = fp.PrefixSHA256
-					workingCursor.TailSHA256 = fp.TailSHA256
-					workingCursor.LastObservedAt = time.Now().UTC()
-					store.Sources[source.key] = workingCursor
-				} else {
-					status.Error = "could not update source continuity fingerprints"
-					store.Sources[source.key] = cursor
-				}
-			} else {
+			if statErr != nil {
+				status.Error = "could not update observed source size"
 				store.Sources[source.key] = cursor
+			} else {
+				store.Sources[source.key] = working
 			}
 
 			status.Offset = store.Sources[source.key].Offset
 			status.TotalRecords = store.Sources[source.key].TotalRecords
 			status.EventCounts = cloneMirrorCounts(store.Sources[source.key].Counts)
-			status.ContinuityVerified = continuityVerified
 			statuses = append(statuses, status)
 			continue
 		}
 
 		complete := chunk[:lastNL+1]
 		newCount := 0
-
 		scanner := bufio.NewScanner(bytes.NewReader(complete))
 		scanner.Buffer(make([]byte, 4096), 1<<20)
 
 		scanFailed := false
-
 		for scanner.Scan() {
 			if err := ctx.Err(); err != nil {
 				_ = file.Close()
@@ -378,12 +379,10 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 				continue
 			}
 
-			// Work on a detached cursor. A scanner or read failure must never
-			// partially commit event counts while leaving the old byte offset.
 			var event map[string]any
 			if json.Unmarshal(line, &event) != nil || event == nil {
-				workingCursor.Counts["unparsed_record"]++
-				workingCursor.TotalRecords++
+				working.Counts["unparsed_record"]++
+				working.TotalRecords++
 				newCount++
 				continue
 			}
@@ -392,32 +391,27 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 				firstString(event, "type", "event", "action", "event_type"),
 			)
 
-			if _, exists := workingCursor.Counts[kind]; !exists &&
-				len(workingCursor.Counts) >= maxMirrorCursorCounts {
+			if _, exists := working.Counts[kind]; !exists &&
+				len(working.Counts) >= maxMirrorCursorCounts {
 				kind = "other"
 			}
 
-			workingCursor.Counts[kind]++
-			workingCursor.TotalRecords++
+			working.Counts[kind]++
+			working.TotalRecords++
 			newCount++
 
-			summary := map[string]any{
+			working.Recent = append(working.Recent, map[string]any{
 				"source":      source.key,
 				"type":        kind,
 				"at":          normalizeMirrorTimestamp(firstString(event, "at", "created_at", "timestamp", "time")),
 				"status":      normalizeMirrorStatus(firstString(event, "status", "result")),
-				"observed_at": time.Now().UTC(),
-			}
+				"observed_at": time.Now().UTC().Format(time.RFC3339Nano),
+			})
 
-			workingCursor.Recent = append(
-				workingCursor.Recent,
-				summary,
-			)
-
-			if len(workingCursor.Recent) > maxMirrorEventsPerSource {
-				workingCursor.Recent = append(
+			if len(working.Recent) > maxMirrorEventsPerSource {
+				working.Recent = append(
 					[]map[string]any(nil),
-					workingCursor.Recent[len(workingCursor.Recent)-maxMirrorEventsPerSource:]...,
+					working.Recent[len(working.Recent)-maxMirrorEventsPerSource:]...,
 				)
 			}
 		}
@@ -435,10 +429,9 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 		}
 
 		newOffset := cursor.Offset + int64(lastNL+1)
-		workingCursor.Offset = newOffset
-		workingCursor.LastObservedAt = time.Now().UTC()
 
-		// A path replaced or truncated during the scan is not committed.
+		// Verify that the exact bytes parsed are still present before accepting
+		// the new counts and moving the cursor.
 		if err := verifyMirrorFileStillSame(
 			source.root,
 			source.relative,
@@ -447,6 +440,14 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 		); err != nil {
 			_ = file.Close()
 			status.Error = "source identity changed during observation; cursor retained"
+			statuses = append(statuses, status)
+			store.Sources[source.key] = cursor
+			continue
+		}
+
+		if err := verifyMirrorSegment(file, cursor.Offset, complete); err != nil {
+			_ = file.Close()
+			status.Error = "consumed source bytes changed during observation; cursor retained"
 			statuses = append(statuses, status)
 			store.Sources[source.key] = cursor
 			continue
@@ -461,35 +462,68 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 			continue
 		}
 
+		fileInfo, statErr := file.Stat()
+		if statErr != nil {
+			_ = file.Close()
+			status.Error = "could not record source size; cursor retained"
+			statuses = append(statuses, status)
+			store.Sources[source.key] = cursor
+			continue
+		}
+
+		if fileInfo.Size() < newOffset {
+			_ = file.Close()
+			status.Error = "source was truncated during observation; cursor retained"
+			statuses = append(statuses, status)
+			store.Sources[source.key] = cursor
+			continue
+		}
+
 		_ = file.Close()
 
-		workingCursor.PrefixSHA256 = fp.PrefixSHA256
-		workingCursor.TailSHA256 = fp.TailSHA256
+		working.Offset = newOffset
+		working.ObservedSize = fileInfo.Size()
+		working.PrefixSHA256 = fp.PrefixSHA256
+		working.TailSHA256 = fp.TailSHA256
+		working.LastObservedAt = time.Now().UTC()
 
-		store.Sources[source.key] = workingCursor
+		store.Sources[source.key] = working
 
-		status.Offset = workingCursor.Offset
+		status.Offset = working.Offset
 		status.NewRecords = newCount
-		status.TotalRecords = workingCursor.TotalRecords
-		status.EventCounts = cloneMirrorCounts(workingCursor.Counts)
-		status.ContinuityVerified = continuityVerified
-
+		status.TotalRecords = working.TotalRecords
+		status.EventCounts = cloneMirrorCounts(working.Counts)
 		statuses = append(statuses, status)
-		recent = append(recent, cloneMirrorSummaries(workingCursor.Recent)...)
 	}
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	store.SchemaVersion = 1
-
-	if err := writeJSONFile(cursorPath, store, 0o600); err != nil {
-		return nil, fmt.Errorf("persist mirror cursor safely: %w", err)
+	// Always rebuild the recent view from persisted, sanitized cursors. This
+	// ensures a request with no new records still reports recent past events.
+	recent := make([]map[string]any, 0, maxMirrorCursorSources*maxMirrorEventsPerSource)
+	for _, source := range sources {
+		cursor, ok := store.Sources[source.key]
+		if !ok {
+			continue
+		}
+		recent = append(recent, cloneMirrorSummaries(cursor.Recent)...)
 	}
+
+	sort.SliceStable(recent, func(i, j int) bool {
+		return mirrorSummaryObservedAt(recent[i]).Before(
+			mirrorSummaryObservedAt(recent[j]),
+		)
+	})
 
 	if len(recent) > 40 {
 		recent = recent[len(recent)-40:]
+	}
+
+	store.SchemaVersion = 1
+	if err := writeJSONFile(cursorPath, store, 0o600); err != nil {
+		return nil, fmt.Errorf("persist mirror cursor safely: %w", err)
 	}
 
 	zeroBase := envOr("USECT_ZERO_BASE_URL", "http://127.0.0.1:8780")
@@ -505,14 +539,12 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 	)
 
 	return map[string]any{
-		"observed_at": time.Now().UTC(),
-		"mode":        "read_only_incremental_log_mirror",
-		"sources":     statuses,
+		"observed_at":           time.Now().UTC(),
+		"mode":                  "read_only_incremental_log_mirror",
+		"sources":               statuses,
 		"recent_event_summaries": recent,
-
-		"core_zero_health": zeroHealth,
-		"core_one_health":  oneHealth,
-
+		"core_zero_health":      zeroHealth,
+		"core_one_health":       oneHealth,
 		"core_zero_heal_evidence": map[string]any{
 			"directory":          "core-zero/evidence/heal",
 			"available":          directoryExists(healingDir),
@@ -520,20 +552,19 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 			"latest_modified_at": lastHeal,
 			"scan_complete":      healComplete,
 		},
-
-		"source_code_executed":   false,
+		"source_code_executed":    false,
 		"raw_log_content_exposed": false,
-		"cursor_path":            "core-two/state/mirror-cursor.json",
-
+		"cursor_path":             "core-two/state/mirror-cursor.json",
 		"notes": []string{
-			"Core-Zero and Core-One logs are consumed incrementally. Unavailable, unreadable, or inconsistent logs are not treated as evidence of zero events.",
-			"Only newline-terminated records that fit the configured line limit are consumed. A malformed JSON record is counted as unparsed without exposing its raw content.",
-			"Cursor fingerprints detect many forms of source truncation or rewriting. A mismatch blocks further consumption until the source or cursor is reviewed.",
-			"Legacy cursors without fingerprints receive a warning because their previously consumed bytes cannot be independently verified.",
-			"Recent summaries contain normalized event categories and statuses, not raw log lines or arbitrary input fields.",
-			"Health probes use fixed endpoint paths, disable redirects, have a bounded timeout, and do not expose response bodies.",
+			"Core-One and Core-Zero logs are consumed incrementally. Missing or unreadable logs are not treated as proof of zero events.",
+			"Only complete newline-terminated records are consumed. Malformed JSON records are counted as unparsed without exposing raw content.",
+			"Source-size tracking and fingerprints detect common truncation and rewrite cases. A detected inconsistency blocks consumption pending review.",
+			"Fingerprint checks cover a bounded prefix and tail, not every previously consumed byte; they are a continuity check, not a tamper-proof audit chain.",
+			"Legacy cursors without fingerprints are accepted with a warning because earlier source bytes cannot be independently verified.",
+			"Recent summaries use a normalized allowlist and are rebuilt from the saved cursor on every observation.",
+			"Health probes use fixed paths, bounded timeouts, and reject redirects. Non-loopback upstreams require HTTPS.",
 			"The mirror reads at most 4 MiB per source per pass and advances only through complete records.",
-			"These controls are application-level safeguards, not a substitute for operating-system isolation against a hostile local process.",
+			"Application-level checks do not replace operating-system isolation against a hostile local process.",
 		},
 	}, nil
 }
@@ -549,8 +580,14 @@ func validateMirrorCursor(cursor mirrorSourceCursor) error {
 	if cursor.Offset < 0 {
 		return errors.New("negative byte offset")
 	}
+	if cursor.ObservedSize < 0 {
+		return errors.New("negative observed file size")
+	}
 	if cursor.TotalRecords < 0 {
 		return errors.New("negative total record count")
+	}
+	if cursor.ObservedSize > 0 && cursor.Offset > cursor.ObservedSize {
+		return errors.New("offset exceeds recorded observed file size")
 	}
 	if len(cursor.Counts) > maxMirrorCursorCounts {
 		return errors.New("too many event-count categories")
@@ -558,13 +595,11 @@ func validateMirrorCursor(cursor mirrorSourceCursor) error {
 	if len(cursor.Recent) > maxMirrorEventsPerSource {
 		return errors.New("too many recent summaries")
 	}
-
 	for _, count := range cursor.Counts {
 		if count < 0 {
 			return errors.New("negative event count")
 		}
 	}
-
 	for _, fingerprint := range []string{
 		cursor.PrefixSHA256,
 		cursor.TailSHA256,
@@ -579,7 +614,6 @@ func validateMirrorCursor(cursor mirrorSourceCursor) error {
 			return errors.New("invalid SHA-256 fingerprint encoding")
 		}
 	}
-
 	return nil
 }
 
@@ -588,24 +622,18 @@ func sanitizeMirrorCursor(
 	cursor mirrorSourceCursor,
 ) mirrorSourceCursor {
 	out := cloneMirrorCursor(cursor)
-
 	counts := make(map[string]int64)
+
 	for category, count := range out.Counts {
 		if count < 0 {
 			continue
 		}
 
 		category = normalizeMirrorEventType(category)
-		if counts[category] > int64(^uint64(0)>>1)-count {
-			counts[category] = int64(^uint64(0) >> 1)
-			continue
-		}
 		counts[category] += count
 	}
 
 	if len(counts) > maxMirrorCursorCounts {
-		// All categories are normalized to a small, predefined vocabulary,
-		// but retain a defensive cap in case that vocabulary changes.
 		capped := make(map[string]int64, maxMirrorCursorCounts)
 		for category, count := range counts {
 			if len(capped) >= maxMirrorCursorCounts-1 {
@@ -619,7 +647,6 @@ func sanitizeMirrorCursor(
 
 	out.Counts = counts
 	out.Recent = sanitizeMirrorSummaries(sourceKey, out.Recent)
-
 	return out
 }
 
@@ -640,22 +667,17 @@ func cloneMirrorCounts(input map[string]int64) map[string]int64 {
 
 func cloneMirrorSummaries(input []map[string]any) []map[string]any {
 	out := make([]map[string]any, 0, len(input))
+
 	for _, summary := range input {
-		copy := map[string]any{
-			"source": normalizeMirrorSourceLabel(firstString(summary, "source")),
-			"type":   normalizeMirrorEventType(firstString(summary, "type")),
-			"at":     normalizeMirrorTimestamp(firstString(summary, "at")),
-			"status": normalizeMirrorStatus(firstString(summary, "status")),
-		}
-
-		if observed, ok := summary["observed_at"].(string); ok {
-			copy["observed_at"] = normalizeMirrorTimestamp(observed)
-		} else if observed, ok := summary["observed_at"].(time.Time); ok {
-			copy["observed_at"] = observed.UTC()
-		}
-
-		out = append(out, copy)
+		out = append(out, map[string]any{
+			"source":      normalizeMirrorSourceLabel(firstString(summary, "source")),
+			"type":        normalizeMirrorEventType(firstString(summary, "type")),
+			"at":          normalizeMirrorTimestamp(firstString(summary, "at")),
+			"status":      normalizeMirrorStatus(firstString(summary, "status")),
+			"observed_at": normalizeMirrorTimestamp(firstString(summary, "observed_at")),
+		})
 	}
+
 	return out
 }
 
@@ -669,8 +691,6 @@ func sanitizeMirrorSummaries(
 
 	out := make([]map[string]any, 0, len(input))
 	for _, summary := range input {
-		// Old cursor summaries may contain arbitrary values. Rebuild every
-		// summary from the narrow allowlist instead of returning persisted data.
 		out = append(out, map[string]any{
 			"source":      sourceKey,
 			"type":        normalizeMirrorEventType(firstString(summary, "type")),
@@ -682,10 +702,19 @@ func sanitizeMirrorSummaries(
 	return out
 }
 
-func mirrorSourceInfo(
-	root string,
-	relative string,
-) (string, os.FileInfo, error) {
+func mirrorSummaryObservedAt(summary map[string]any) time.Time {
+	raw := firstString(summary, "observed_at")
+	if raw == "" {
+		return time.Time{}
+	}
+	value, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return value
+}
+
+func mirrorSourceInfo(root, relative string) (string, os.FileInfo, error) {
 	path, info, err := mindPathWithinRoot(root, relative)
 	if err != nil {
 		return "", nil, err
@@ -696,10 +725,7 @@ func mirrorSourceInfo(
 	return path, info, nil
 }
 
-func openMirrorSource(
-	root string,
-	relative string,
-) (*os.File, os.FileInfo, error) {
+func openMirrorSource(root, relative string) (*os.File, os.FileInfo, error) {
 	path, before, err := mirrorSourceInfo(root, relative)
 	if err != nil {
 		return nil, nil, err
@@ -734,9 +760,7 @@ func openMirrorSource(
 }
 
 func verifyMirrorFileStillSame(
-	root string,
-	relative string,
-	path string,
+	root, relative, path string,
 	openedInfo os.FileInfo,
 ) error {
 	if openedInfo == nil {
@@ -756,11 +780,38 @@ func verifyMirrorFileStillSame(
 	return nil
 }
 
+func verifyMirrorSegment(file *os.File, offset int64, expected []byte) error {
+	if file == nil || offset < 0 {
+		return errors.New("invalid source segment")
+	}
+
+	actual := make([]byte, len(expected))
+	if len(actual) == 0 {
+		return nil
+	}
+
+	n, err := file.ReadAt(actual, offset)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if n != len(expected) {
+		return io.ErrUnexpectedEOF
+	}
+	if !bytes.Equal(actual, expected) {
+		return errors.New("source segment changed after reading")
+	}
+
+	return nil
+}
+
+// calculateMirrorFingerprints hashes a bounded file prefix and the bytes
+// immediately preceding the current cursor offset. These are sampled
+// continuity fingerprints, not a complete hash of all previously consumed data.
 func calculateMirrorFingerprints(
 	file *os.File,
 	offset int64,
 ) (mirrorFingerprints, error) {
-	result := mirrorFingerprints{}
+	var result mirrorFingerprints
 
 	if file == nil || offset < 0 {
 		return result, errors.New("invalid file or byte offset")
@@ -774,12 +825,12 @@ func calculateMirrorFingerprints(
 		return result, errors.New("offset exceeds current file size")
 	}
 
-	prefixLength := int64(maxMirrorFingerprintPrefix)
-	if offset < prefixLength {
-		prefixLength = offset
-	}
-
+	prefixLength := minMirrorInt64(
+		int64(maxMirrorFingerprintPrefix),
+		offset,
+	)
 	prefix := make([]byte, int(prefixLength))
+
 	if len(prefix) > 0 {
 		n, readErr := file.ReadAt(prefix, 0)
 		if readErr != nil && readErr != io.EOF {
@@ -790,12 +841,12 @@ func calculateMirrorFingerprints(
 		}
 	}
 
-	tailLength := int64(maxMirrorFingerprintTail)
-	if offset < tailLength {
-		tailLength = offset
-	}
-
+	tailLength := minMirrorInt64(
+		int64(maxMirrorFingerprintTail),
+		offset,
+	)
 	tail := make([]byte, int(tailLength))
+
 	if len(tail) > 0 {
 		start := offset - tailLength
 		n, readErr := file.ReadAt(tail, start)
@@ -809,7 +860,15 @@ func calculateMirrorFingerprints(
 
 	result.PrefixSHA256 = hashString(string(prefix))
 	result.TailSHA256 = hashString(string(tail))
+
 	return result, nil
+}
+
+func minMirrorInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func normalizeMirrorEventType(raw string) string {
@@ -943,8 +1002,6 @@ func probeHealth(
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 
-	// Do not include credentials, query parameters, arbitrary request paths,
-	// or response bodies in the health-probe result.
 	result.URL = parsed.Scheme + "://" + parsed.Host + parsed.EscapedPath()
 
 	request, err := http.NewRequestWithContext(
@@ -961,8 +1018,8 @@ func probeHealth(
 	client := &http.Client{
 		Timeout: maxMirrorHealthTimeout,
 		CheckRedirect: func(
-			request *http.Request,
-			via []*http.Request,
+			_ *http.Request,
+			_ []*http.Request,
 		) error {
 			return http.ErrUseLastResponse
 		},
@@ -982,7 +1039,6 @@ func probeHealth(
 	result.Reachable = response.StatusCode >= 200 &&
 		response.StatusCode < 300
 
-	// Consume only a small bounded amount. The body is never returned or logged.
 	_, _ = io.CopyN(
 		io.Discard,
 		response.Body,
@@ -1008,7 +1064,6 @@ func countRecentFilesDetailed(
 	if capFiles <= 0 {
 		capFiles = 1000
 	}
-
 	if !directoryExists(root) {
 		return 0, nil, false
 	}
@@ -1030,7 +1085,6 @@ func countRecentFilesDetailed(
 		if path == root {
 			return nil
 		}
-
 		if entry.Type()&os.ModeSymlink != 0 {
 			complete = false
 			if entry.IsDir() {
@@ -1038,7 +1092,6 @@ func countRecentFilesDetailed(
 			}
 			return nil
 		}
-
 		if entry.IsDir() {
 			return nil
 		}
@@ -1053,7 +1106,6 @@ func countRecentFilesDetailed(
 		if info.ModTime().After(latest) {
 			latest = info.ModTime()
 		}
-
 		if count >= capFiles {
 			complete = false
 			return filepath.SkipAll
@@ -1065,7 +1117,6 @@ func countRecentFilesDetailed(
 	if err != nil {
 		complete = false
 	}
-
 	if latest.IsZero() {
 		return count, nil, complete
 	}
@@ -1082,13 +1133,11 @@ func firstString(obj map[string]any, keys ...string) string {
 			}
 		}
 	}
-
 	return ""
 }
 
 func limitLabel(value string, maximum int) string {
 	value = strings.TrimSpace(value)
-
 	if maximum <= 0 {
 		return ""
 	}
@@ -1122,6 +1171,5 @@ func envOr(key, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
 	}
-
 	return fallback
 }
