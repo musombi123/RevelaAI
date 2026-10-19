@@ -39,6 +39,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/webhook/whatsapp" in schema["paths"]
     assert "/api/agi/manifest" in schema["paths"]
     assert "/api/agi/status" in schema["paths"]
+    assert "/api/sci/shield/dashboard" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -180,6 +181,12 @@ def test_native_system_routes_keep_response_contracts() -> None:
     ready = client.get("/ready")
     assert ready.status_code in (200, 503)
     assert ready.json()["status"] in ("ready", "degraded")
+
+
+def test_sci_core_dashboard_keeps_authoritative_admin_boundary() -> None:
+    response = client.get("/api/sci/shield/dashboard")
+    assert response.status_code == 401
+    assert response.json()["code"] == "authentication_required"
 
 
 def test_agi_manifest_and_status_routes_preserve_shape() -> None:
