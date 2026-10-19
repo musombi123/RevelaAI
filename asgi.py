@@ -8,8 +8,9 @@ legacy endpoints and their authentication/error semantics.
 from __future__ import annotations
 
 import logging
+import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from starlette.middleware.wsgi import WSGIMiddleware
 
 # Import the existing application only as the temporary compatibility gateway.
@@ -32,9 +33,23 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def attach_asgi_security_headers(request: Request, call_next):
+    """Apply baseline headers to native FastAPI routes and documentation."""
+    response = await call_next(request)
+    response.headers.setdefault(
+        "X-Request-ID",
+        request.headers.get("X-Request-ID", "").strip()[:100] or uuid.uuid4().hex,
+    )
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
+
 @app.get("/_fastapi/health", tags=["Operations"])
 async def fastapi_gateway_health() -> dict[str, str]:
-    """Health check for the ASGI process, not a claim that every AI provider is ready."""
+    """Check the ASGI process only; provider readiness is reported by /ready."""
     return {
         "status": "ok",
         "service": "revelaai",
