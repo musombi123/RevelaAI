@@ -6,7 +6,19 @@ services:
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn revela_platform.fastapi_app:app --host 0.0.0.0 --port $PORT --workers 1
+    disk:
+      name: revelaai-platform-data
+      mountPath: /var/data/revelaai
+      sizeGB: 1
     envVars:
+      - key: REVELA_DATA_DIR
+        value: /var/data/revelaai
+      - key: REVELA_FACTORY_ROOT
+        value: /var/data/revelaai/factories
+      - key: REVELA_SEED_ROOT
+        value: /var/data/revelaai/seeded
+      - key: REVELA_AUDIT_LEDGER_PATH
+        value: /var/data/revelaai/audit/events.jsonl
       - key: GROQ_API_KEY
         sync: false
       - key: JWT_SECRET
