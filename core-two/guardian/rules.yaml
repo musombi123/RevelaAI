@@ -1,38 +1,177 @@
 version: 1
+policy_id: usect-core-zero-guardian
+policy_revision: "1.1.0"
 mode: fail_closed
-core_law: "Protect, not destroy. Stage proposals; never auto-merge or execute generated code."
+
+core_law: >-
+  Protect, not destroy. Screen objectives before mutation artifacts are
+  created. Stage proposals for review. Never automatically execute generated
+  code, install hardware, or merge changes into existing cores.
+
+# Explicit markers support compatibility with the current Guardian loader.
+# Keep these entries when changing or expanding the category taxonomy.
 block_categories:
+  - weapons
   - weapons_and_weapon_efficiency
+  - warfare
   - warfare_and_explosives
+  - explosives
   - malware_and_credential_theft
+  - privacy_violations
   - covert_surveillance_and_privacy_violations
   - evasion_of_safety_controls
   - unauthorized_access_or_destruction
   - illegal_operations_and_evasion_of_law
+
 mandatory_checks:
-  - screen the objective before creating mutation directories
-  - use Core-One Guardian as a mandatory dependency
-  - check core-zero/guardian/rules.yaml when present; if present but invalid, fail closed
-  - if Core-Zero has no dedicated Guardian file, report the gap and use restrictive local controls plus Core-One Guardian
-  - run the Core-Zero RV Lang and radar library integration probes
-  - require a measured improvement and a verified RVX artifact-protection proposal
-  - never execute candidate code, install hardware, or merge into existing cores
-  - retain only evidence-backed proposals awaiting explicit human review
-  - mark Kenya-law, KEBS, and Data Protection compliance as pending human review; do not assert certification without evidence
-  - never store provider secrets or cryptographic keys in source control
+  - id: objective_screening
+    rule: Screen the objective before creating mutation directories or candidate files.
+    required: true
+    failure_action: block
+
+  - id: core_one_guardian
+    rule: Use Core-One Guardian as a mandatory dependency for proposal screening.
+    required: true
+    failure_action: block
+
+  - id: core_zero_guardian_policy
+    rule: >-
+      Inspect core-zero/guardian/rules.yaml when present. If the dedicated
+      policy file exists but is unreadable, malformed, or invalid, fail closed.
+      If it is absent, report the policy gap and use restrictive local controls
+      together with Core-One Guardian.
+    required: true
+    failure_action: block_if_present_but_invalid
+
+  - id: library_integration_probes
+    rule: Run the Core-Zero RV Lang and Radar library integration probes.
+    required: true
+    failure_action: block
+
+  - id: evidence_quality
+    rule: >-
+      Require reproducible, scope-appropriate evidence for any claimed
+      improvement. Keep synthetic fixture measurements separate from
+      production measurements and end-to-end performance claims.
+    required: true
+    failure_action: retain_as_unverified
+
+  - id: rvx_artifact_protection
+    rule: >-
+      Require review and verification of the proposed RVX artifact-protection
+      mechanism before making protection claims. Document key custody,
+      rotation, recovery, compatibility, and authentication-test coverage.
+      Do not claim that software is literally uncopyable.
+    required: true
+    failure_action: retain_as_unverified
+
+  - id: no_candidate_execution
+    rule: Never execute candidate code as part of automatic proposal generation.
+    required: true
+    failure_action: block
+
+  - id: no_automatic_installation
+    rule: Never automatically install hardware or activate generated integrations.
+    required: true
+    failure_action: block
+
+  - id: no_automatic_merge
+    rule: Never automatically merge proposals into Core-One or Core-Zero.
+    required: true
+    failure_action: block
+
+  - id: evidence_backed_staging
+    rule: >-
+      Retain only proposals whose claims are supported by recorded evidence.
+      Keep unsupported claims explicitly unverified and proposals awaiting
+      explicit human review.
+    required: true
+    failure_action: retain_as_unverified
+
+  - id: kenya_compliance_review
+    rule: >-
+      Treat Kenya-law, KEBS, and Data Protection compliance as pending qualified
+      human review until supporting evidence exists. Do not assert certification
+      or legal compliance without appropriate verification.
+    required: true
+    failure_action: mark_pending_review
+
+  - id: secret_management
+    rule: >-
+      Never store provider secrets, authentication tokens, private keys, or
+      encryption keys in source control. Use an approved secret-management
+      mechanism and restrict access.
+    required: true
+    failure_action: block_release
+
+  - id: protected_core_integrity
+    rule: >-
+      Keep Core-One and Core-Zero unchanged during Core-Two proposal generation.
+      Any authorized integration requires a separate reviewed change.
+    required: true
+    failure_action: block
+
+  - id: auditability
+    rule: >-
+      Record the decision, policy revision, candidate reference, and test
+      outcome without logging sensitive inputs, credentials, or key material.
+    required: true
+    failure_action: block_release
+
+# These terms are screening indicators, not a complete classifier.
+# Their presence should trigger policy evaluation rather than replace it.
 extra_terms:
   - weapon search
   - faster weapon
   - weapon efficiency
+  - increase weapon lethality
+  - maximize weapon damage
   - explosive optimization
+  - build an explosive device
   - credential theft
+  - steal credentials
   - ransomware
   - spyware
+  - covert surveillance
+  - unauthorized tracking
+  - bypass authentication
   - disable guardian
   - disable safety controls
+  - bypass safety controls
   - delete audit logs
+  - destroy audit evidence
+  - unauthorized access
   - illegal operation
   - evade law
   - bypass law
   - violate privacy
-  - covert surveillance
+
+# Human review is mandatory for policy changes and candidate activation.
+approval:
+  automatic_policy_changes: false
+  automatic_candidate_execution: false
+  automatic_hardware_installation: false
+  automatic_core_one_merge: false
+  automatic_core_zero_merge: false
+  explicit_owner_approval_required: true
+  approval_record_required: true
+  record_candidate_revision: true
+  record_policy_revision: true
+
+compliance:
+  kenya_law:
+    status: pending_human_review
+    certification_claim_allowed: false
+  kebs:
+    status: pending_human_review
+    certification_claim_allowed: false
+  data_protection:
+    status: pending_human_review
+    certification_claim_allowed: false
+
+evidence:
+  synthetic_fixture_is_production_evidence: false
+  unknown_production_metrics_must_remain_null: true
+  unsupported_claims_must_be_marked_unverified: true
+  benchmark_scope_must_be_recorded: true
+  source_revision_must_be_recorded: true
