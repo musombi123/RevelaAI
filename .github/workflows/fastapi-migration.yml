@@ -1,0 +1,49 @@
+name: FastAPI Gateway Migration Checks
+
+on:
+  pull_request:
+    paths:
+      - "asgi.py"
+      - "app.py"
+      - "requirements.txt"
+      - "render.yaml"
+      - "routes/**"
+      - "fastapi_routes/**"
+      - "services/**"
+      - "tests/test_fastapi_entrypoint.py"
+      - ".github/workflows/fastapi-migration.yml"
+  push:
+    branches: [migration/flask-to-fastapi]
+    paths:
+      - "asgi.py"
+      - "app.py"
+      - "requirements.txt"
+      - "render.yaml"
+      - "routes/**"
+      - "fastapi_routes/**"
+      - "services/**"
+      - "tests/test_fastapi_entrypoint.py"
+      - ".github/workflows/fastapi-migration.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  asgi-entrypoint:
+    name: ASGI entry point and compatibility contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install gateway and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Compile ASGI entry point and tests
+        run: python -m py_compile asgi.py tests/test_fastapi_entrypoint.py
+      - name: Run FastAPI gateway regression tests
+        run: python -m pytest -q tests/test_fastapi_entrypoint.py
