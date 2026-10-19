@@ -58,10 +58,10 @@ jobs:
           assert "from asgi import app" in app_source
           assert "WSGIMiddleware" not in asgi_source
           assert "legacy_flask_app" not in asgi_source
-          assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", asgi_source, re.M)
-          assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", app_source, re.M)
+          assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", asgi_source, re.M)
+          assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", app_source, re.M)
           for dependency in ("flask", "flask-cors", "a2wsgi"):
-              assert not re.search(rf"^\\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\\s|$)", requirements, re.M), dependency
+              assert not re.search(rf"^\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\s|$)", requirements, re.M), dependency
           assert not Path("legacy_flask_app.py").exists()
           print("FastAPI-only runtime contract verified.")
           PY
