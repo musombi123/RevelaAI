@@ -4,12 +4,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from core_billing.licensing import LicenseError, verify_license_token
 from core_billing.plans import get_plan
-from revela_platform.database import FactoryRecord, LicenseRecord, ToolRecord
+from revela_platform.database import FactoryRecord, LicenseRecord, SeedRecord, ToolRecord
 
 
 def _aware(value: datetime) -> datetime:
@@ -48,6 +48,12 @@ def enforce_tool_creation_quota(session: Session, license_record: LicenseRecord)
             ToolRecord.factory_build_id.is_(None),
         )
     ) or 0
-    created = int(factory_count) + int(standalone_tool_count)
+    seeded_children_count = session.scalar(
+        select(func.count()).select_from(SeedRecord).where(
+            SeedRecord.owner_user_id == license_record.user_id,
+            SeedRecord.status != "revoked",
+        )
+    ) or 0
+    created = int(factory_count) + int(standalone_tool_count) + int(seeded_children_count)
     if created >= plan.tool_limit:
         raise LicenseError(f"Plan limit reached ({plan.tool_limit} tools). Upgrade to Enterprise or a higher plan.")
