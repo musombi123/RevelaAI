@@ -1,5 +1,9 @@
 # USECT-SEED — Offline Child Factory
 
-The importable implementation lives in `core_seed/`; this directory retains the feature's organ name. Seed Runner validates a signed Ed25519 license offline and honors its signed `offline_until` claim, capped to 30 days when issued by RevelaAI. It creates a declarative child bundle, not executable code, and never silently activates hardware or runs arbitrary Python.
+Canonical importable implementation: `core_seed/seed_runner.py`; the hyphenated path wrapper is for the named organ directory.
 
-Offline enforcement relies on the local wall clock and signed token; protection against a privileged user rolling back system time requires trusted hardware or a server recheck.
+Seed validates the signed Ed25519 platform entitlement offline and honors its signed `offline_until` claim, capped to 30 days by the issuer. A child bundle stores the signed token in a local file restricted to owner permissions, binds its JSON manifest with SHA-256, and can be verified offline:
+
+    python -m core_seed.cli --seed-id seed_<24 hex characters>
+
+Set `REVELA_SEED_ROOT` to the seeded child directory and configure the license public key. The current seed is a declarative workflow plan: it never imports or executes customer-supplied Python, activates hardware, or silently deploys. System-clock rollback cannot be fully prevented without trusted hardware. The hosted API also checks the current server-side license record, while the offline CLI uses the signed entitlement and bounded lease.
