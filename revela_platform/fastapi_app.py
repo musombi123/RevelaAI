@@ -5,6 +5,7 @@ existing Flask app and ZERO/ONE/TWO Go services are not rewritten.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -1055,5 +1056,66 @@ async def licensed_tool_guard(request: Request, call_next):
 # Preserve all existing Flask endpoints. FastAPI routers/docs above this mount win
 # route priority; unresolved routes are passed to the original Flask WSGI app.
 from app import app as flask_app  # noqa: E402
+from mesh.rvx_mesh import MeshCallError, rvx_call  # noqa: E402
+
+
+@app.post("/v1/{tool_id}", tags=["licensed tools"])
+async def invoke_licensed_tool(
+    tool_id: str,
+    request: Request,
+    user_id: str = Depends(authenticated_user),
+) -> dict[str, Any]:
+    """Invoke a published tool through an RVXP1-capable adapter, never plaintext fallback."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tool_id):
+        raise HTTPException(status_code=404, detail="Tool route is not registered")
+    try:
+        country = _country(request.headers.get("X-Country") or request.query_params.get("country", "KE"))
+    except HTTPException as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    raw = await request.body()
+    if len(raw) > 1_000_000:
+        raise HTTPException(status_code=413, detail="Tool request exceeds the 1 MB input limit")
+    if raw:
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise HTTPException(status_code=400, detail="Tool input must be valid JSON") from exc
+    else:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Tool input must be a JSON object")
+
+    with SessionLocal() as session:
+        tool = session.get(ToolRecord, tool_id)
+        if tool is None or tool.status != "published":
+            raise HTTPException(status_code=404, detail="Tool is not published")
+        factory_build_id = tool.factory_build_id
+
+    packet = {
+        "protocol": "RVXP1_TOOL_INVOKE",
+        "tool_id": tool_id,
+        "factory_build_id": factory_build_id,
+        "user_id": user_id,
+        "country": country,
+        "input": payload,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        # urllib is blocking; move network I/O off the FastAPI event loop.
+        result = await asyncio.to_thread(rvx_call, "tool." + tool_id, packet)
+    except MeshCallError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Licensed tool adapter is unavailable or failed RVX authentication; no plaintext fallback was attempted.",
+        ) from exc
+    return {
+        "ok": True,
+        "tool_id": tool_id,
+        "runtime": "rvx_mesh",
+        "country": country,
+        "result": result,
+    }
+
 
 app.mount("/", WSGIMiddleware(flask_app), name="existing-flask-gateway")
