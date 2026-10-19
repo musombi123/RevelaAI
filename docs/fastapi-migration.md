@@ -61,7 +61,7 @@ longer depend on Flask state, and the full regression suite passes.
   remain isolated by a hash of the verified account ID.
 - **WhatsApp:** webhook verification and incoming message handler.
 - **Research:** `POST /api/research` searches a bounded set of configured RSS feeds; it does not fetch arbitrary user-supplied URLs.
-- **Prototype users directory:** `POST /api/users` and `GET /api/users/{user_id}`. This remains an in-memory demo store and is not the authoritative RevelaCode account database.
+- **Prototype users directory:** `POST /api/users` and `GET /api/users/{user_id}`. This remains an in-memory demo store, is disabled by default with `REVELAAI_ENABLE_PROTOTYPE_USERS_API=false`, and is not the authoritative RevelaCode account database.
 
 The ASGI middleware retains the same trusted-origin CORS allowlist, credential
 behavior, request IDs, security headers and reversible SCI throttle for native
