@@ -1,6 +1,6 @@
-"""Import aliases for the native FastAPI chat router and orchestration helpers."""
+"""Framework-neutral import path for the native chat router and chat services."""
 from fastapi_routes.chat import (
-    router as chat_bp,
+    router,
     _load_personalization_context,
     _persist_turn,
     _record_brain_outcome,
@@ -17,7 +17,7 @@ from services.ai_service import process_message
 chat = chat_no_slash
 
 __all__ = [
-    "chat_bp", "chat", "chat_no_slash", "chat_with_slash",
+    "router", "chat", "chat_no_slash", "chat_with_slash",
     "_load_personalization_context", "_persist_turn", "_record_brain_outcome",
     "_chat_sync", "classify_intent", "build_global_context", "HUB_LABELS",
     "get_identity_answer", "get_self_description_answer", "process_message",
