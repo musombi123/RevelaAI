@@ -9,7 +9,7 @@ on:
       - "render.yaml"
       - "routes/**"
       - "fastapi_routes/**"
-      - "services/user_store.py"
+      - "services/**"
       - "tests/test_fastapi_entrypoint.py"
       - ".github/workflows/fastapi-migration.yml"
   push:
@@ -20,6 +20,8 @@ on:
       - "requirements.txt"
       - "render.yaml"
       - "routes/**"
+      - "fastapi_routes/**"
+      - "services/**"
       - "tests/test_fastapi_entrypoint.py"
       - ".github/workflows/fastapi-migration.yml"
 
