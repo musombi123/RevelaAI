@@ -129,11 +129,8 @@ def _propose(actor: str, payload: dict[str, Any]):
 
         tests = {
             "passed": bool(artifact_results) and all(item["passed"] for item in artifact_results),
-            "logs": "
-
-".join(
-                "=== " + item["path"] + " (" + ("PASS" if item["passed"] else "FAIL") + ") ===
-" + item["logs"]
+            "logs": "\n\n".join(
+                "=== " + item["path"] + " (" + ("PASS" if item["passed"] else "FAIL") + ") ===\n" + item["logs"]
                 for item in artifact_results
             )[:40000],
             "coverage": 0.0,
@@ -150,32 +147,16 @@ def _propose(actor: str, payload: dict[str, Any]):
             + ".md"
         )
         changelog = (
-            "# Meta-Engineer Proposal
-
-"
-            + "- Feature: " + generated["feature"] + "
-"
-            + "- Spec: " + spec + "
-"
-            + "- Target: " + target + "
-"
-            + "- Artifact: " + generated["code_path"] + "
-"
-            + "- Status: " + status + "
-"
-            + "- Created: " + now.isoformat() + "
-"
-            + "- Tests passed: " + str(tests.get("passed")) + "
-
-"
-            + "## Test logs
-
-" + str(tests.get("logs", ""))[:12000]
-            + "
-
-## Safety
-No production file changed. Candidate source was not executed. Human review is required.
-"
+            "# Meta-Engineer Proposal\n\n"
+            + "- Feature: " + generated["feature"] + "\n"
+            + "- Spec: " + spec + "\n"
+            + "- Target: " + target + "\n"
+            + "- Artifact: " + generated["code_path"] + "\n"
+            + "- Status: " + status + "\n"
+            + "- Created: " + now.isoformat() + "\n"
+            + "- Tests passed: " + str(tests.get("passed")) + "\n\n"
+            + "## Test logs\n\n" + str(tests.get("logs", ""))[:12000]
+            + "\n\n## Safety\nNo production file changed. Candidate source was not executed. Human review is required.\n"
         )
         doc = {
             "spec": spec,
