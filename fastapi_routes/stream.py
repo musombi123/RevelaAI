@@ -11,16 +11,20 @@ import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-import legacy_flask_app as legacy
+from ai.intent_router import classify_intent
+from ai.json_utils import error_response
+from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
+from services.ai_service import detect_capability, process_message
+from services.image_service import generate_image_asset, parse_image_options
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 from services.runtime_config import (
-    REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, configured_image_model,
+    MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, configured_image_model,
     get_active_text_model, get_active_text_provider,
 )
 
 router = APIRouter(tags=["AI Streaming"])
 logger = logging.getLogger("revelaai.fastapi.stream")
-MAX_BODY_BYTES = int(getattr(legacy, "MAX_CONTENT_LENGTH", 12 * 1024 * 1024))
+MAX_BODY_BYTES = MAX_CONTENT_LENGTH
 
 
 def _subject(headers: Mapping[str, str]) -> str | None:
@@ -28,14 +32,14 @@ def _subject(headers: Mapping[str, str]) -> str | None:
         (str(v) for k, v in headers.items() if str(k).casefold() == "authorization"),
         "",
     ).strip()
-    secret = str(getattr(legacy, "JWT_SECRET", "") or "").strip()
+    secret = JWT_SECRET
     if not secret or not authorization.startswith("Bearer ") or not authorization[7:].strip():
         return None
     try:
         claims = jwt.decode(
             authorization[7:].strip(),
             secret,
-            algorithms=[getattr(legacy, "JWT_ALGORITHM", "HS256")],
+            algorithms=[JWT_ALGORITHM],
             options={"require": ["sub", "iat", "exp"]},
         )
     except jwt.InvalidTokenError:
@@ -111,12 +115,12 @@ async def ai_stream(request: Request):
         try:
             if int(content_length) > MAX_BODY_BYTES:
                 return JSONResponse(
-                    legacy.error_response("REQUEST_TOO_LARGE", "The request exceeds the allowed size."),
+                    error_response("REQUEST_TOO_LARGE", "The request exceeds the allowed size."),
                     status_code=413,
                 )
         except ValueError:
             return JSONResponse(
-                legacy.error_response("INVALID_CONTENT_LENGTH", "Invalid Content-Length header."),
+                error_response("INVALID_CONTENT_LENGTH", "Invalid Content-Length header."),
                 status_code=400,
             )
     try:
@@ -128,12 +132,12 @@ async def ai_stream(request: Request):
 
     message = str(payload.get("message") or "").strip()
     if not message:
-        return JSONResponse(legacy.error_response("EMPTY_MESSAGE", "Message required."), status_code=400)
+        return JSONResponse(error_response("EMPTY_MESSAGE", "Message required."), status_code=400)
     try:
-        image_options = legacy.parse_image_options(payload)
+        image_options = parse_image_options(payload)
     except ValueError as exc:
         return JSONResponse(
-            legacy.error_response("INVALID_IMAGE_OPTIONS", str(exc)),
+            error_response("INVALID_IMAGE_OPTIONS", str(exc)),
             status_code=400,
         )
 
@@ -146,8 +150,8 @@ async def ai_stream(request: Request):
     previous_context, memory_source = resolve_conversation_context(
         session, raw_client_context
     )
-    intent = legacy.classify_intent(message)
-    capability = legacy.detect_capability(message, intent=intent)
+    intent = classify_intent(message)
+    capability = detect_capability(message, intent=intent)
     image_request = capability == "image_generation"
     if image_request:
         intent = "image_generation"
@@ -157,7 +161,7 @@ async def ai_stream(request: Request):
     if image_request:
         def generate_image_stream() -> Iterator[str]:
             try:
-                asset = legacy.generate_image_asset(
+                asset = generate_image_asset(
                     message,
                     image_options=image_options,
                     request_base_url=base_url,
@@ -198,7 +202,7 @@ async def ai_stream(request: Request):
 
     def generate() -> Iterator[str]:
         try:
-            ai_result = legacy.process_message(
+            ai_result = process_message(
                 message=message,
                 context=previous_context,
                 intent=intent,
@@ -211,7 +215,7 @@ async def ai_stream(request: Request):
                 action = ai_result.get("action") if isinstance(ai_result.get("action"), dict) else {}
                 action_type = str(action.get("type") or "").strip().lower()
                 if action_type == "image_generation":
-                    asset = legacy.generate_image_asset(
+                    asset = generate_image_asset(
                         message,
                         image_options=image_options,
                         request_base_url=base_url,
