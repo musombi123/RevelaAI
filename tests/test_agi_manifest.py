@@ -51,7 +51,7 @@ class AGIManifestTests(unittest.TestCase):
             [service["name"] for service in deployment["private_services_declared_in_blueprint"]],
             ["usect-zero-core", "genesis-core-one", "infinite-mind-core"],
         )
-        self.assertIn("not proof", deployment["deployment_note"].lower())
+        self.assertIn("desired resource", deployment["deployment_note"].lower())
         self.assertIn(
             "/api/usect-zero/health",
             AGI_MANIFEST["runtime_endpoints"]["usect_zero_health"],
