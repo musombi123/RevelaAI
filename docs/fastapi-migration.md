@@ -16,6 +16,15 @@ longer depend on Flask state, and the full regression suite passes.
 - **System:** `GET /`, `GET /capabilities`, `GET /health`,
   `GET /ready`, dynamic-feature `POST /chat`, safe generated image serving,
   and generated audio serving.
+- **Main multimodal AI:** `POST /ai`, including JSON and multipart document
+  uploads, context/hub routing, image-generation requests, and the existing
+  response schema. The provider/orchestration service remains shared with the
+  legacy application while HTTP parsing and response handling are native.
+- **AI streaming:** `POST /ai/stream`, native Server-Sent Events for text and
+  image requests with explicit message/metadata/done/error events.
+- **Voice:** `POST /voice`, bounded audio uploads, transcription, conversation
+  processing, image requests and optional speech synthesis. `/voice/audio/*`
+  serves generated audio through the native system router.
 - **Primary authenticated AI chat:** `POST /api/chat` and `POST /api/chat/`.
 - **Live Vision:** `POST /api/vision/analyze`; validates MIME type, decoded size,
   actual image format and pixel count, and does not persist frame bytes.
@@ -58,16 +67,20 @@ routes. An unauthenticated request is not promoted to a verified user or admin.
 
 ## Remaining Flask bridge inventory
 
-The main remaining direct Flask handlers are large and tightly coupled to
-legacy request/session globals:
+The main AI, streaming and voice HTTP endpoints are now registered natively.
+Their provider orchestration, image generation, transcription and TTS helpers
+still reuse selected functions from `app.py`; this is intentional transitional
+service reuse, not evidence that Flask has been fully removed.
 
-- `POST /ai` — multimodal orchestration, image options, attachments and
-  executable-action dispatch.
-- `POST /ai/stream` — long-running/streaming AI request path.
-- `POST /voice` — transcription, orchestration, and speech generation.
-- Root-level legacy research/users blueprint declarations whose historical
-  paths overlap the existing root route. Do not create a new route at a
-  conflicting path without verifying which Flask endpoint currently wins.
+Remaining work is the legacy route inventory outside those native routers:
+- Route declarations and blueprints still mounted only in the Flask app,
+  including legacy research/user and compatibility APIs.
+- Legacy request hooks, error handlers, and duplicated after-request logic.
+- Service/configuration helpers that still import Flask globals (`request`,
+  `g`, `current_app`) even where native adapters pass explicit request
+  metadata. Move these to framework-neutral modules before deleting Flask.
+- Resolve root-level legacy route collisions by comparing actual Flask route
+  maps and preserving public endpoint contracts.
 
 The legacy module is still imported by native system/chat modules for feature
 registries, provider helpers and process-local session state. Those imports
@@ -111,8 +124,11 @@ green.
 
 ## Exit criteria for declaring the migration complete
 
-- Port `/ai`, `/ai/stream` and `/voice` to native FastAPI with streaming and
-  file semantics tested against the current frontend.
+- Finish porting the remaining Flask-only route declarations and blueprints,
+  preserving endpoint paths and methods.
+- Verify native `/ai`, `/ai/stream`, and `/voice` contracts against the
+  frontend, including multipart uploads, SSE event shapes, audio playback and
+  image URLs.
 - Resolve the root-route overlap and document the intended public endpoint.
 - Move application config, session state, feature registry and service logic
   out of `app.py` into framework-neutral modules.
