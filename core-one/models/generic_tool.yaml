@@ -1,9 +1,201 @@
 name: generic_tool_blueprint
 version: 1
-purpose: "A model family specification from which safe, reviewable tool scaffolds can be derived."
-inputs: [demand, research_evidence, policy_constraints]
-outputs: [tool_specification, source_scaffold, tests, openapi, hardware_guide, sdk_proposals, evidence, merge_checklist]
+schema_version: 1
+family: generic_tool
+
+purpose: >
+  A model-family specification from which safe, reviewable tool specifications
+  and implementation scaffolds can be derived. It supports multiple tool
+  categories while preserving deterministic safety boundaries and human review.
+
+inputs:
+  - demand
+  - research_evidence
+  - policy_constraints
+
+outputs:
+  - tool_specification
+  - source_scaffold
+  - tests
+  - openapi
+  - hardware_guide
+  - sdk_proposals
+  - evidence
+  - capability_plan
+  - implementation_plan
+  - acceptance_matrix
+  - dependency_review
+  - security_review
+  - worldwide_context
+  - merge_checklist
+  - artifact_integrity_manifest
+
 execution: proposal_only
-required_gates: [guardian, tests, human_review, explicit_merge]
+
+identity:
+  name_source: deterministic_tool_specification
+  normalized_resource_name_required: true
+  preserve_existing_inventions: true
+  overwrite_existing_proposals: false
+  stable_proposal_identity: true
+
+generation:
+  source_code:
+    generated_from_reviewable_templates: true
+    execute_during_generation: false
+    accept_model_generated_source_as_trusted: false
+
+  metadata:
+    model_assisted: true
+    model_optional: true
+    preserve_deterministic_requirements: true
+    preserve_required_safeguards: true
+    allow_model_to_change_safety_classification: false
+    allow_model_to_change_tool_identity: false
+
+  capability_planning:
+    infer_requirements: true
+    identify_unresolved_capabilities: true
+    discover_reusable_library_candidates: true
+    trust_library_candidates_automatically: false
+    claim_implementation_without_evidence: false
+
+  artifact_generation:
+    generate_tests: true
+    generate_api_contract: true
+    generate_documentation: true
+    generate_evidence_manifest: true
+    generate_merge_checklist: true
+    include_integrity_hashes_when_supported: true
+
+required_gates:
+  - guardian
+  - input_validation
+  - capability_review
+  - dependency_review
+  - tests
+  - security_review
+  - human_review
+  - explicit_merge
+
+policy:
+  guardian:
+    screen_demand_before_research: true
+    screen_research_before_use: true
+    screen_model_metadata: true
+    fail_closed_when_policy_unavailable: true
+
+  execution:
+    generated_code_execution: false
+    automatic_merge: false
+    automatic_deployment: false
+    automatic_self_import: false
+    automatic_dependency_installation: false
+    automatic_core_modification: false
+
+  evidence:
+    preserve_source_provenance: true
+    distinguish_retrieved_data_from_reference_links: true
+    fabricate_missing_results: false
+    claim_verified_prices_without_verification: false
+    claim_patent_clearance_without_legal_review: false
+    claim_compliance_without_verification: false
+
+  integration:
+    human_approval_required: true
+    production_activation_requires_separate_approval: true
+    existing_api_compatibility_review_required: true
+    rollback_plan_required_before_production: true
+
+validation:
+  tool_specification:
+    require_valid_resource_name: true
+    require_nonempty_purpose: true
+    require_bounded_inputs_and_outputs: true
+    require_documented_capabilities: true
+    require_safeguards: true
+
+  generated_artifacts:
+    verify_required_files: true
+    validate_generated_paths: true
+    verify_artifact_integrity_when_supported: true
+    distinguish_generated_tests_from_passed_tests: true
+
+  reusable_libraries:
+    validate_metadata: true
+    inspect_source_before_integration: true
+    review_dependencies_and_licenses: true
+    test_before_integration: true
+    dynamic_import_without_review: false
+
+  acceptance:
+    require_test_evidence: true
+    record_unresolved_requirements: true
+    document_review_decisions: true
+    require_owner_approval: true
+
+hardware_integration:
+  enabled_when_required: true
+  require_exact_hardware_identification: true
+  require_manufacturer_datasheets: true
+  require_interface_compatibility_review: true
+  require_electrical_ratings_review: true
+  require_hardware_specific_tests: true
+  require_qualified_review_where_applicable: true
+  invent_unverified_pin_mappings: false
+  automatic_firmware_flashing: false
+  automatic_physical_actuation: false
+  activation_requires_separate_authorization: true
+
+worldwide_context:
+  country_localization_supported: true
+  language_localization_supported: true
+  supplier_directory_is_informational: true
+  infer_live_inventory: false
+  infer_live_supplier_prices: false
+  infer_regulatory_compliance: false
+  verify_applicable_local_requirements: true
+
+sdk_proposals:
+  languages:
+    - go
+    - python
+    - javascript
+  generated_source_is_untrusted: true
+  validate_endpoint_configuration: true
+  require_bounded_requests_and_responses: true
+  require_authentication_review: true
+  require_tests_before_publication: true
+
+security:
+  validate_untrusted_inputs: true
+  enforce_resource_limits: true
+  protect_credentials: true
+  review_external_endpoints: true
+  review_permissions_and_data_access: true
+  review_failure_and_recovery_behavior: true
+  execute_downloaded_content: false
+  permit_external_content_to_override_policy: false
+
+failure_handling:
+  invalid_input: reject
+  guardian_rejection: block
+  policy_unavailable: fail_closed
+  model_unavailable: deterministic_fallback
+  missing_evidence: report_unresolved
+  unresolved_capability: mark_unresolved
+  failed_validation: prevent_approval
+  failed_tests: prevent_release
+
+lifecycle:
+  initial_status: await_merge
+  approval_status: approved
+  implementation_status: implementation_in_progress
+  verification_status: verification_pending
+  release_status: release_approved
+  rejected_status: rejected
+  preserve_review_history: true
+  approval_implies_execution: false
+
 model_optional: true
 automatic_self_import: false
