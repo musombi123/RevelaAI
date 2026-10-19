@@ -41,6 +41,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/agi/status" in schema["paths"]
     assert "/api/sci/shield/dashboard" in schema["paths"]
     assert "/api/meta-engineer/health" in schema["paths"]
+    assert "/api/usect-zero/health" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -182,6 +183,17 @@ def test_native_system_routes_keep_response_contracts() -> None:
     ready = client.get("/ready")
     assert ready.status_code in (200, 503)
     assert ready.json()["status"] in ("ready", "degraded")
+
+
+def test_usect_zero_health_is_explicitly_disabled_without_opt_in(monkeypatch) -> None:
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
+    response = client.get("/api/usect-zero/health")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "disabled"
+    assert body["module"] == "usect-zero"
+    assert body["enabled"] is False
+    assert body["model_free"] is True
 
 
 def test_meta_engineer_health_keeps_status_contract() -> None:
