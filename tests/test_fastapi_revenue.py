@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -175,6 +178,68 @@ def test_marketplace_split_is_exact_and_checkout_is_not_payment_confirmation(api
         assert intent.creator_share_cents == 6999
         assert intent.platform_share_cents == 3000
         assert session.execute(select(database.CreatorEarning)).scalars().all() == []
+
+
+def test_stripe_webhook_is_signature_checked_and_licenses_only_after_payment(api_env, monkeypatch):
+    client = api_env["client"]
+    monkeypatch.setenv("STRIPE_WEBHOOK_SECRET", "whsec_unit_test_secret")
+
+    async def fake_checkout(**kwargs):
+        assert kwargs["amount_cents"] == 1000
+        assert kwargs["subscription"] is True
+        return {
+            "checkout_url": "https://checkout.stripe.com/c/pay/cs_test_billing",
+            "session_id": "cs_test_billing_1",
+        }
+
+    monkeypatch.setattr(platform, "create_stripe_checkout", fake_checkout)
+    headers = {"Authorization": "Bearer " + api_env["bearer"]("subscriber-1")}
+    checkout = client.post("/v1/billing/buy", headers=headers,
+                           json={"plan": "local", "country": "KE"})
+    assert checkout.status_code == 202
+    intent_id = checkout.json()["intent_id"]
+
+    event = {
+        "id": "evt_test_paid_1",
+        "type": "checkout.session.completed",
+        "data": {"object": {
+            "id": "cs_test_billing_1",
+            "status": "complete",
+            "payment_status": "paid",
+            "amount_total": 1000,
+            "currency": "usd",
+            "client_reference_id": "subscriber-1",
+            "subscription": "sub_test_1",
+            "metadata": {
+                "intent_id": intent_id, "purpose": "billing", "user_id": "subscriber-1",
+                "plan": "local", "country": "KE",
+            },
+        }},
+    }
+    raw = json.dumps(event, separators=(",", ":")).encode()
+    timestamp = int(time.time())
+    signed = str(timestamp).encode() + b"." + raw
+    digest = hmac.new(b"whsec_unit_test_secret", signed, hashlib.sha256).hexdigest()
+    invalid = client.post("/v1/billing/webhooks/stripe", content=raw,
+                          headers={"Stripe-Signature": f"t={timestamp},v1={'0' * 64}"})
+    assert invalid.status_code == 400
+
+    paid = client.post("/v1/billing/webhooks/stripe", content=raw,
+                       headers={"Stripe-Signature": f"t={timestamp},v1={digest}"})
+    assert paid.status_code == 200
+    license_response = client.get(f"/v1/billing/license/{intent_id}", headers=headers)
+    assert license_response.status_code == 200
+    license_key = license_response.json()["license_key"]
+    verification = client.post("/v1/billing/verify", headers=headers,
+                               json={"license_key": license_key})
+    assert verification.status_code == 200
+    assert verification.json()["valid"] is True
+    assert verification.json()["plan"] == "local"
+
+    duplicate = client.post("/v1/billing/webhooks/stripe", content=raw,
+                            headers={"Stripe-Signature": f"t={timestamp},v1={digest}"})
+    assert duplicate.status_code == 200
+    assert duplicate.json()["duplicate"] is True
 
 
 def test_foundry_and_tool_routes_are_visible_in_fastapi_schema(api_env):
