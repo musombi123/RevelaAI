@@ -2,6 +2,7 @@
 from fastapi.testclient import TestClient
 
 from asgi import app
+from fastapi_routes.auth import _header_value
 
 
 client = TestClient(app)
@@ -40,6 +41,11 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     docs = client.get("/docs")
     assert docs.status_code == 200
     assert "swagger-ui" in docs.text.lower()
+
+
+def test_native_auth_header_lookup_is_case_insensitive() -> None:
+    assert _header_value({"Authorization": "Bearer token"}, "authorization") == "Bearer token"
+    assert _header_value({"userId": "507f1f77bcf86cd799439011"}, "USERID") == "507f1f77bcf86cd799439011"
 
 
 def test_native_fastapi_routes_preserve_trusted_origin_cors() -> None:
