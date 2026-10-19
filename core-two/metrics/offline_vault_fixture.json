@@ -1,21 +1,84 @@
 {
+  "schema_version": "usect-two.graph-benchmark-evidence.v1",
   "tool_name": "offline_vault_fixture",
   "observed_at": "2026-10-18T23:02:33Z",
   "fixture_only": true,
   "evidence_status": "synthetic_fixture_replay_not_production_invention",
   "fixture_id": "offline-vault-graph-replay-v1",
-  "baseline_ns_per_round": 2656694,
-  "candidate_ns_per_round": 421937,
-  "speedup_percent": 529.64,
-  "throughput_ratio": 6.3,
-  "replay_rounds": 5,
-  "node_count": 1800,
-  "edge_count": 7200,
-  "measurement_scope": "graph traversal phase only; not end-to-end invention-generation time",
-  "time_to_invent_ms": null,
-  "bom_cost_kes": null,
-  "human_merge_time_ms": null,
-  "historical_core_one_invention": false,
-  "production_tool_count_at_baseline_commit": 0,
-  "measurement_note": "Captured from the local API-compatible acceptance harness after warmed median benchmarking. Numbers are machine-dependent, illustrative, and only for the synthetic graph-traversal phase."
+  "objective": "Evaluate graph-traversal performance for the graph-indexed candidate using a synthetic offline_vault fixture",
+  "benchmark": {
+    "baseline_ns_per_round": 2656694,
+    "candidate_ns_per_round": 421937,
+    "speedup_percent": 529.64,
+    "throughput_ratio": 6.3,
+    "replay_rounds": 5,
+    "node_count": 1800,
+    "edge_count": 7200,
+    "measurement_scope": "Graph traversal phase only; not end-to-end invention-generation time",
+    "methodology": {
+      "harness": "Local API-compatible acceptance harness",
+      "warmup_performed": true,
+      "aggregation_method": "Median, as reported by the source",
+      "methodology_independently_verified": false,
+      "raw_samples_included": false,
+      "machine_details_included": false,
+      "go_version_included": false,
+      "baseline_revision": null,
+      "candidate_revision": null,
+      "benchmark_command": null
+    },
+    "derived_metrics": {
+      "recomputed_throughput_ratio": 6.296423,
+      "recomputed_speedup_percent": 529.64,
+      "candidate_time_reduction_percent": 84.12,
+      "calculation_formulas": {
+        "throughput_ratio": "baseline_ns_per_round / candidate_ns_per_round",
+        "speedup_percent": "(throughput_ratio - 1) * 100",
+        "candidate_time_reduction_percent": "(1 - candidate_ns_per_round / baseline_ns_per_round) * 100"
+      },
+      "interpretation": "The recorded timings imply approximately 6.30 times the measured graph-phase throughput and an 84.12% reduction in graph-phase time in this synthetic local benchmark. These figures do not establish a production or end-to-end speedup."
+    }
+  },
+  "production_evidence": {
+    "time_to_invent_ms": null,
+    "bom_cost_kes": null,
+    "human_merge_time_ms": null,
+    "historical_core_one_invention": false,
+    "production_tool_count_at_baseline_commit": 0,
+    "historical_replay_records_available": false,
+    "production_performance_verified": false,
+    "production_savings_verified": false
+  },
+  "implementation_review": {
+    "candidate_id": "graph-indexed",
+    "baseline_implementation_verified": false,
+    "optimization_attribution_verified": false,
+    "note": "The originally supplied Reachable implementation already used a map-backed visited-node set. Verify the exact baseline and candidate source revisions before attributing the measured improvement to replacing linear membership scans."
+  },
+  "safety_and_governance": {
+    "fixture_execution_scope": "Synthetic acceptance benchmark",
+    "repository_sourced_code_execution_confirmed": false,
+    "os_level_sandbox_confirmed": false,
+    "automatic_installation": false,
+    "automatic_execution": false,
+    "automatic_merge": false,
+    "human_merge_approval_required": true,
+    "core_one_modified_by_this_record": false,
+    "core_zero_modified_by_this_record": false
+  },
+  "measurement_note": "Captured from the local API-compatible acceptance harness after warmed median benchmarking, according to the supplied record. Numbers are machine-dependent, illustrative, and limited to the synthetic graph-traversal phase. The benchmark methodology and source revisions have not been independently verified.",
+  "provenance": {
+    "data_origin": "User-supplied synthetic benchmark record",
+    "historical_core_one_evidence": false,
+    "production_invention_claim_supported": false,
+    "production_bom_savings_claim_supported": false,
+    "independent_reproduction_confirmed": false
+  },
+  "merge_gate": {
+    "status": "await_merge",
+    "required_review_document": "AWAIT_MERGE.md",
+    "explicit_human_approval_required": true,
+    "benchmark_review_required": true,
+    "source_revision_review_required": true
+  }
 }
