@@ -12,6 +12,12 @@ from starlette.concurrency import run_in_threadpool
 
 import app as legacy
 from services.conversation_store import MAX_HISTORY, MAX_SESSIONS, SESSION_MEMORY, SESSION_TTL_SECONDS
+from services.runtime_config import (
+    APP_NAME, AUDIO_DIR, ENVIRONMENT, IMAGE_DIR, REVELAAI_BUILD_ID,
+    REVELAAI_ENABLE_HF_TTS, REVELAAI_IMAGE_ENGINE_VERSION,
+    cleanup_generated_files, configured_image_model, get_active_text_model,
+    get_active_text_provider, get_revelaai_text_status,
+)
 from ai.ai_client import hf_configured
 from ai.json_utils import error_response
 
@@ -40,28 +46,28 @@ def root():
     return {
         "status": "success",
         "service": "revelaai",
-        "app": legacy.APP_NAME,
-        "environment": legacy.ENVIRONMENT,
-        "build_id": legacy.REVELAAI_BUILD_ID,
-        "text_provider": legacy.get_active_text_provider(),
-        "text_model": legacy.get_active_text_model(),
-        "image_engine": legacy.REVELAAI_IMAGE_ENGINE_VERSION,
+        "app": APP_NAME,
+        "environment": ENVIRONMENT,
+        "build_id": REVELAAI_BUILD_ID,
+        "text_provider": get_active_text_provider(),
+        "text_model": get_active_text_model(),
+        "image_engine": REVELAAI_IMAGE_ENGINE_VERSION,
         "message": "RevelaAI is live.",
     }
 
 
 @router.get("/capabilities")
 def capabilities():
-    text_status = legacy.get_revelaai_text_status()
-    active_provider = legacy.get_active_text_provider()
-    active_model = legacy.get_active_text_model()
+    text_status = get_revelaai_text_status()
+    active_provider = get_active_text_provider()
+    active_model = get_active_text_model()
     providers = text_status.get("providers", {})
     gemini = providers.get("gemini", {}) if isinstance(providers, dict) else {}
     gemini = gemini if isinstance(gemini, dict) else {}
     return {
         "status": "success",
         "service": "revelaai",
-        "build_id": legacy.REVELAAI_BUILD_ID,
+        "build_id": REVELAAI_BUILD_ID,
         "capabilities": {
             "text": {
                 "enabled": active_provider != "none",
@@ -71,7 +77,7 @@ def capabilities():
                 "providers": text_status,
             },
             "image_generation": {
-                "enabled": bool(legacy.configured_image_model() or legacy.REVELAAI_IMAGE_ENGINE_VERSION),
+                "enabled": bool(configured_image_model() or REVELAAI_IMAGE_ENGINE_VERSION),
                 "provider": "huggingface",
                 "routing": {
                     "primary": "ai-client", "planner": "image_prompt",
@@ -103,7 +109,7 @@ def capabilities():
                 "provider": "huggingface",
                 "asr_model": os.getenv("HF_ASR_MODEL", "openai/whisper-large-v3"),
                 "tts_model": os.getenv("HF_TTS_MODEL", "hexgrad/Kokoro-82M"),
-                "tts_enabled": legacy.REVELAAI_ENABLE_HF_TTS,
+                "tts_enabled": REVELAAI_ENABLE_HF_TTS,
             },
             "ecosystem": {
                 "enabled": True,
@@ -119,17 +125,17 @@ def capabilities():
 @router.get("/health")
 def health():
     """Keep the public health response shape; optional modules degrade independently."""
-    text_status = legacy.get_revelaai_text_status()
-    active_provider = legacy.get_active_text_provider()
-    active_model = legacy.get_active_text_model()
+    text_status = get_revelaai_text_status()
+    active_provider = get_active_text_provider()
+    active_model = get_active_text_model()
     return {
         "status": "ok",
         "service": "revelaai",
-        "environment": legacy.ENVIRONMENT,
+        "environment": ENVIRONMENT,
         "build": {
-            "id": legacy.REVELAAI_BUILD_ID,
+            "id": REVELAAI_BUILD_ID,
             "image_routing": "ai-client-managed",
-            "image_engine": legacy.REVELAAI_IMAGE_ENGINE_VERSION,
+            "image_engine": REVELAAI_IMAGE_ENGINE_VERSION,
             "conversation_memory": "client-context-plus-session",
             "capability_routing": "server-authoritative",
         },
@@ -142,8 +148,8 @@ def health():
             },
             "image": {
                 "provider": "huggingface",
-                "configured": hf_configured() and bool(legacy.configured_image_model()),
-                "primary_model": legacy.configured_image_model(),
+                "configured": hf_configured() and bool(configured_image_model()),
+                "primary_model": configured_image_model(),
                 "routing": {
                     "owner": "ai_client", "planner": "image_prompt",
                     "text_aware": True, "fallback": True,
@@ -156,7 +162,7 @@ def health():
                 "configured": hf_configured(),
                 "asr_model": os.getenv("HF_ASR_MODEL", "openai/whisper-large-v3"),
                 "tts_model": os.getenv("HF_TTS_MODEL", "hexgrad/Kokoro-82M"),
-                "tts_enabled": legacy.REVELAAI_ENABLE_HF_TTS,
+                "tts_enabled": REVELAAI_ENABLE_HF_TTS,
             },
         },
         "online_research": {"available": _online_research_available()},
@@ -181,13 +187,13 @@ def health():
 
 @router.get("/ready")
 def ready():
-    provider = legacy.get_active_text_provider()
-    model = legacy.get_active_text_model()
+    provider = get_active_text_provider()
+    model = get_active_text_model()
     checks: dict[str, Any] = {
         "text_provider": provider != "none",
         "text_model": bool(model),
         "huggingface": hf_configured(),
-        "image_model": bool(legacy.configured_image_model()),
+        "image_model": bool(configured_image_model()),
         "online_research": _online_research_available(),
         "pdf_processor": _pdf_available(),
     }
@@ -196,7 +202,7 @@ def ready():
         {
             "status": "ready" if core_ready else "degraded",
             "service": "revelaai",
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "build_id": REVELAAI_BUILD_ID,
             "text": {"provider": provider, "model": model},
             "checks": checks,
             "core": {
@@ -227,7 +233,7 @@ async def feature_chat(request: Request):
             "message": "Use the /ai endpoint for image-generation requests.",
             "request_id": getattr(request.state, "request_id", None)
                 or request.headers.get("X-Request-ID"),
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "build_id": REVELAAI_BUILD_ID,
         }
 
     def run_features():
@@ -248,19 +254,19 @@ async def feature_chat(request: Request):
         "responses": responses,
         "request_id": getattr(request.state, "request_id", None)
             or request.headers.get("X-Request-ID"),
-        "build_id": legacy.REVELAAI_BUILD_ID,
+        "build_id": REVELAAI_BUILD_ID,
     }
 
 
 def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str, str], not_found_code: str, not_found_message: str, allow_unknown_type: bool = False):
-    legacy.cleanup_generated_files()
+    cleanup_generated_files()
     safe_filename = os.path.basename(filename)
     if safe_filename != filename:
         return JSONResponse(
             {
                 "status": "error",
                 "error": {"code": "INVALID_FILENAME", "message": f"Invalid {('image' if not_found_code == 'IMAGE_NOT_FOUND' else 'audio')} filename."},
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
             },
             status_code=400,
         )
@@ -270,7 +276,7 @@ def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str,
             {
                 "status": "error",
                 "error": {"code": not_found_code, "message": not_found_message},
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
             },
             status_code=404,
         )
@@ -285,7 +291,7 @@ def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str,
                     "code": "UNSUPPORTED_IMAGE_FORMAT" if not_found_code == "IMAGE_NOT_FOUND" else "UNSUPPORTED_AUDIO_FORMAT",
                     "message": "Unsupported generated image format." if not_found_code == "IMAGE_NOT_FOUND" else "Unsupported generated audio format.",
                 },
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
             },
             status_code=415,
         )
@@ -296,7 +302,7 @@ def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str,
 def serve_generated_image(filename: str):
     return _safe_generated_file(
         filename,
-        legacy.IMAGE_DIR,
+        IMAGE_DIR,
         {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml"},
         "IMAGE_NOT_FOUND",
         "Image not found.",
@@ -307,7 +313,7 @@ def serve_generated_image(filename: str):
 def serve_audio(filename: str):
     return _safe_generated_file(
         filename,
-        legacy.AUDIO_DIR,
+        AUDIO_DIR,
         {".wav": "audio/wav", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/opus", ".flac": "audio/flac", ".webm": "audio/webm"},
         "AUDIO_NOT_FOUND",
         "Audio not found.",
