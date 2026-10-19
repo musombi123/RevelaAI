@@ -26,6 +26,9 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/vision/analyze" in schema["paths"]
     assert "/api/revelaai/v2/brain/chat" in schema["paths"]
     assert "/api/revelaai/hubs/" in schema["paths"]
+    assert "/api/core-mesh/dashboard" in schema["paths"]
+    assert "/api/core-mesh/genesis/invent" in schema["paths"]
+    assert "/v1/learn/known" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -117,10 +120,25 @@ def test_live_vision_still_requires_identity() -> None:
     assert response.json().get("status") == "error"
 
 
-def test_existing_flask_route_is_forwarded_with_auth_contract() -> None:
-    # This authenticated endpoint remains on the WSGI bridge until its router
-    # is migrated; unauthenticated access must not become less restrictive.
+def test_core_mesh_routes_keep_authentication_boundary() -> None:
     response = client.get("/api/core-mesh/dashboard")
     assert response.status_code == 401
+    assert response.json()["error"]["code"] == "authentication_required"
+
+    proposal = client.post("/api/core-mesh/genesis/invent", json={"demand": "test"})
+    assert proposal.status_code == 401
+    assert proposal.json()["error"]["code"] == "authentication_required"
+
+    known = client.get("/v1/learn/known")
+    assert known.status_code == 401
+    assert known.json()["error"]["code"] == "authentication_required"
+
+
+def test_legacy_health_route_remains_available_through_wsgi_bridge() -> None:
+    # This route has not been ported yet and should still work through the
+    # compatibility mount with the old response and response headers.
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
