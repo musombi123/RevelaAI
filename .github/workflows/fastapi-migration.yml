@@ -5,6 +5,7 @@ on:
     paths:
       - "asgi.py"
       - "app.py"
+      - "legacy_flask_app.py"
       - "requirements.txt"
       - "render.yaml"
       - "routes/**"
@@ -13,10 +14,11 @@ on:
       - "tests/test_fastapi_entrypoint.py"
       - ".github/workflows/fastapi-migration.yml"
   push:
-    branches: [migration/flask-to-fastapi]
+    branches: [migration/flask-to-fastapi, migration/fastapi-shared-routes]
     paths:
       - "asgi.py"
       - "app.py"
+      - "legacy_flask_app.py"
       - "requirements.txt"
       - "render.yaml"
       - "routes/**"
@@ -44,6 +46,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
       - name: Compile ASGI entry point and tests
-        run: python -m py_compile asgi.py tests/test_fastapi_entrypoint.py
+        run: python -m py_compile app.py legacy_flask_app.py asgi.py tests/test_fastapi_entrypoint.py
       - name: Run FastAPI gateway regression tests
         run: python -m pytest -q tests/test_fastapi_entrypoint.py

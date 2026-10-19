@@ -4,8 +4,11 @@
 
 The migration branch boots through FastAPI/Uvicorn and registers native
 `APIRouter` modules before a temporary `a2wsgi.WSGIMiddleware` compatibility
-mount. Flask remains present only as the fallback for endpoints that have not
-yet been ported, plus legacy configuration/state used by some adapters.
+mount. `app.py` is now a backwards-compatible facade; the existing Flask app
+and route map have been isolated in `legacy_flask_app.py`. Sector-specific and
+other not-yet-ported routes remain in that file unchanged for the manual pass.
+The ASGI entry point and native routers import the compatibility module explicitly
+rather than relying on `app.py` to construct the Flask app.
 
 **This is not yet a full Flask removal.** Keep the compatibility bridge and
 Flask dependencies until the main multimodal endpoints are ported, imports no
@@ -60,6 +63,8 @@ longer depend on Flask state, and the full regression suite passes.
   plan status, explicitly approved execution and audit listing. Workspace paths
   remain isolated by a hash of the verified account ID.
 - **WhatsApp:** webhook verification and incoming message handler.
+- **Research:** `POST /api/research` searches a bounded set of configured RSS feeds; it does not fetch arbitrary user-supplied URLs.
+- **Prototype users directory:** `POST /api/users` and `GET /api/users/{user_id}`. This remains an in-memory demo store, is disabled by default with `REVELAAI_ENABLE_PROTOTYPE_USERS_API=false`, and is not the authoritative RevelaCode account database.
 
 The ASGI middleware retains the same trusted-origin CORS allowlist, credential
 behavior, request IDs, security headers and reversible SCI throttle for native
@@ -67,25 +72,33 @@ routes. An unauthenticated request is not promoted to a verified user or admin.
 
 ## Remaining Flask bridge inventory
 
-The main AI, streaming and voice HTTP endpoints are now registered natively.
-Their provider orchestration, image generation, transcription and TTS helpers
-still reuse selected functions from `app.py`; this is intentional transitional
-service reuse, not evidence that Flask has been fully removed.
+The main AI, streaming, voice and system HTTP endpoints are registered natively.
+These routers now import provider, image, document, audio, feature-registry and
+conversation functions from framework-neutral modules rather than importing the
+Flask app module. The AI provider/orchestration implementation itself remains a
+shared service, and this service reuse is not evidence that Flask has been fully
+removed.
 
 Remaining work is the legacy route inventory outside those native routers:
-- Route declarations and blueprints still mounted only in the Flask app,
-  including legacy research/user and compatibility APIs.
-- Legacy request hooks, error handlers, and duplicated after-request logic.
-- Service/configuration helpers that still import Flask globals (`request`,
-  `g`, `current_app`) even where native adapters pass explicit request
-  metadata. Move these to framework-neutral modules before deleting Flask.
+- Sector-specific legacy route handlers and older compatibility APIs remain on
+  the Flask fallback intentionally. Their business logic is left untouched for
+  the manual sector pass. The newly ported research/users APIs are native FastAPI
+  routes under `/api/research` and `/api/users`; ambiguous legacy root paths are
+  not treated as their public endpoints.
+- Legacy request hooks, error handlers, and duplicated after-request logic are
+  isolated in `legacy_flask_app.py` and still apply only to WSGI fallback traffic.
+- Shared service/configuration helpers still imported from `legacy_flask_app.py`
+  must be moved to framework-neutral modules before deleting Flask. The facade
+  preserves old import access during this staged migration.
 - Resolve root-level legacy route collisions by comparing actual Flask route
   maps and preserving public endpoint contracts.
 
-The legacy module is still imported by native system/chat modules for feature
-registries, provider helpers and process-local session state. Those imports
-must be moved to framework-neutral service/configuration modules before the
-bridge can be removed.
+The ASGI entry point still imports `legacy_flask_app.py` to mount the remaining
+WSGI routes and to share the current CORS allowlist and SCI throttle state.
+`app.py` remains a backwards-compatible facade over that module, but the native
+AI, streaming, voice and system routers no longer import the Flask app directly.
+Before removing the bridge, move the remaining CORS/throttle state into a small
+framework-neutral module and finish the manual sector-route pass.
 
 ## Migration requirements
 
@@ -124,8 +137,8 @@ green.
 
 ## Exit criteria for declaring the migration complete
 
-- Finish porting the remaining Flask-only route declarations and blueprints,
-  preserving endpoint paths and methods.
+- Manually port the remaining sector-specific Flask handlers and compatibility
+  blueprints, preserving endpoint paths and methods.
 - Verify native `/ai`, `/ai/stream`, and `/voice` contracts against the
   frontend, including multipart uploads, SSE event shapes, audio playback and
   image URLs.
@@ -135,7 +148,7 @@ green.
 - Convert all remaining blueprints to FastAPI routers or delete genuinely
   unused route modules after proving they are not part of the public contract.
 - Remove the `a2wsgi` mount, Flask imports, Flask middleware, and Flask/`flask-cors`
-  dependencies only after parity tests prove the remaining gateway is native.
+  dependencies only after the manual sector pass and parity tests prove the whole gateway is native.
 - Run the full Python tests, validate the OpenAPI document, then deploy and
   smoke-test chat, voice, vision, memory, administrator functions and all three
   private Go cores.

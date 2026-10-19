@@ -153,3 +153,24 @@ def build_session_id(
     if authenticated_user_id:
         session_id = f"{authenticated_user_id}:{session_id}"[:128]
     return session_id
+
+
+def save_image_conversation(
+    session_id: str,
+    session: dict[str, Any],
+    message: str,
+    *,
+    success: bool,
+) -> None:
+    """Persist an image request in the shared, framework-neutral session store."""
+    messages = session.setdefault("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+        session["messages"] = messages
+    messages.append({"role": "user", "content": str(message or "")})
+    if success:
+        messages.append({
+            "role": "assistant",
+            "content": f"Generated a design based on the request: {message}",
+        })
+    save_session(session_id, session)

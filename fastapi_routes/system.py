@@ -10,8 +10,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-import app as legacy
 from services.conversation_store import MAX_HISTORY, MAX_SESSIONS, SESSION_MEMORY, SESSION_TTL_SECONDS
+from services.feature_registry import FEATURES
+from services.image_service import is_image_generation_request
 from services.runtime_config import (
     APP_NAME, AUDIO_DIR, ENVIRONMENT, IMAGE_DIR, REVELAAI_BUILD_ID,
     REVELAAI_ENABLE_HF_TTS, REVELAAI_IMAGE_ENGINE_VERSION,
@@ -173,12 +174,12 @@ def health():
             "authenticated_user_bridge": "RevelaCode JWT -> user_id",
             "domains": ["theology", "elimu", "shamba", "biashara", "community"],
         },
-        "features_loaded": len(legacy.FEATURES),
+        "features_loaded": len(FEATURES),
         "session_memory": {
             "active_sessions": len(SESSION_MEMORY),
             "max_sessions": MAX_SESSIONS,
             "ttl_seconds": SESSION_TTL_SECONDS,
-            "max_history_messages": legacy.MAX_HISTORY,
+            "max_history_messages": MAX_HISTORY,
             "server_storage": "in_memory",
             "browser_context_supported": True,
         },
@@ -226,7 +227,7 @@ async def feature_chat(request: Request):
     user_input = str(payload.get("message") or "").strip()
     if not user_input:
         return JSONResponse(error_response("EMPTY_MESSAGE", "Message required."), status_code=400)
-    if legacy.is_image_generation_request(user_input):
+    if is_image_generation_request(user_input):
         return {
             "status": "success",
             "mode": "image_generation",
@@ -238,7 +239,7 @@ async def feature_chat(request: Request):
 
     def run_features():
         responses = {}
-        for name, feature in legacy.FEATURES.items():
+        for name, feature in FEATURES.items():
             try:
                 responses[name] = feature.run(user_input)
             except Exception:
@@ -250,7 +251,7 @@ async def feature_chat(request: Request):
     return {
         "status": "success",
         "input": user_input,
-        "features_used": list(legacy.FEATURES.keys()),
+        "features_used": list(FEATURES.keys()),
         "responses": responses,
         "request_id": getattr(request.state, "request_id", None)
             or request.headers.get("X-Request-ID"),
