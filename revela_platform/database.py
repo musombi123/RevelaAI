@@ -28,6 +28,7 @@ class LicenseRecord(Base):
     status: Mapped[str] = mapped_column(String(24), default="active", index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    checkout_intent_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -77,6 +78,7 @@ class CheckoutIntent(Base):
     platform_share_cents: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
     stripe_session_id: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(160), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
