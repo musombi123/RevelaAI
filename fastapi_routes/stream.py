@@ -11,7 +11,7 @@ import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-import app as legacy
+import legacy_flask_app as legacy
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 from services.runtime_config import (
     REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, configured_image_model,
