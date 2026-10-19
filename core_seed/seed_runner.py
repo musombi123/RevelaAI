@@ -35,7 +35,8 @@ class SeedRunner:
 
     def seed_child(self, *, build_id: str, license_key: str, user_id: str,
                    child_name: str, now: datetime | None = None,
-                   purchase_verified: bool = False,\n                   source_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+                   purchase_verified: bool = False,
+                   source_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,99}", child_name.strip()):
             raise SeedError("Child name contains unsupported characters or length.")
         try:
