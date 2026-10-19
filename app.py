@@ -3683,6 +3683,8 @@ def ai_assistant():
             ai_result = process_message(
                 message=message, context=previous_context, intent=intent,
                 session_id=session_id, user_id=user_id,
+                country=str(brain_payload.get("country") or "KE"),
+                language=str(brain_payload.get("language") or ""),
             )
 
         # -------------------------------------------------
@@ -3927,7 +3929,21 @@ def ai_assistant():
                 if _summary:
                     usect_tool_metadata["result_summary"] = _summary
 
+        _unknown_learning = orchestrator_data.get("unknown_learning", {})
+        if not isinstance(_unknown_learning, dict):
+            _unknown_learning = {}
+        _unknown_public = {
+            "is_unknown": bool(_unknown_learning.get("is_unknown", False)),
+            "topic": str(_unknown_learning.get("topic") or "")[:120],
+            "wisdom_score": _unknown_learning.get("wisdom_score"),
+            "threshold": _unknown_learning.get("threshold", 0.5),
+            "next_action": str(_unknown_learning.get("next_action") or "use_existing_knowledge")[:40],
+            "automatic_retries": False,
+            "known_matches": _unknown_learning.get("known_matches", [])[:3] if isinstance(_unknown_learning.get("known_matches"), list) else [],
+        }
+
         meta = {
+            "unknown_learning": _unknown_public,
             "ai_model": ai_result.get(
                 "model"
             ),
