@@ -11,7 +11,7 @@ import logging
 import time
 import uuid
 
-import app as legacy_app_module
+import legacy_flask_app as legacy_app_module
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
