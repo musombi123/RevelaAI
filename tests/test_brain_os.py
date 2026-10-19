@@ -473,7 +473,7 @@ def test_diagnostics_are_bounded_and_never_claim_automatic_recovery():
 
 
 def test_brain_os_routes_are_registered():
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     expected = {
         "/api/agi/brain-os/status",
         "/api/agi/brain-os/outcomes",
