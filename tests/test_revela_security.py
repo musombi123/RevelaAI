@@ -106,3 +106,88 @@ def test_tool_compilation_requires_license_and_uses_owner_recipe(tmp_path, monke
     assert artifact.read_bytes().startswith(b"RVX1.")
     restored = compiler.open_file(artifact, tmp_path / "restored.py")
     assert restored.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
+
+
+from core_auditor.ledger import AuditLedger, AuditLedgerError
+from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
+from core_seed.seed_runner import SeedError, SeedRunner
+
+
+def test_foundry_manifest_is_hash_checked_and_requires_review(tmp_path):
+    builder = FoundryBuilder(tmp_path / "factories")
+    proposal = builder.build_plan(
+        owner_user_id="owner-1",
+        name="Factory Sample",
+        description="A deterministic sample factory proposal for acceptance tests.",
+        requirements=["Inspect input", "Validate output"],
+        country="KE",
+        language="sw",
+        industry="manufacturing",
+        adapters=["csv", "scale-reader"],
+    )
+    assert proposal["status"] == "await_merge"
+    manifest = builder.get_manifest(proposal["build_id"])
+    assert manifest["execution_policy"]["generated_code_execution"] is False
+    assert manifest["manifest_sha256"] == proposal["manifest_sha256"]
+    approved = builder.set_status(proposal["build_id"], "approved")
+    assert approved["status"] == "approved"
+    assert builder.get_manifest(proposal["build_id"])["status"] == "approved"
+
+    path = tmp_path / "factories" / proposal["build_id"] / "manifest.json"
+    tampered = path.read_text(encoding="utf-8").replace("Inspect input", "Skip input")
+    path.write_text(tampered, encoding="utf-8")
+    with pytest.raises(FactoryBuildError, match="integrity"):
+        builder.get_manifest(proposal["build_id"])
+
+
+def test_seed_child_is_offline_verifiable_and_tamper_evident(tmp_path, monkeypatch):
+    _keypair(monkeypatch)
+    builder = FoundryBuilder(tmp_path / "factories")
+    proposal = builder.build_plan(
+        owner_user_id="offline-owner",
+        name="Offline Factory",
+        description="A safe declarative factory for an offline acceptance test.",
+        requirements=["Read local file", "Validate local record"],
+    )
+    with pytest.raises(SeedError, match="human review"):
+        SeedRunner(tmp_path / "seeded", builder).seed_child(
+            build_id=proposal["build_id"], license_key="not-a-license",
+            user_id="offline-owner", child_name="Child A"
+        )
+    builder.set_status(proposal["build_id"], "approved")
+    token, claims = create_license_token(user_id="offline-owner", plan_id="pro", country="KE")
+    runner = SeedRunner(tmp_path / "seeded", builder)
+    child = runner.seed_child(
+        build_id=proposal["build_id"], license_key=token,
+        user_id="offline-owner", child_name="Child A"
+    )
+    checked = runner.verify_child_offline(child["seed_id"])
+    assert checked["ok"] is True
+    assert checked["offline_authorized"] is True
+    child_path = Path(child["path"])
+    assert child_path.stat().st_mode & 0o077 == 0
+    child_json = child_path.read_text(encoding="utf-8").replace("Child A", "Child B")
+    child_path.write_text(child_json, encoding="utf-8")
+    with pytest.raises(SeedError, match="integrity"):
+        runner.verify_child_offline(child["seed_id"])
+
+
+def test_audit_ledger_detects_record_tampering(tmp_path):
+    ledger = AuditLedger(tmp_path / "audit" / "events.jsonl")
+    first = ledger.append(actor_user_id="user-1", action="factory.build", object_id="fab_a",
+                          detail={"manifest_sha256": "ab" * 32})
+    second = ledger.append(actor_user_id="user-1", action="factory.review", object_id="fab_a",
+                           detail={"approved": True})
+    result = ledger.verify()
+    assert result["ok"] is True
+    assert result["records"] == 2
+    assert result["head_hash"] == second["record_hash"]
+
+    file_path = tmp_path / "audit" / "events.jsonl"
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    first_record = __import__("json").loads(lines[0])
+    first_record["action"] = "factory.destroy"
+    lines[0] = __import__("json").dumps(first_record, sort_keys=True, separators=(",", ":"))
+    file_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    with pytest.raises(AuditLedgerError):
+        ledger.verify()
