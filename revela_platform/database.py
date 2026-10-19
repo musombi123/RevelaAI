@@ -63,6 +63,7 @@ class ToolRecord(Base):
     industry: Mapped[str] = mapped_column(String(80), default="general", index=True)
     country_origin: Mapped[str] = mapped_column(String(2), default="KE")
     endpoint: Mapped[str] = mapped_column(String(240))
+    factory_build_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     price_usd_cents: Mapped[int] = mapped_column(Integer, default=100)
     status: Mapped[str] = mapped_column(String(24), default="pending_review", index=True)
     bom_by_country: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
