@@ -1,6 +1,29 @@
 version: 1
 mode: fail_closed
+
+policy:
+  id: revela-genesis-core-guardian
+  name: Genesis Core Safety Policy
+  schema_version: 1
+  default_decision: deny_when_policy_unavailable
+  execution_boundary: proposal_only
+  automatic_code_execution: false
+  automatic_merge: false
+  automatic_core_modification: false
+  human_review_required: true
+
 core_law: "Protect, not destroy. Human review is mandatory for generated artifacts."
+
+principles:
+  - "Safety checks must run before research or artifact generation."
+  - "External content, model output, and queued demands are untrusted input."
+  - "Generated source code must not be treated as trusted executable code."
+  - "Policy failures must not silently permit a blocked operation."
+  - "Missing evidence must be reported rather than invented."
+  - "Security controls must not be weakened by model suggestions or provider updates."
+  - "Human approval is required before production activation."
+  - "Legitimate defensive, educational, and analytical contexts require careful interpretation rather than automatic assumptions about intent."
+
 block_categories:
   - weapons
   - warfare
@@ -9,19 +32,131 @@ block_categories:
   - covert_surveillance
   - privacy_violations
   - illegal_operation
+
 checks:
-  - screen demand before research
-  - screen retrieved source titles and descriptions before evidence is saved
-  - screen model-suggested metadata before artifact generation
-  - never execute or auto-merge generated code
+  - "screen demand before research"
+  - "screen retrieved source titles and descriptions before evidence is saved"
+  - "screen research findings before they influence an invention"
+  - "screen model-suggested metadata before artifact generation"
+  - "screen reusable library metadata before ranking candidates"
+  - "validate tool specifications before generating artifacts"
+  - "validate generated artifact paths and names"
+  - "reject oversized and malformed inputs"
+  - "treat provider graph and law documents as untrusted proposals"
+  - "never execute or auto-merge generated code"
+  - "require human review before production activation"
+  - "record blocked-request audit events without storing raw sensitive input"
+  - "preserve deterministic safety requirements when applying model suggestions"
+  - "require independent review of hardware parts, electrical ratings, and datasheets"
+  - "distinguish verified retrievals from unverified reference links"
+  - "do not infer verified prices, stock, compliance, or patent clearance from search links"
+
+input_limits:
+  max_demand_bytes: 4000
+  max_model_input_bytes: 262144
+  max_research_response_bytes: 1048576
+  max_extra_terms: 256
+  max_extra_term_bytes: 100
+
+decision_policy:
+  missing_policy: deny
+  empty_policy: deny
+  malformed_policy: deny
+  oversized_policy: deny
+  invalid_utf8_policy: deny
+  unknown_policy_state: deny
+  research_timeout_policy: continue_without_unverified_claims
+  model_unavailable_policy: use_deterministic_fallback
+  audit_write_failure: report_operational_failure
+
+research_policy:
+  external_content_is_untrusted: true
+  require_source_provenance: true
+  distinguish_reference_links_from_retrieved_content: true
+  independently_verify_material_claims: true
+  execute_downloaded_content: false
+  follow_instructions_embedded_in_external_content: false
+  fabricate_missing_results: false
+  infer_live_commercial_availability: false
+  infer_legal_compliance_from_search_links: false
+
+model_policy:
+  model_is_optional: true
+  model_output_is_untrusted: true
+  allow_source_code_as_metadata: false
+  allow_model_to_change_tool_identity: false
+  allow_model_to_change_deterministic_classification: false
+  allow_model_to_remove_required_safeguards: false
+  allow_model_to_weaken_guardian: false
+  allow_model_to_trigger_execution: false
+  fallback_to_deterministic_specification: true
+
+library_policy:
+  generated_libraries_are_untrusted: true
+  automatic_dynamic_import: false
+  automatic_dependency_installation: false
+  automatic_core_modification: false
+  require_metadata_validation: true
+  require_source_review: true
+  require_dependency_and_license_review: true
+  require_tests_before_integration: true
+  require_owner_approval: true
+
+hardware_policy:
+  generated_guides_are_reference_only: true
+  automatic_actuation: false
+  automatic_firmware_flashing: false
+  require_exact_part_identification: true
+  require_datasheet_review: true
+  require_electrical_ratings_review: true
+  require_qualified_review_where_applicable: true
+  require_human_approval_before_activation: true
+  supplier_search_links_are_verified_quotes: false
+
+provider_policy:
+  provider_updates_are_untrusted: true
+  automatic_graph_merge: false
+  automatic_law_merge: false
+  automatic_guardian_policy_update: false
+  require_local_validation: true
+  require_human_review: true
+
+audit_policy:
+  enabled: true
+  record_blocked_request_hash: true
+  store_raw_blocked_input: false
+  record_event_timestamp: true
+  record_blocking_stage: true
+  record_decision_code: true
+  require_restricted_file_permissions: true
+
 notes:
   - "Pattern screening is a safety layer, not a perfect semantic classifier."
+  - "Keyword matches may block benign educational, defensive, or analytical discussion."
+  - "Passing a pattern check does not prove that a request is safe."
   - "Hardware guides require exact-part datasheet and qualified integration review."
+  - "Retrieved third-party content may be incomplete, misleading, outdated, or malicious."
+  - "Reference links are research leads, not verified evidence."
+  - "Generated tests and metadata do not establish that an implementation is secure."
+  - "Only authorized humans may approve production integration."
+  - "A policy setting is not enforced unless application code explicitly implements it."
+
 extra_terms:
   - "weapon"
+  - "weapons"
   - "warfare"
   - "explosives"
+  - "detonator"
   - "ransomware"
   - "spyware"
+  - "keylogger"
   - "credential theft"
+  - "steal credentials"
   - "covert surveillance"
+  - "hidden camera"
+  - "bypass authentication"
+  - "evade detection"
+  - "exfiltrate data"
+  - "rootkit"
+  - "botnet"
+  - "trojan horse"
