@@ -7,11 +7,14 @@ from asgi import app
 client = TestClient(app)
 
 
-def test_fastapi_health_endpoint() -> None:
+def test_fastapi_health_endpoint_and_security_headers() -> None:
     response = client.get("/_fastapi/health")
     assert response.status_code == 200
     assert response.json()["runtime"] == "fastapi"
     assert response.json()["service"] == "revelaai"
+    assert response.headers.get("X-Request-ID")
+    assert response.headers.get("X-Content-Type-Options") == "nosniff"
+    assert response.headers.get("X-Frame-Options") == "DENY"
 
 
 def test_fastapi_openapi_and_docs_are_available() -> None:
