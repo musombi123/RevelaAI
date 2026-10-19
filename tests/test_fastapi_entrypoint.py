@@ -23,16 +23,16 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
     import asgi
 
     app_source = Path("app.py").read_text(encoding="utf-8")
-    asgi_source = Path("asgi.__file__").read_text(encoding="utf-8") if False else Path(asgi.__file__).read_text(encoding="utf-8")
+    asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
     requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
     assert "WSGIMiddleware" not in asgi_source
     assert "legacy_flask_app" not in asgi_source
     assert "WSGIMiddleware" not in app_source
-    assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", asgi_source, re.M)
-    assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", app_source, re.M)
+    assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", asgi_source, re.M)
+    assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", app_source, re.M)
     for dependency in ("flask", "flask-cors", "a2wsgi"):
-        assert not re.search(rf"^\\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\\s|$)", requirements, re.M), dependency
+        assert not re.search(rf"^\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\s|$)", requirements, re.M), dependency
     assert not Path("legacy_flask_app.py").exists()
 
 
