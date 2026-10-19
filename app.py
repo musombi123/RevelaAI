@@ -82,7 +82,7 @@ from ai.core_mesh import (
     propose_genesis_invention,
     propose_mind_evolution,
 )
-from ai.unknown_learning import attach_genesis_proposal, list_known, publish_known, save_teaching
+from ai.unknown_learning import attach_genesis_proposal, attach_improvement_proposal, list_known, publish_known, save_teaching
 
 
 # =========================================================
@@ -3051,6 +3051,22 @@ def publish_known_learning_api(topic_key: str):
         return jsonify({"status": "error", "error": {"code": "learning_consent_required", "message": str(exc)}}), 403
     except ValueError as exc:
         return jsonify({"status": "error", "error": {"code": "learning_publish_rejected", "message": str(exc)}}), 422
+    result["mind"] = {"status": "not_staged"}
+    tool_name = str(result.get("tool_name") or "")
+    try:
+        objective = f"Review measured worldwide outcomes for {tool_name}; propose one evidence-gated improvement."
+        proposal = propose_mind_evolution(objective, tool_name)
+        attach_improvement_proposal(topic_key, proposal)
+        result["mind"] = {
+            "status": "await_merge",
+            "proposal": {key: proposal[key] for key in ("status", "version", "tool_name", "selected_mutation", "await_merge_path") if key in proposal},
+            "human_approval_required": True,
+            "automatic_merge": False,
+        }
+    except CoreMeshError as exc:
+        result["mind"] = {"status": "not_staged", "error_code": exc.code, "retry_allowed": True}
+    except ValueError:
+        result["mind"] = {"status": "not_staged", "error_code": "mind_proposal_rejected", "retry_allowed": True}
     return jsonify({"status": "success", "data": result}), 202
 
 
