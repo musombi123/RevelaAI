@@ -2,76 +2,109 @@
 
 ## Current branch status
 
-The ASGI entry point in `asgi.py` uses FastAPI and Uvicorn. The root-mounted
-`WSGIMiddleware` is an intentional temporary compatibility bridge: it forwards
-paths that have not yet been ported to the existing Flask app. This first phase
-allows the ASGI runtime, OpenAPI documentation, and basic middleware to be
-validated without changing the existing route contract in a single risky rewrite.
+The migration branch uses FastAPI/Uvicorn as the public ASGI entry point. Native
+FastAPI routers are registered before a temporary root-mounted
+`starlette.middleware.wsgi.WSGIMiddleware` adapter, which currently preserves
+remaining legacy Flask endpoints. The public Render blueprint targets
+`uvicorn asgi:app` while this branch is under review; it has not been merged
+into `main`.
 
-**This phase is not the completed Flask removal.** Do not remove Flask,
-`flask-cors`, or the compatibility mount until the route groups below are
-ported and parity-tested.
+**This is not yet a full Flask removal.** Do not merge/deploy as a finished
+migration while the WSGI adapter and the Flask application import remain.
 
-## Route inventory to migrate
+## Native FastAPI route groups now registered
 
-The current gateway directly declares endpoints in `app.py` and registers these
-Flask blueprints:
+- System endpoints: `GET /`, `GET /capabilities`, `GET /health`,
+  `GET /ready`, `POST /chat`, generated image delivery, and generated audio
+  delivery.
+- Primary authenticated chat: `POST /api/chat` and `POST /api/chat/`.
+- Live Vision: `POST /api/vision/analyze`.
+- Local Living Brain: `/api/revelaai/v2/brain/chat`,
+  `/api/revelaai/v2/vision/describe`, and `/api/revelaai/v2/health`.
+- Hub persona engine: `/api/revelaai/hubs/` and
+  `/api/revelaai/hubs/respond`.
+- Explainability: `POST /`.
+- Smart Memory: `POST /api/memory/chat`, `GET /api/memory/{user_id}`,
+  `POST /api/memory/ideas`, `POST /api/memory/ideas/{idea_id}/implementation`,
+  `GET /api/memory/ideas/{user_id}`, `DELETE /api/memory/useless/{user_id}`,
+  and `GET /api/memory/{user_id}/history`.
+- Core Mesh: dashboard, Genesis invention proposal, Infinite Mind evolution
+  proposal, unknown-topic teaching, known-topic list, and operator-only
+  knowledge publication.
+- WhatsApp webhook verification and message notifications.
 
-- Vision (`/api/vision`)
-- Chat (`/api/chat`)
-- Living Brain API (`/api/revelaai/v2`)
-- Explain
-- Memory (`/api/memory`)
-- Research
-- Users
-- WhatsApp
-- Hub
-- Meta-Engineer (`/api/meta-engineer`)
-- USECT-ZERO (`/api/usect-zero`)
-- SCI (`/api/sci`)
-- AGI (`/api/agi`)
-- Automation Fabric (`/api/automation-fabric`)
+Smart Memory's data-access/filtering helpers now live in
+`services/memory_store.py`, without Flask imports. Native chat and Vision use
+FastAPI-compatible authentication helpers rather than invoking Flask's request
+global. The database remains the separate `revelai` database; signed identity
+and the protected RevelaCode user-verification check are retained.
 
-The direct routes include chat/AI processing and streaming, generated image and
-audio file serving, health/readiness, Core Mesh status/proposals, and Living
-Brain learning/publication endpoints. This inventory must be kept current while
-the route port is completed.
+## Remaining Flask bridge inventory
 
-## Required conversion sequence
+The following paths or router families still use the WSGI compatibility app:
 
-1. **Extract framework-independent service functions.** Provider calls,
-   orchestration, persistence, capability execution, and security policy should
-   not depend on Flask's `request`, `g`, `jsonify`, or application context.
-2. **Port routes to FastAPI `APIRouter` modules.** Define Pydantic request models
-   and explicit response/status behavior. Keep endpoint paths, HTTP methods,
-   response envelopes, and error codes compatible with existing clients.
-3. **Replace request lifecycle behavior.** Preserve trusted CORS origins,
-   forwarded-proxy behavior, request IDs, response security headers, upload
-   limits, JSON error contracts, request throttling, and shutdown/lifespan work.
-4. **Preserve security invariants.** JWT validation must continue to require
-   `sub`, `iat`, and `exp`; operator-only operations must remain operator-only;
-   Core Mesh tokens stay server-side; user-specific memory stays isolated.
-5. **Add route parity tests for every ported group.** Include unauthenticated,
-   authenticated, forbidden, malformed input, missing resource, provider
-   failure, and successful response cases as relevant.
-6. **Remove the compatibility bridge only after parity passes.** Then remove
-   Flask/`flask-cors`, make `asgi.py` import only FastAPI routers/services, and
-   prove no production import or test depends on Flask.
+- Main multimodal processing endpoints: `POST /ai`, `POST /ai/stream`, and
+  `POST /voice`. These are large handlers involving file/audio parsing,
+  session state, AI orchestration, streaming responses, and action handling.
+- Meta-Engineer (`/api/meta-engineer`).
+- USECT-ZERO (`/api/usect-zero`).
+- SCI (`/api/sci`).
+- AGI (`/api/agi`).
+- Automation Fabric (`/api/automation-fabric`).
+- Remaining memory/research/user legacy blueprint declarations and other
+  unported endpoints. The older memory handlers remain available in the Flask
+  application, but the registered paths listed above are intercepted by the
+  native FastAPI router first.
+- The legacy Flask application is still imported during ASGI startup to provide
+  existing configuration, in-memory session state, feature registries, and
+  the fallback adapter. Therefore Flask and `flask-cors` must remain installed.
 
-## Deployment and verification
+## Compatibility and security rules
 
-The Render blueprint now starts the gateway with:
+1. Preserve endpoint paths, HTTP methods, status codes, response envelopes, and
+   error codes unless an existing collision/bug is explicitly documented and
+   deliberately fixed.
+2. Preserve trusted CORS origins, credentials behavior, request IDs, baseline
+   security headers, upload bounds, and the reversible SCI throttle policy.
+3. JWT authentication must remain fail-closed. Core Mesh invention/evolution
+   and knowledge publication remain restricted to configured operator user IDs.
+   Core tokens must remain server-side.
+4. Smart Memory must continue to verify the signed user and the authoritative
+   RevelaCode user record, isolate records by user ID, and never query
+   `revelacode.users` directly.
+5. Vision frames are validated, bounded, processed ephemerally, and not persisted
+   by the Vision endpoint.
+6. Submitted code and proposals are records for review; they must not be
+   executed or automatically merged/deployed by this migration.
+
+## CI and deployment
+
+The branch's migration workflow installs the dependencies, compiles the ASGI
+entry point and migration test suite, and runs endpoint/auth/CORS regression
+checks. Checks for the newest branch head must pass before the draft PR is made
+ready. The tests in this phase do not prove every remaining Flask endpoint has
+been migrated.
+
+Render starts the gateway with:
 
 ```sh
 uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
 ```
 
-A single worker is retained to avoid changing the existing process-local session
-memory behavior while migrating. The private Go Core-Zero, Genesis/Core-One,
-and Infinite-Mind/Core-Two service wiring and their server-side credentials are
-unchanged.
+A single worker avoids changing process-local session memory during this
+migration. The private Go Core-Zero, Genesis/Core-One, and Infinite-Mind/Core-Two
+service wiring and server-side credentials remain unchanged.
 
-The added CI check covers the ASGI entry point, docs, security headers, and one
-authenticated legacy route's unauthenticated response. It does **not** prove
-that all routes have already been converted. Full completion requires per-route
-parity tests and removal of Flask from runtime imports and dependencies.
+## Exit criteria for declaring the migration complete
+
+- Port every remaining direct handler and blueprint to FastAPI routers or
+  framework-independent services.
+- Eliminate URL collisions and test each endpoint's happy path, malformed input,
+  authentication/authorization, provider failure, and response schema.
+- Move session/state/configuration dependencies out of `app.py` and remove the
+  compatibility bridge.
+- Remove all production imports of Flask/Flask-CORS and remove those packages
+  from `requirements.txt`.
+- Run the full Python test suite and CI, validate the OpenAPI inventory, then
+  deploy the finished branch and verify health/readiness, chat, vision, memory,
+  Core Mesh, and the three private Go cores.
