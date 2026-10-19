@@ -188,6 +188,6 @@ def test_audit_ledger_detects_record_tampering(tmp_path):
     first_record = __import__("json").loads(lines[0])
     first_record["action"] = "factory.destroy"
     lines[0] = __import__("json").dumps(first_record, sort_keys=True, separators=(",", ":"))
-    file_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    file_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with pytest.raises(AuditLedgerError):
         ledger.verify()
