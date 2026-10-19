@@ -72,10 +72,12 @@ routes. An unauthenticated request is not promoted to a verified user or admin.
 
 ## Remaining Flask bridge inventory
 
-The main AI, streaming and voice HTTP endpoints are now registered natively.
-Their provider orchestration, image generation, transcription and TTS helpers
-still reuse selected functions from `app.py`; this is intentional transitional
-service reuse, not evidence that Flask has been fully removed.
+The main AI, streaming, voice and system HTTP endpoints are registered natively.
+These routers now import provider, image, document, audio, feature-registry and
+conversation functions from framework-neutral modules rather than importing the
+Flask app module. The AI provider/orchestration implementation itself remains a
+shared service, and this service reuse is not evidence that Flask has been fully
+removed.
 
 Remaining work is the legacy route inventory outside those native routers:
 - Sector-specific legacy route handlers and older compatibility APIs remain on
@@ -91,10 +93,12 @@ Remaining work is the legacy route inventory outside those native routers:
 - Resolve root-level legacy route collisions by comparing actual Flask route
   maps and preserving public endpoint contracts.
 
-The legacy module is still imported by native system/chat modules for feature
-registries, provider helpers and process-local session state. Those imports
-must be moved to framework-neutral service/configuration modules before the
-bridge can be removed.
+The ASGI entry point still imports `legacy_flask_app.py` to mount the remaining
+WSGI routes and to share the current CORS allowlist and SCI throttle state.
+`app.py` remains a backwards-compatible facade over that module, but the native
+AI, streaming, voice and system routers no longer import the Flask app directly.
+Before removing the bridge, move the remaining CORS/throttle state into a small
+framework-neutral module and finish the manual sector-route pass.
 
 ## Migration requirements
 
