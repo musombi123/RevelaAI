@@ -60,6 +60,8 @@ longer depend on Flask state, and the full regression suite passes.
   plan status, explicitly approved execution and audit listing. Workspace paths
   remain isolated by a hash of the verified account ID.
 - **WhatsApp:** webhook verification and incoming message handler.
+- **Research:** `POST /api/research` searches a bounded set of configured RSS feeds; it does not fetch arbitrary user-supplied URLs.
+- **Prototype users directory:** `POST /api/users` and `GET /api/users/{user_id}`. This remains an in-memory demo store and is not the authoritative RevelaCode account database.
 
 The ASGI middleware retains the same trusted-origin CORS allowlist, credential
 behavior, request IDs, security headers and reversible SCI throttle for native
@@ -73,8 +75,11 @@ still reuse selected functions from `app.py`; this is intentional transitional
 service reuse, not evidence that Flask has been fully removed.
 
 Remaining work is the legacy route inventory outside those native routers:
-- Route declarations and blueprints still mounted only in the Flask app,
-  including legacy research/user and compatibility APIs.
+- Sector-specific legacy route handlers and older compatibility APIs remain on
+  the Flask fallback intentionally. Their business logic is left untouched for
+  the manual sector pass. The newly ported research/users APIs are native FastAPI
+  routes under `/api/research` and `/api/users`; ambiguous legacy root paths are
+  not treated as their public endpoints.
 - Legacy request hooks, error handlers, and duplicated after-request logic.
 - Service/configuration helpers that still import Flask globals (`request`,
   `g`, `current_app`) even where native adapters pass explicit request
@@ -124,8 +129,8 @@ green.
 
 ## Exit criteria for declaring the migration complete
 
-- Finish porting the remaining Flask-only route declarations and blueprints,
-  preserving endpoint paths and methods.
+- Manually port the remaining sector-specific Flask handlers and compatibility
+  blueprints, preserving endpoint paths and methods.
 - Verify native `/ai`, `/ai/stream`, and `/voice` contracts against the
   frontend, including multipart uploads, SSE event shapes, audio playback and
   image URLs.
@@ -135,7 +140,7 @@ green.
 - Convert all remaining blueprints to FastAPI routers or delete genuinely
   unused route modules after proving they are not part of the public contract.
 - Remove the `a2wsgi` mount, Flask imports, Flask middleware, and Flask/`flask-cors`
-  dependencies only after parity tests prove the remaining gateway is native.
+  dependencies only after the manual sector pass and parity tests prove the whole gateway is native.
 - Run the full Python tests, validate the OpenAPI document, then deploy and
   smoke-test chat, voice, vision, memory, administrator functions and all three
   private Go cores.
