@@ -334,6 +334,16 @@ async def stripe_webhook(request: Request, session: Session = Depends(get_db)) -
         intent = session.get(CheckoutIntent, intent_id) if intent_id else None
         if intent is None or intent.stripe_session_id != obj.get("id"):
             raise HTTPException(status_code=404, detail="Checkout intent/session mismatch")
+        # Bind the signed provider event to the amount, currency and account that
+        # the server-side intent expected; never issue entitlements for a mismatch.
+        try:
+            amount_total = int(obj.get("amount_total"))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Checkout event is missing a valid amount_total") from exc
+        if amount_total != intent.amount_usd_cents or str(obj.get("currency", "")).lower() != "usd":
+            raise HTTPException(status_code=400, detail="Checkout amount/currency does not match the recorded intent")
+        if str(obj.get("client_reference_id") or "") != intent.user_id:
+            raise HTTPException(status_code=400, detail="Checkout user does not match the recorded intent")
         if intent.status not in {"paid", "cancelled"}:
             intent.status = "paid"
             intent.paid_at = now
