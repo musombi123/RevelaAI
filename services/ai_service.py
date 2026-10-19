@@ -1349,16 +1349,16 @@ def process_message(
         topic = str(unknown_data.get("topic") or "this topic")[:120]
         locale = str((orchestrator_data.get("country_context") or {}).get("language") or language or "en")
         ask_messages = {
-            "de": f"Ich habe dazu noch kein verifiziertes Tool, keine Bibliothek und kein geprüftes gemeinsames Wissen: „{topic}“. Ich werde keine Schritte erfinden. Kannst du mir 1–3 sichere Arbeitsschritte oder ein Foto des Aufbaus beisteuern? Entferne persönliche und vertrauliche Daten. Notizen bleiben zunächst privat; Teilen erfordert deine ausdrückliche Zustimmung. Eine Genesis-Erstellung bleibt bis zur Prüfung und Freigabe ein Vorschlag.",
-            "zh": f"我目前没有关于“{topic}”的已验证工具、库或审核过的共享知识，因此不会编造步骤。你能提供 1–3 个安全步骤或设备照片吗？请删除个人和机密信息。笔记默认私有；共享需要明确同意。Genesis 创建结果在审核批准前只是提案。",
-            "ja": f"「{topic}」について、検証済みのツール・ライブラリ・共有知識がまだないため、手順を推測しません。安全な手順を1〜3個、または装置の写真を共有できますか。個人情報や機密情報は除いてください。メモは最初は非公開で、共有には明示的な同意が必要です。Genesis の生成物は審査・承認まで提案のままです。",
-            "fr": f"Je n'ai pas encore d'outil, de bibliothèque ni de connaissance partagée vérifiée pour « {topic} » ; je ne vais pas inventer de procédure. Peux-tu fournir 1 à 3 étapes sûres ou une photo, sans données personnelles ni confidentielles ? Les notes restent privées par défaut ; le partage exige un consentement explicite. Toute proposition Genesis attend une revue et une approbation.",
-            "es": f"Aún no tengo una herramienta, biblioteca ni conocimiento compartido verificado sobre «{topic}», así que no inventaré los pasos. ¿Puedes aportar 1–3 pasos seguros o una foto? Elimina datos personales y confidenciales. Las notas serán privadas por defecto; compartirlas requiere consentimiento explícito. Toda propuesta de Genesis espera revisión y aprobación.",
-            "sw": f"Bado sina zana, maktaba au maarifa ya pamoja yaliyothibitishwa kuhusu “{topic}”; sitabuni hatua. Unaweza kutoa hatua 1–3 salama au picha ya kifaa? Ondoa taarifa binafsi na za siri. Maelezo yatabaki ya faragha mwanzoni; kushiriki kunahitaji idhini ya wazi. Pendekezo la Genesis litasubiri ukaguzi na idhini.",
+            "de": f"Ich habe dazu noch kein verifiziertes Tool, keine Bibliothek und kein geprüftes gemeinsames Wissen: „{topic}“. Ich werde keine Schritte erfinden. Kannst du mir 1–3 sichere Arbeitsschritte beisteuern? Entferne persönliche und vertrauliche Daten. Notizen bleiben zunächst privat; Teilen erfordert deine ausdrückliche Zustimmung. Eine Genesis-Erstellung bleibt bis zur Prüfung und Freigabe ein Vorschlag.",
+            "zh": f"我目前没有关于“{topic}”的已验证工具、库或审核过的共享知识，因此不会编造步骤。你能提供 1–3 个安全步骤吗？请删除个人和机密信息。笔记默认私有；共享需要明确同意。Genesis 创建结果在审核批准前只是提案。",
+            "ja": f"「{topic}」について、検証済みのツール・ライブラリ・共有知識がまだないため、手順を推測しません。安全な手順を1〜3個共有できますか。個人情報や機密情報は除いてください。メモは最初は非公開で、共有には明示的な同意が必要です。Genesis の生成物は審査・承認まで提案のままです。",
+            "fr": f"Je n'ai pas encore d'outil, de bibliothèque ni de connaissance partagée vérifiée pour « {topic} » ; je ne vais pas inventer de procédure. Peux-tu fournir 1 à 3 étapes sûres, sans données personnelles ni confidentielles ? Les notes restent privées par défaut ; le partage exige un consentement explicite. Toute proposition Genesis attend une revue et une approbation.",
+            "es": f"Aún no tengo una herramienta, biblioteca ni conocimiento compartido verificado sobre «{topic}», así que no inventaré los pasos. ¿Puedes aportar 1–3 pasos seguros? Elimina datos personales y confidenciales. Las notas serán privadas por defecto; compartirlas requiere consentimiento explícito. Toda propuesta de Genesis espera revisión y aprobación.",
+            "sw": f"Bado sina zana, maktaba au maarifa ya pamoja yaliyothibitishwa kuhusu “{topic}”; sitabuni hatua. Unaweza kutoa hatua 1–3 salama? Ondoa taarifa binafsi na za siri. Maelezo yatabaki ya faragha mwanzoni; kushiriki kunahitaji idhini ya wazi. Pendekezo la Genesis litasubiri ukaguzi na idhini.",
         }
         reply = ask_messages.get(
             locale,
-            f"I don't yet have a verified tool, library, or reviewed shared memory for “{topic}”. I won't guess. Could you share 1–3 safe steps ? Remove personal and confidential details first. Notes stay private by default; sharing requires explicit consent. Any Genesis tool remains a proposal until it is reviewed and approved.",
+            f"I don't yet have a verified tool, library, or reviewed shared memory for “{topic}”. I won't guess. Could you share 1–3 safe steps? Remove personal and confidential details first. Notes stay private by default; sharing requires explicit consent. Any Genesis tool remains a proposal until it is reviewed and approved.",
         )
         pending_registration = register_unknown_ask(
             topic=topic,
@@ -1369,9 +1369,21 @@ def process_message(
             source_request=normalized_message,
         )
         if pending_registration.get("registered"):
-            reply += chr(10) + chr(10) + "To teach me in this chat, reply with TEACH: followed by 1–3 safe steps (one per line or separated by semicolons). Add SHARE: YES only if you explicitly consent to reuse by other users. Without that, notes stay private."
+            teaching_instructions = {
+                "de": "Antworte mit TEACH: und 1–3 sicheren Schritten. Nutze eine Zeile pro Schritt oder Semikolons. Schreibe SHARE: YES nur, wenn du der Nutzung durch andere ausdrücklich zustimmst; sonst bleiben die Notizen privat.",
+                "zh": "请回复 TEACH: 并附上 1–3 个安全步骤，每行一个或用分号分隔。只有明确同意其他用户复用时才添加 SHARE: YES；否则笔记保持私有。",
+                "ja": "TEACH: に続けて安全な手順を1〜3個入力してください。共有に明示的に同意する場合だけ SHARE: YES を追加してください。それ以外は非公開で保存されます。",
+                "fr": "Réponds avec TEACH: suivi de 1 à 3 étapes sûres. Ajoute SHARE: YES uniquement si tu consens explicitement au partage ; sinon les notes restent privées.",
+                "es": "Responde con TEACH: seguido de 1–3 pasos seguros. Añade SHARE: YES solo si consientes explícitamente compartirlos; de lo contrario, las notas serán privadas.",
+                "sw": "Jibu kwa TEACH: kisha hatua 1–3 salama. Ongeza SHARE: YES tu ikiwa unakubali wazi kushiriki na wengine; vinginevyo maelezo yatabaki ya faragha.",
+            }
+            teaching_suffix = teaching_instructions.get(
+                locale,
+                "Reply with TEACH: followed by 1–3 safe steps, one per line or separated by semicolons. Add SHARE: YES only if you explicitly consent to reuse by other users; otherwise the notes stay private.",
+            )
+            reply += chr(10) + chr(10) + teaching_suffix
         else:
-            reply += "\\n\\nSign in to RevelaCode to submit teaching notes. No new knowledge has been stored yet."
+            reply += chr(10) + chr(10) + "Sign in to RevelaCode to submit teaching notes. No new knowledge has been stored yet."
 
         return {
             "response": reply,
