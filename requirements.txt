@@ -2,6 +2,7 @@
 # and is removed after all legacy blueprints/routes have been ported and tested.
 Flask>=2.3,<4
 flask-cors>=4.0
+a2wsgi>=1.10,<2
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
 gunicorn>=21.2
