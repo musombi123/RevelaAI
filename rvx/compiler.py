@@ -6,6 +6,9 @@ Before compiling/birthing a tool, a valid signed RevelaCode license is required.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import json
 from pathlib import Path
 
 from rvx.crypto import RecipeError, load_master_key, open_blob, seal_blob
@@ -37,7 +40,25 @@ class RvxCompiler:
             else source_path.with_suffix(source_path.suffix + ".opened")
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(open_blob(source_path.read_bytes(), self._root_key))
+        plaintext = open_blob(source_path.read_bytes(), self._root_key)
+        # Licensed bundles keep license claims and their original signed token
+        # inside the authenticated ciphertext; opening restores just the source file.
+        try:
+            bundle = json.loads(plaintext)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            bundle = None
+        if isinstance(bundle, dict) and bundle.get("kind") == "licensed_tool_bundle" and bundle.get("version") == 1:
+            try:
+                source_bytes = base64.b64decode(bundle["source_b64"], validate=True)
+                expected_hash = hashlib.sha256(source_bytes).hexdigest()
+                if not isinstance(bundle.get("source_sha256"), str) or not __import__("hmac").compare_digest(expected_hash, bundle["source_sha256"]):
+                    raise RecipeError("Licensed RVX source digest mismatch.")
+                plaintext = source_bytes
+            except RecipeError:
+                raise
+            except Exception as exc:
+                raise RecipeError("Licensed RVX bundle payload is invalid.") from exc
+        destination.write_bytes(plaintext)
         return destination
 
     def compile_file(
@@ -54,15 +75,23 @@ class RvxCompiler:
         source_path = Path(source).expanduser()
         if not source_path.is_file():
             raise FileNotFoundError(source_path)
+        source_bytes = source_path.read_bytes()
+        # The signed token and entitlement claims are placed inside the ciphertext,
+        # not in the outer readable RVX envelope metadata.
+        bundle = {
+            "kind": "licensed_tool_bundle",
+            "version": 1,
+            "source_name": source_path.name,
+            "source_sha256": hashlib.sha256(source_bytes).hexdigest(),
+            "tool_id": tool_id or source_path.stem,
+            "license_token": license_key,
+            "license_claims": claims,
+            "source_b64": base64.b64encode(source_bytes).decode("ascii"),
+        }
         encrypted = seal_blob(
-            source_path.read_bytes(),
+            json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode("utf-8"),
             self._root_key,
-            metadata={
-                "source_name": source_path.name,
-                "tool_id": tool_id or source_path.stem,
-                "license_id": claims.get("jti"),
-                "license_plan": claims.get("plan"),
-            },
+            metadata={"source_name": source_path.name, "format": "licensed-tool-bundle-v1"},
         )
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(encrypted)
