@@ -19,23 +19,50 @@ def test_app_module_exports_the_native_fastapi_instance() -> None:
 
 def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
     from pathlib import Path
-    import re
     import asgi
 
     app_source = Path("app.py").read_text(encoding="utf-8")
     asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
     requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
+    def has_flask_import(source: str) -> bool:
+        for line in source.splitlines():
+            statement = line.strip()
+            if (
+                statement.startswith("from flask ")
+                or statement.startswith("from flask.")
+                or statement == "import flask"
+                or statement.startswith("import flask ")
+            ):
+                return True
+        return False
+
+    assert "from asgi import app" in app_source
     assert "WSGIMiddleware" not in asgi_source
     assert "legacy_flask_app" not in asgi_source
     assert "WSGIMiddleware" not in app_source
-    assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", asgi_source, re.M)
-    assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", app_source, re.M)
+    assert not has_flask_import(asgi_source)
+    assert not has_flask_import(app_source)
+
+    requirement_lines = [
+        line.strip() for line in requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
     for dependency in ("flask", "flask-cors", "a2wsgi"):
-        assert not re.search(rf"^\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\s|$)", requirements, re.M), dependency
+        assert not any(
+            line == dependency
+            or line.startswith((
+                dependency + " ", dependency + "<", dependency + ">",
+                dependency + "=", dependency + "[", dependency + "~",
+                dependency + "!", dependency + ";",
+            ))
+            for line in requirement_lines
+        ), dependency
+
     assert not Path("legacy_flask_app.py").exists()
-
-
+    for root in (Path("fastapi_routes"), Path("services"), Path("revelai/sci_core")):
+        for source in root.rglob("*.py"):
+            assert not has_flask_import(source.read_text(encoding="utf-8")), str(source)
 
 def test_native_core_routers_do_not_import_the_flask_compatibility_module() -> None:
     from fastapi_routes import ai as ai_routes
