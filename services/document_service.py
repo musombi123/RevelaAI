@@ -96,7 +96,7 @@ def process_uploaded_document(
         )
 
         prompt = (
-            (request.form.get("message", "") if prompt is None else prompt)
+            prompt
             or ""
         ).strip()
 
@@ -190,7 +190,7 @@ def process_uploaded_document(
         ]
 
         prompt = (
-            (request.form.get("message", "") if prompt is None else prompt)
+            prompt
             or ""
         ).strip()
 
@@ -264,7 +264,7 @@ def process_uploaded_document(
         ]
 
         prompt = (
-            (request.form.get("message", "") if prompt is None else prompt)
+            prompt
             or ""
         ).strip()
 
