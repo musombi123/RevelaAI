@@ -23,6 +23,7 @@ from fastapi_routes.explain import router as explain_router
 from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.vision import router as vision_router
+from fastapi_routes.system import router as system_router
 
 legacy_flask_app = legacy_app_module.app
 logger = logging.getLogger("revelaai.asgi")
@@ -61,6 +62,8 @@ app.add_middleware(
 async def asgi_security_and_legacy_throttle(request: Request, call_next):
     """Maintain baseline response headers and SCI throttle for native routes."""
     path = request.url.path
+    request_id = request.headers.get("X-Request-ID", "").strip()[:100] or uuid.uuid4().hex
+    request.state.request_id = request_id
 
     # Count native ASGI requests in the same reversible SCI throttle as the
     # legacy application. The mounted WSGI app retains its own before_request
@@ -119,10 +122,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
             return response
 
     response = await call_next(request)
-    response.headers.setdefault(
-        "X-Request-ID",
-        request.headers.get("X-Request-ID", "").strip()[:100] or uuid.uuid4().hex,
-    )
+    response.headers.setdefault("X-Request-ID", request_id)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -142,6 +142,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 
 # Native FastAPI routes precede the catch-all WSGI mount so these endpoints no
 # longer execute through Flask.
+app.include_router(system_router)
 app.include_router(core_mesh_router)
 app.include_router(chat_router)
 app.include_router(explain_router)
