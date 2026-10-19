@@ -16,7 +16,7 @@ class Plan:
 PLANS: dict[str, Plan] = {
     "local": Plan("local", 1000, 10, False, "Local plan; one licensed country; up to 10 tools"),
     "pro": Plan("pro", 50000, 100, True, "Pro Worldwide; up to 100 tools; marketplace access"),
-    "enterprise": Plan("enterprise", 1000000, None, True, "Enterprise; unlimited tools; private deployment/dialect options"),
+    "enterprise": Plan("enterprise", 1000000, None, True, "Enterprise; unlimited tool quota; dedicated integration planning; private RVX dialect requires a separate implementation."),
 }
 
 
