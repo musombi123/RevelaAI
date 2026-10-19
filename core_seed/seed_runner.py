@@ -34,7 +34,8 @@ class SeedRunner:
         self.foundry = foundry or FoundryBuilder()
 
     def seed_child(self, *, build_id: str, license_key: str, user_id: str,
-                   child_name: str, now: datetime | None = None) -> dict[str, Any]:
+                   child_name: str, now: datetime | None = None,
+                   purchase_verified: bool = False) -> dict[str, Any]:
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,99}", child_name.strip()):
             raise SeedError("Child name contains unsupported characters or length.")
         try:
@@ -47,12 +48,10 @@ class SeedRunner:
             source = self.foundry.get_manifest(build_id)
         except (ValueError, OSError) as exc:
             raise SeedError("Source factory manifest is invalid or unavailable.") from exc
-        if source.get("owner_user_id") != user_id:
-            # Enterprise customers may seed a factory purchased from the marketplace.
-            # That case requires caller-provided proof of purchase; not implied here.
-            raise SeedError("Only the owner of this factory proposal may seed it.")
-        if source.get("status") != "await_merge":
-            raise SeedError("Only reviewable factory proposals may be seeded by this runner.")
+        if source.get("owner_user_id") != user_id and not purchase_verified:
+            raise SeedError("Only the owner or a verified marketplace buyer may seed this factory.")
+        if source.get("status") != "approved":
+            raise SeedError("Factory must pass human review before seeding.")
         seed_id = "seed_" + hashlib.sha256(
             f"{build_id}:{user_id}:{child_name.strip()}".encode()
         ).hexdigest()[:24]
