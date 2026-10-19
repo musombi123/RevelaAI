@@ -46,7 +46,6 @@ def send_whatsapp_message(to: str, message: str) -> dict[str, Any]:
         "text": {"body": message},
     }
     response = requests.post(GRAPH_API_URL, headers=headers, json=payload, timeout=(3.05, 20))
-    response.raise_for_status()
     body = response.json()
     return body if isinstance(body, dict) else {}
 
