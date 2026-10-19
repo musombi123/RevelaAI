@@ -1,6 +1,50 @@
+# USECT-ZERO Guardian Safety Policy
+#
+# Purpose:
+#   Safety control index for engineering plans, generated artifacts,
+#   repository recovery, tool assembly, and proposed hardware integrations.
+#
+# Enforcement:
+#   This file defines policy. The Go runtime must actively enforce these
+#   rules at every relevant API and execution boundary.
+
 version: 1
+policy_id: usect-zero-guardian-safety
+policy_name: USECT-ZERO Guardian Safety Policy
+policy_status: active
 mode: fail_closed
-core_law: "Protect, not destroy. Do not permit harmful engineering or unauthorized actions; human review remains required."
+
+core_law: >-
+  Protect, not destroy. Do not permit harmful engineering, unauthorized
+  access, or unauthorized actions. Human review remains required for
+  consequential changes, and safety controls must not be bypassed.
+
+decision_policy:
+  default_for_ambiguous_harmful_or_unauthorized_requests: deny
+  missing_required_evidence: deny
+  failed_integrity_check: deny
+  failed_required_test: deny
+  unavailable_guardian_verification: deny
+  missing_human_approval: deny
+  missing_explicit_merge_approval: deny
+  policy_engine_error: deny
+  policy_database_unavailable: deny
+
+  decisions:
+    allow:
+      description: >-
+        Permit only the non-harmful, authorized, in-scope operation after
+        every applicable required gate has passed.
+    deny:
+      description: >-
+        Block the requested operation when it violates a prohibited category,
+        lacks required authorization, fails a required check, or cannot be
+        safely evaluated.
+    escalate:
+      description: >-
+        Require guardian review for uncertain classifications or elevated
+        risk. Escalation is not authorization to execute the operation.
+
 block_categories:
   - weapons
   - warfare
@@ -11,6 +55,22 @@ block_categories:
   - non_consensual_tracking
   - unauthorized_safety_control_bypass
   - illegal_operation
+
+restricted_actions:
+  - credential_extraction_or_theft
+  - unauthorized_access
+  - unauthorized_privilege_escalation
+  - covert_collection_of_private_data
+  - non_consensual_location_tracking
+  - unauthorized_security_control_modification
+  - disabling_required_safety_interlocks
+  - destructive_actions_without_explicit_authorization
+  - unauthorized_device_actuation
+  - unauthorized_firmware_flashing
+  - audit_log_tampering
+  - provenance_or_integrity_check_bypass
+  - concealment_of_failed_safety_checks
+
 required_gates:
   - validate_inputs
   - guardian_screening
@@ -19,14 +79,169 @@ required_gates:
   - qualified_professional_review_for_hazardous_hardware
   - explicit_human_approval
   - explicit_merge
+
+gate_policy:
+  input_validation:
+    required: true
+    reject_malformed_inputs: true
+    reject_unbounded_inputs: true
+    reject_path_traversal: true
+    reject_unexpected_actions: true
+
+  guardian_screening:
+    required: true
+    check_block_categories: true
+    check_restricted_actions: true
+    uncertain_result: escalate
+    unavailable_result: deny
+    screening_alone_authorizes_execution: false
+
+  provenance_and_integrity:
+    required: true
+    verify_source_identity: true
+    verify_artifact_hashes_when_available: true
+    verify_template_version: true
+    verify_approved_change_scope: true
+    reject_unverified_or_mismatched_artifacts: true
+    never_treat_a_hash_as_proof_of_safety: true
+
+  candidate_tests:
+    required: true
+    tests_must_pass: true
+    missing_test_results: deny
+    failed_test_results: deny
+    tests_do_not_replace_human_approval: true
+
+  professional_review:
+    required_for_hazardous_hardware: true
+    require_relevant_qualified_reviewer: true
+    verify_manufacturer_documentation: true
+    verify_electrical_and_physical_limits: true
+    review_does_not_imply_automatic_actuation: true
+
+  human_approval:
+    required_for_consequential_actions: true
+    must_be_explicit: true
+    bind_approval_to_specific_action: true
+    bind_approval_to_specific_target: true
+    bind_approval_to_reviewed_artifact_or_version: true
+    reject_expired_approval: true
+    reject_replayed_approval: true
+    approval_must_not_be_inferred_from_session_presence: true
+
+  merge:
+    explicit_approval_required: true
+    review_required_before_merge: true
+    reject_unreviewed_changes: true
+    reject_integrity_mismatch: true
+    reject_failed_required_checks: true
+
+execution_policy:
+  mode: proposal_first
+  automatic_execution_of_unreviewed_commands: false
+  automatic_repository_modification_without_approval: false
+  automatic_merge: false
+  automatic_firmware_flashing: false
+  automatic_hardware_actuation: false
+  automatic_safety_interlock_bypass: false
+  execute_generated_code_during_validation: false
+  network_access_requires_separate_authorization: true
+  device_access_requires_explicit_local_permission: true
+  privileged_operations_require_server_side_authorization: true
+
+  recovery:
+    generate_proposal_before_change: true
+    capture_existing_state_before_overwrite: true
+    revalidate_target_before_approval: true
+    reject_stale_proposals: true
+    preserve_backup_evidence: true
+    report_partial_recovery: true
+    rollback_failure_requires_manual_review: true
+
+  tool_assembly:
+    use_curated_templates: true
+    reject_unknown_templates: true
+    preserve_template_provenance: true
+    generated_artifacts_are_review_only_by_default: true
+    external_side_effects_disabled_by_default: true
+
+api_security:
+  administrator_authentication_required_for_admin_routes: true
+  verify_authorization_server_side: true
+  distinguish_authentication_failure_from_verification_unavailability: true
+  never_expose_secrets_in_responses_or_logs: true
+  never_treat_an_issued_scoped_key_as_an_admin_token_without_explicit_policy: true
+  fail_closed_when_admin_verification_is_unavailable: true
+  enforce_key_scope_and_expiry: true
+  audit_key_issuance_and_revocation: true
+  require_explicit_authorization_for_key_approval: true
+
+audit_policy:
+  enabled: true
+  append_security_events: true
+  record_approval_decisions: true
+  record_integrity_failures: true
+  record_blocked_operations: true
+  record_recovery_outcomes: true
+  protect_audit_logs_from_unapproved_modification: true
+  never_log_plaintext_credentials: true
+  audit_failure_on_privileged_operation: deny
+  audit_failure_on_destructive_operation: deny
+
 extra_terms:
   - "credential theft"
   - "covert surveillance"
   - "non-consensual tracking"
   - "delete audit logs"
   - "disable safety controls"
+  - "steal credentials"
+  - "bypass authorization"
+  - "disable safety interlock"
+  - "unauthorized firmware flashing"
+  - "exfiltrate private data"
+  - "conceal unauthorized access"
+
+phrase_screening:
+  enabled: true
+  case_insensitive: true
+  normalize_whitespace: true
+  match_method: advisory_phrase_matching
+  phrase_match_is_proof_of_intent: false
+  phrase_match_can_be_the_only_safety_check: false
+  possible_match_requires_contextual_review: true
+  ambiguous_high_risk_request_requires_escalation: true
+  screening_failure: deny
+  claim_of_complete_semantic_understanding: false
+
+evidence_policy:
+  require_claims_to_match_observed_evidence: true
+  distinguish_observed_facts_from_inferences: true
+  identify_missing_evidence: true
+  prohibit_fabricated_test_results: true
+  prohibit_fabricated_hardware_verification: true
+  prohibit_claiming_execution_when_only_a_plan_was_generated: true
+  retain_relevant_failure_details_without_secrets: true
+
 notes:
-  - "This policy is a control index, not a complete legal compliance engine."
-  - "Phrase screening is not perfect semantic understanding and cannot guarantee that all harm is blocked."
-  - "Law must be independently verified for the deployment jurisdiction."
-  - "No auto-repair may execute an unreviewed command; no hardware is actuated automatically."
+  - >-
+    This policy is a control index, not a complete legal compliance engine.
+    Its protections depend on correct implementation and enforcement by the
+    runtime, API handlers, tool adapters, and approval workflow.
+  - >-
+    Phrase screening is not perfect semantic understanding and cannot guarantee
+    that all harmful activity will be blocked.
+  - >-
+    Law must be independently verified for the deployment jurisdiction.
+  - >-
+    No auto-repair may execute an unreviewed command. No hardware is actuated
+    automatically.
+  - >-
+    Human approval must be explicit, specific to the proposed action, and
+    checked by the server. A policy file or frontend control is not itself
+    proof of authorization.
+  - >-
+    Hash verification establishes artifact integrity relative to a trusted
+    reference; it does not prove that an artifact is safe.
+  - >-
+    An unavailable administrator-verification service must not be interpreted
+    as successful authorization.
