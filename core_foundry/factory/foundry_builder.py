@@ -153,6 +153,25 @@ class FoundryBuilder:
             "manifest": manifest,
         }
 
+    def set_status(self, build_id: str, status: str) -> dict[str, Any]:
+        """Update a build's review state and re-hash the manifest."""
+        if status not in {"await_merge", "approved", "rejected"}:
+            raise FactoryBuildError("Unsupported review status.")
+        manifest = self.get_manifest(build_id)
+        if manifest.get("status") == "rejected" and status != "rejected":
+            raise FactoryBuildError("Rejected factory proposals cannot be reactivated by this method.")
+        if manifest.get("status") == "approved" and status == "await_merge":
+            raise FactoryBuildError("Approved factory proposals cannot be demoted to draft.")
+        manifest["status"] = status
+        manifest.pop("manifest_sha256", None)
+        digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        manifest["manifest_sha256"] = digest
+        target = self.output_root / build_id / "manifest.json"
+        temporary = target.with_name(".manifest.tmp")
+        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+        os.replace(temporary, target)
+        return manifest
+
     def get_manifest(self, build_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"fab_[a-f0-9]{24}", build_id):
             raise FactoryBuildError("Invalid factory build identifier.")
