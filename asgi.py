@@ -100,6 +100,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
     }
     native_prefixes = (
         "/api/usect-zero/",
+        "/api/sci/",
         "/api/automation-fabric/",
         "/api/core-mesh/",
         "/v1/learn/",
