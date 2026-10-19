@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 import app as legacy
 from fastapi_routes.auth import authenticate_identity
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
+from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 
 router = APIRouter(tags=["AI"])
 logger = logging.getLogger("revelaai.fastapi.ai")
@@ -203,7 +204,7 @@ def _ai_sync(
     )
     user_id = _subject_from_bearer(authorization)
     session_id = _session_id(headers, cookies, user_id)
-    session = legacy.get_session(session_id)
+    session = get_session(session_id)
 
     memory_user_oid = None
     if user_id:
@@ -271,7 +272,7 @@ def _ai_sync(
         return _error("MESSAGE_TOO_LARGE", "Message exceeds the allowed size.", 413, request_id)
 
     try:
-        previous_context, memory_source = legacy.resolve_conversation_context(
+        previous_context, memory_source = resolve_conversation_context(
             session, raw_client_context
         )
         brain_context, interaction = legacy.build_global_context(
@@ -279,11 +280,11 @@ def _ai_sync(
             hub=brain_payload.get("hub") or "auto",
             payload=brain_payload,
         )
-        previous_context = (previous_context + [brain_context])[-legacy.MAX_HISTORY:]
+        previous_context = (previous_context + [brain_context])[-MAX_HISTORY:]
         if memory_user_oid is not None:
             personalization = _load_personalization_context(memory_user_oid)
             if personalization:
-                previous_context = (previous_context + [personalization])[-legacy.MAX_HISTORY:]
+                previous_context = (previous_context + [personalization])[-MAX_HISTORY:]
 
         intent = legacy.classify_intent(message)
         capability = legacy.detect_capability(message, intent=intent)
@@ -298,7 +299,7 @@ def _ai_sync(
             )
 
         session["messages"].append({"role": "user", "content": message})
-        session["messages"] = session["messages"][-legacy.MAX_HISTORY:]
+        session["messages"] = session["messages"][-MAX_HISTORY:]
 
         lowered = message.lower()
         expert_payload = None
@@ -371,7 +372,7 @@ def _ai_sync(
                 message,
                 assistant_text,
             )
-        legacy.save_session(session_id, session)
+        save_session(session_id, session)
 
         wants_json = any(
             keyword in lowered for keyword in ("respond in json", "return json", "output json")
