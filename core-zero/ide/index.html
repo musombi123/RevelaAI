@@ -1,8 +1,1177 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RevelaIDE · RV Lang</title><style>body{font-family:system-ui,sans-serif;max-width:1000px;margin:2rem auto;padding:0 1rem;color:#18232b;background:#f5f8f6}header{border-bottom:1px solid #d1ddd6;margin-bottom:1.2rem}textarea,pre{box-sizing:border-box;width:100%;min-height:260px;border:1px solid #b8c8bf;border-radius:10px;padding:1rem;background:#fff;font:14px/1.5 ui-monospace,monospace;overflow:auto}button{padding:.75rem 1rem;border:0;border-radius:8px;background:#087f5b;color:#fff;font-weight:700;cursor:pointer}small{color:#52635a}.warning{border-left:4px solid #d97706;padding:.7rem;background:#fff7ed}</style></head>
-<body><header><h1>RevelaIDE <small>· RV Lang offline plan editor</small></h1><p>Compile a bounded declarative plan into reviewable Go source. It does not execute actions.</p></header><p class="warning">Use only on a local trusted USECT-ZERO service. Compiled output is a proposal, not authorization to run it.</p><textarea id="src">scan
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#071a14">
+  <meta
+    name="description"
+    content="RevelaIDE is an offline-first RV Lang plan editor for USECT-ZERO. Compile bounded, reviewable plans without executing actions."
+  >
+  <title>RevelaIDE · RV Lang</title>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f2f6f3;
+      --panel: #ffffff;
+      --panel-soft: #f7faf8;
+      --text: #17251f;
+      --muted: #63736b;
+      --border: #d8e3dc;
+      --primary: #087f5b;
+      --primary-hover: #066849;
+      --primary-soft: #e1f5eb;
+      --warning: #98520c;
+      --warning-bg: #fff7e8;
+      --danger: #b42332;
+      --danger-bg: #fff0f1;
+      --success: #087747;
+      --success-bg: #e8f8ee;
+      --shadow: 0 16px 45px rgba(27, 53, 40, 0.07);
+      --radius-lg: 18px;
+      --radius-md: 11px;
+      --editor-bg: #fbfdfb;
+      --editor-text: #182c23;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 0%, rgba(8, 127, 91, 0.07), transparent 30rem),
+        var(--page);
+      color: var(--text);
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    button,
+    input,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      min-height: 42px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      padding: 0.65rem 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition:
+        background-color 140ms ease,
+        border-color 140ms ease,
+        transform 140ms ease;
+    }
+
+    button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid rgba(8, 127, 91, 0.3);
+      outline-offset: 2px;
+    }
+
+    .primary-button {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .primary-button:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .secondary-button {
+      color: var(--text);
+      background: var(--panel);
+      border-color: var(--border);
+    }
+
+    .secondary-button:hover:not(:disabled) {
+      background: var(--panel-soft);
+      border-color: #a9c4b5;
+    }
+
+    .app-shell {
+      width: min(1440px, 100%);
+      margin: 0 auto;
+      padding: 28px 26px 42px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding-bottom: 22px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 47px;
+      height: 47px;
+      flex: 0 0 47px;
+      place-items: center;
+      border-radius: 14px;
+      color: white;
+      background: linear-gradient(145deg, #0b9b6a, #075c43);
+      box-shadow: 0 6px 18px rgba(8, 127, 91, 0.2);
+      font-size: 23px;
+      font-weight: 900;
+      letter-spacing: -1px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: clamp(1.3rem, 3vw, 1.8rem);
+      line-height: 1.2;
+      letter-spacing: -0.055em;
+    }
+
+    .brand-subtitle {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 500;
+      letter-spacing: 0;
+    }
+
+    .version-label {
+      flex: 0 0 auto;
+      padding: 0.35rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      color: var(--muted);
+      background: var(--panel);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+    }
+
+    .intro {
+      padding: 25px 0 20px;
+    }
+
+    .intro h2 {
+      margin: 0 0 7px;
+      font-size: clamp(1.25rem, 3vw, 1.75rem);
+      letter-spacing: -0.04em;
+    }
+
+    .intro p {
+      max-width: 760px;
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 23px;
+      padding: 15px 17px;
+      border: 1px solid #f1d7a9;
+      border-left: 4px solid #d97706;
+      border-radius: var(--radius-md);
+      background: var(--warning-bg);
+      color: #69400f;
+    }
+
+    .notice-icon {
+      flex: 0 0 auto;
+      font-size: 1.1rem;
+      font-weight: 900;
+    }
+
+    .notice p {
+      margin: 0;
+      font-size: 0.91rem;
+    }
+
+    .notice strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      align-items: start;
+      gap: 20px;
+    }
+
+    .panel {
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 17px 19px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel-soft);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 800;
+    }
+
+    .panel-subtitle {
+      margin: 3px 0 0;
+      color: var(--muted);
+      font-size: 0.79rem;
+    }
+
+    .panel-body {
+      padding: 18px;
+    }
+
+    .field {
+      margin-bottom: 18px;
+    }
+
+    .field:last-child {
+      margin-bottom: 0;
+    }
+
+    .field-label-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 7px;
+    }
+
+    label {
+      font-size: 0.87rem;
+      font-weight: 750;
+    }
+
+    .field-hint {
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    textarea {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text);
+      background: var(--panel);
+    }
+
+    input[type="text"],
+    input[type="password"] {
+      min-height: 44px;
+      padding: 0.65rem 0.8rem;
+    }
+
+    input::placeholder {
+      color: #83938b;
+    }
+
+    textarea {
+      display: block;
+      min-height: 420px;
+      resize: vertical;
+      padding: 16px;
+      color: var(--editor-text);
+      background: var(--editor-bg);
+      font-family:
+        "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.75;
+      tab-size: 2;
+      white-space: pre;
+      overflow: auto;
+      spellcheck: false;
+    }
+
+    .source-footer {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 8px 16px;
+      padding-top: 10px;
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    .source-footer .over-limit {
+      color: var(--danger);
+      font-weight: 800;
+    }
+
+    .api-hint {
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .actions .primary-button {
+      min-width: 145px;
+    }
+
+    .status {
+      flex: 1 1 180px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+      overflow-wrap: anywhere;
+    }
+
+    .status[data-kind="success"] {
+      color: var(--success);
+    }
+
+    .status[data-kind="error"] {
+      color: var(--danger);
+    }
+
+    .status[data-kind="busy"] {
+      color: var(--primary);
+    }
+
+    .result-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 25px;
+      padding: 0.2rem 0.55rem;
+      border-radius: 99px;
+      background: #e9eee9;
+      color: #4d5b53;
+      font-size: 0.7rem;
+      font-weight: 850;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .status-pill[data-kind="success"] {
+      color: var(--success);
+      background: var(--success-bg);
+    }
+
+    .status-pill[data-kind="error"] {
+      color: var(--danger);
+      background: var(--danger-bg);
+    }
+
+    .result-output {
+      display: block;
+      width: 100%;
+      min-height: 420px;
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--editor-text);
+      background: var(--editor-bg);
+      font-family:
+        "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12.5px;
+      line-height: 1.75;
+    }
+
+    .result-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.77rem;
+    }
+
+    .result-footer p {
+      margin: 0;
+    }
+
+    .bottom-note {
+      margin-top: 22px;
+      padding: 15px 0 0;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.79rem;
+    }
+
+    .bottom-note p {
+      margin: 4px 0;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 900px) {
+      .app-shell {
+        padding: 20px 16px 32px;
+      }
+
+      .workspace {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      textarea,
+      .result-output {
+        min-height: 330px;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .app-shell {
+        padding: 15px 11px 25px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .brand {
+        gap: 9px;
+      }
+
+      .brand-mark {
+        width: 39px;
+        height: 39px;
+        flex-basis: 39px;
+        border-radius: 11px;
+        font-size: 20px;
+      }
+
+      .version-label {
+        font-size: 0.65rem;
+      }
+
+      .panel-header,
+      .panel-body {
+        padding: 13px;
+      }
+
+      .field-label-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 3px;
+      }
+
+      .actions > button {
+        flex: 1 1 auto;
+      }
+
+      .status {
+        flex-basis: 100%;
+      }
+
+      textarea,
+      .result-output {
+        min-height: 290px;
+        padding: 12px;
+        font-size: 12px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --page: #0b1410;
+        --panel: #111e17;
+        --panel-soft: #16251c;
+        --text: #e5eee8;
+        --muted: #a3b5aa;
+        --border: #2a3d31;
+        --primary: #15976d;
+        --primary-hover: #1cab7b;
+        --primary-soft: #153d2d;
+        --warning: #f0bd72;
+        --warning-bg: #332719;
+        --danger: #ff929a;
+        --danger-bg: #391e24;
+        --success: #75d7a0;
+        --success-bg: #153b2a;
+        --shadow: 0 16px 45px rgba(0, 0, 0, 0.15);
+        --editor-bg: #0d1711;
+        --editor-text: #deebe2;
+      }
+
+      .notice {
+        border-color: #735326;
+        color: #ffe0af;
+      }
+
+      .status-pill {
+        color: #c3d0c8;
+        background: #28372d;
+      }
+
+      .status-pill[data-kind="success"] {
+        color: var(--success);
+        background: var(--success-bg);
+      }
+
+      .status-pill[data-kind="error"] {
+        color: var(--danger);
+        background: var(--danger-bg);
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">R</div>
+        <div>
+          <h1>
+            RevelaIDE
+            <span class="brand-subtitle">RV Lang · Plan compiler</span>
+          </h1>
+        </div>
+      </div>
+      <span class="version-label">USECT-ZERO</span>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <h2 id="page-title">Build a plan. Review before action.</h2>
+      <p>
+        Write a bounded RV Lang program and compile it into a reviewable plan.
+        Compilation does not authorize or execute repository changes, deployments,
+        or other actions.
+      </p>
+    </section>
+
+    <aside class="notice" aria-label="Security warning">
+      <span class="notice-icon" aria-hidden="true">!</span>
+      <p>
+        <strong>Connect only to a service you trust.</strong>
+        Use an authenticated USECT-ZERO instance. Your API key is kept in this
+        page's memory and is not saved to local storage. Compiled output is a
+        proposal, not execution authorization.
+      </p>
+    </aside>
+
+    <section class="workspace" aria-label="RV Lang workspace">
+      <section class="panel" aria-labelledby="editor-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="editor-heading" class="panel-title">RV Lang source</h2>
+            <p class="panel-subtitle">Declarative instructions · not a shell</p>
+          </div>
+          <span class="status-pill">Editor</span>
+        </div>
+
+        <div class="panel-body">
+          <div class="field">
+            <div class="field-label-row">
+              <label for="src">Source program</label>
+              <span class="field-hint">Ctrl + Enter to compile</span>
+            </div>
+
+            <textarea
+              id="src"
+              name="source"
+              autocomplete="off"
+              autocapitalize="off"
+              autocorrect="off"
+              spellcheck="false"
+              wrap="off"
+              aria-describedby="source-help source-count"
+              maxlength="65536"
+            >scan
 heal "src/example.py"
 assemble "esp32-sensor"
 forge "openapi"
 bridge "ros2"
-audit "session-1"</textarea><p><label for="apiKey">Approved API key (only held in this page memory):</label> <input id="apiKey" type="password" autocomplete="off" placeholder="X-API-Key" style="min-width:22rem;max-width:100%;padding:.65rem;border:1px solid #b8c8bf;border-radius:8px"> <button id="compile">Compile plan</button> <span id="status" role="status"></span></p><h2>Result</h2><pre id="output">POST /v1/mind/compile sends the source to the local USECT-ZERO service.</pre><script>document.getElementById('compile').addEventListener('click',async()=>{const status=document.getElementById('status'),out=document.getElementById('output');status.textContent='Compiling…';try{const r=await fetch('/v1/mind/compile',{method:'POST',headers:{'Content-Type':'application/json','X-API-Key':document.getElementById('apiKey').value},body:JSON.stringify({source:document.getElementById('src').value})});const d=await r.json();out.textContent=JSON.stringify(d,null,2);status.textContent=r.ok?'Plan generated; no action executed.':'Compile failed.'}catch(e){status.textContent='Unable to reach local USECT-ZERO API.';out.textContent=String(e)}});</script></body></html>
+audit "session-1"</textarea>
+
+            <div class="source-footer" id="source-count" aria-live="polite">
+              <span id="source-stats">0 bytes · 0 lines</span>
+              <span id="source-limit">Maximum source size: 64 KiB</span>
+            </div>
+            <p id="source-help" class="api-hint">
+              Use the supported RV Lang commands. The server remains authoritative
+              for syntax and policy validation.
+            </p>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label for="endpoint">Compile API endpoint</label>
+              <span class="field-hint">Not saved</span>
+            </div>
+            <input
+              id="endpoint"
+              type="text"
+              inputmode="url"
+              spellcheck="false"
+              autocomplete="url"
+              value="/v1/mind/compile"
+              aria-describedby="endpoint-help"
+            >
+            <p id="endpoint-help" class="api-hint">
+              The default endpoint uses the same origin as this page. For a
+              different service, enter its complete HTTPS endpoint.
+            </p>
+          </div>
+
+          <div class="field">
+            <div class="field-label-row">
+              <label for="apiKey">Approved API key</label>
+              <span class="field-hint">Memory only</span>
+            </div>
+            <input
+              id="apiKey"
+              type="password"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              placeholder="Enter the key authorized for mind:compile"
+              aria-describedby="api-key-help"
+            >
+            <p id="api-key-help" class="api-hint">
+              Sent in the X-API-Key header. Never put the key in a URL or source
+              program. Clear the field when finished.
+            </p>
+          </div>
+
+          <div class="actions">
+            <button id="compile" class="primary-button" type="button">
+              Compile plan
+            </button>
+            <button id="clear-output" class="secondary-button" type="button">
+              Clear result
+            </button>
+            <span id="status" class="status" role="status" aria-live="polite">
+              Ready to compile.
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="result-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="result-heading" class="panel-title">Compiler result</h2>
+            <p class="panel-subtitle">Server response · review before use</p>
+          </div>
+          <div class="result-meta">
+            <span id="result-badge" class="status-pill">Not compiled</span>
+          </div>
+        </div>
+
+        <pre
+          id="output"
+          class="result-output"
+          tabindex="0"
+          role="region"
+          aria-label="Compiler output"
+          aria-live="polite"
+        >Ready. Enter an approved API key and compile your RV Lang program. The editor sends source to the configured API; it does not execute the resulting plan.</pre>
+
+        <div class="result-footer">
+          <p id="result-info">No request has been sent.</p>
+          <button id="copy-output" class="secondary-button" type="button">
+            Copy result
+          </button>
+        </div>
+      </section>
+    </section>
+
+    <footer class="bottom-note">
+      <p><strong>Execution safety:</strong> this page only requests compilation. It contains no code path that executes the returned Go source.</p>
+      <p>Source is limited to 64 KiB; compiler syntax, authorization, and policy checks must also be enforced by the USECT-ZERO API.</p>
+    </footer>
+  </main>
+
+  <script>
+    "use strict";
+
+    (() => {
+      const MAX_SOURCE_BYTES = 64 * 1024;
+      const MAX_LINE_BYTES = 8 * 1024;
+      const MAX_LINES = 4096;
+      const MAX_RESPONSE_BYTES = 1024 * 1024;
+      const REQUEST_TIMEOUT_MS = 45000;
+
+      const source = document.getElementById("src");
+      const endpointInput = document.getElementById("endpoint");
+      const apiKeyInput = document.getElementById("apiKey");
+      const compileButton = document.getElementById("compile");
+      const clearButton = document.getElementById("clear-output");
+      const copyButton = document.getElementById("copy-output");
+      const status = document.getElementById("status");
+      const output = document.getElementById("output");
+      const sourceStats = document.getElementById("source-stats");
+      const sourceLimit = document.getElementById("source-limit");
+      const resultBadge = document.getElementById("result-badge");
+      const resultInfo = document.getElementById("result-info");
+
+      let requestInProgress = false;
+
+      function utf8Bytes(value) {
+        return new TextEncoder().encode(value).length;
+      }
+
+      function setStatus(message, kind = "") {
+        status.textContent = message;
+        status.dataset.kind = kind;
+      }
+
+      function setResultBadge(message, kind = "") {
+        resultBadge.textContent = message;
+        resultBadge.dataset.kind = kind;
+      }
+
+      function prettyPrint(value) {
+        if (typeof value === "string") {
+          return value;
+        }
+
+        try {
+          return JSON.stringify(value, null, 2);
+        } catch {
+          return String(value);
+        }
+      }
+
+      function updateSourceStats() {
+        const text = source.value;
+        const size = utf8Bytes(text);
+        const lines = text.length === 0 ? 0 : text.split(/\r\n|\r|\n/).length;
+        const oversizedLines = text
+          .split(/\r\n|\r|\n/)
+          .some((line) => utf8Bytes(line) > MAX_LINE_BYTES);
+
+        sourceStats.textContent =
+          `${size.toLocaleString()} bytes · ${lines.toLocaleString()} lines`;
+
+        const errors = [];
+
+        if (size > MAX_SOURCE_BYTES) {
+          errors.push("source exceeds 64 KiB");
+        }
+
+        if (lines > MAX_LINES) {
+          errors.push("source exceeds 4096 lines");
+        }
+
+        if (oversizedLines) {
+          errors.push("a line exceeds 8 KiB");
+        }
+
+        if (errors.length > 0) {
+          sourceLimit.textContent = errors.join(" · ");
+          sourceLimit.classList.add("over-limit");
+        } else {
+          sourceLimit.textContent =
+            `Maximum source size: ${MAX_SOURCE_BYTES / 1024} KiB`;
+          sourceLimit.classList.remove("over-limit");
+        }
+
+        return {
+          size,
+          lines,
+          oversizedLines,
+          valid:
+            size <= MAX_SOURCE_BYTES &&
+            lines <= MAX_LINES &&
+            !oversizedLines
+        };
+      }
+
+      function resolveEndpoint() {
+        const value = endpointInput.value.trim();
+
+        if (!value) {
+          throw new Error("Enter the compile API endpoint.");
+        }
+
+        let url;
+
+        try {
+          url = new URL(value, window.location.href);
+        } catch {
+          throw new Error("The compile API endpoint is not a valid URL.");
+        }
+
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+          throw new Error("The API endpoint must use HTTP or HTTPS.");
+        }
+
+        if (url.username || url.password || url.hash) {
+          throw new Error(
+            "The API endpoint must not contain credentials or a URL fragment."
+          );
+        }
+
+        if (url.protocol === "http:") {
+          const host = url.hostname.toLowerCase();
+          const isLoopback =
+            host === "localhost" ||
+            host === "127.0.0.1" ||
+            host === "::1" ||
+            host === "[::1]";
+
+          if (!isLoopback) {
+            throw new Error(
+              "Use HTTPS for non-loopback endpoints. API keys must not be sent over unencrypted remote HTTP."
+            );
+          }
+        }
+
+        return url;
+      }
+
+      async function readLimitedResponse(response, maxBytes) {
+        if (!response.body || typeof response.body.getReader !== "function") {
+          const text = await response.text();
+
+          if (utf8Bytes(text) > maxBytes) {
+            throw new Error("The API response exceeds the 1 MiB size limit.");
+          }
+
+          return text;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const chunks = [];
+        let totalBytes = 0;
+
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+
+            if (done) {
+              break;
+            }
+
+            totalBytes += value.byteLength;
+
+            if (totalBytes > maxBytes) {
+              try {
+                await reader.cancel();
+              } catch {
+                // Cancellation is best-effort; the size limit still applies.
+              }
+
+              throw new Error("The API response exceeds the 1 MiB size limit.");
+            }
+
+            chunks.push(decoder.decode(value, { stream: true }));
+          }
+
+          chunks.push(decoder.decode());
+          return chunks.join("");
+        } finally {
+          reader.releaseLock();
+        }
+      }
+
+      function parseResponse(rawText) {
+        if (!rawText.trim()) {
+          return {
+            parsed: null,
+            display: "(The server returned an empty response.)"
+          };
+        }
+
+        try {
+          const parsed = JSON.parse(rawText);
+          return {
+            parsed,
+            display: prettyPrint(parsed)
+          };
+        } catch {
+          return {
+            parsed: null,
+            display: rawText
+          };
+        }
+      }
+
+      function responseMessage(payload, fallback) {
+        if (payload && typeof payload === "object") {
+          for (const field of ["error", "message", "detail"]) {
+            const value = payload[field];
+
+            if (typeof value === "string" && value.trim()) {
+              return value.trim();
+            }
+
+            if (
+              value &&
+              typeof value === "object" &&
+              typeof value.message === "string" &&
+              value.message.trim()
+            ) {
+              return value.message.trim();
+            }
+          }
+        }
+
+        return fallback;
+      }
+
+      async function compilePlan() {
+        if (requestInProgress) {
+          return;
+        }
+
+        const stats = updateSourceStats();
+
+        if (!stats.valid) {
+          setStatus("Fix the source-size or line-limit errors before compiling.", "error");
+          setResultBadge("Input rejected", "error");
+          return;
+        }
+
+        if (!source.value.trim()) {
+          setStatus("Enter an RV Lang program before compiling.", "error");
+          setResultBadge("Input rejected", "error");
+          return;
+        }
+
+        const apiKey = apiKeyInput.value.trim();
+
+        if (!apiKey) {
+          setStatus("Enter an approved API key.", "error");
+          setResultBadge("Key required", "error");
+          apiKeyInput.focus();
+          return;
+        }
+
+        let endpoint;
+
+        try {
+          endpoint = resolveEndpoint();
+        } catch (error) {
+          setStatus(error.message || "Invalid API endpoint.", "error");
+          setResultBadge("Endpoint error", "error");
+          endpointInput.focus();
+          return;
+        }
+
+        const controller = new AbortController();
+        const timeout = window.setTimeout(
+          () => controller.abort(),
+          REQUEST_TIMEOUT_MS
+        );
+
+        requestInProgress = true;
+        compileButton.disabled = true;
+        clearButton.disabled = true;
+        copyButton.disabled = true;
+        compileButton.textContent = "Compiling…";
+
+        setStatus("Sending source to the compiler…", "busy");
+        setResultBadge("Request running");
+        resultInfo.textContent = "Waiting for the API response…";
+        output.textContent = "Compiling the declarative plan. No actions are executed by this page.";
+
+        try {
+          const response = await fetch(endpoint.href, {
+            method: "POST",
+            mode: "cors",
+            credentials: "omit",
+            cache: "no-store",
+            redirect: "error",
+            referrerPolicy: "no-referrer",
+            signal: controller.signal,
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "X-API-Key": apiKey
+            },
+            body: JSON.stringify({
+              source: source.value
+            })
+          });
+
+          const rawText = await readLimitedResponse(
+            response,
+            MAX_RESPONSE_BYTES
+          );
+          const decoded = parseResponse(rawText);
+
+          output.textContent = decoded.display;
+          resultInfo.textContent =
+            `HTTP ${response.status} ${response.statusText || ""}`.trim();
+
+          if (response.ok) {
+            setStatus(
+              "Compilation request completed. Review the returned plan before any separate approval.",
+              "success"
+            );
+            setResultBadge("Response received", "success");
+          } else {
+            setStatus(
+              responseMessage(
+                decoded.parsed,
+                `Compilation failed with HTTP ${response.status}.`
+              ),
+              "error"
+            );
+            setResultBadge("Compile failed", "error");
+          }
+        } catch (error) {
+          let message = "Unable to reach the compile API.";
+
+          if (error && error.name === "AbortError") {
+            message = "The compile request timed out after 45 seconds.";
+          } else if (error instanceof TypeError) {
+            message =
+              "Network or browser access failed. Check the endpoint, service health, HTTPS, and CORS configuration.";
+          } else if (error instanceof Error && error.message) {
+            message = error.message;
+          }
+
+          setStatus(message, "error");
+          setResultBadge("Request failed", "error");
+          resultInfo.textContent = "No successful response was received.";
+          output.textContent = message;
+        } finally {
+          window.clearTimeout(timeout);
+
+          requestInProgress = false;
+          compileButton.disabled = false;
+          clearButton.disabled = false;
+          copyButton.disabled = false;
+          compileButton.textContent = "Compile plan";
+        }
+      }
+
+      compileButton.addEventListener("click", compilePlan);
+
+      clearButton.addEventListener("click", () => {
+        if (requestInProgress) {
+          return;
+        }
+
+        output.textContent = "Result cleared. Your source program is unchanged.";
+        resultInfo.textContent = "No result displayed.";
+        setStatus("Ready to compile.", "");
+        setResultBadge("Not compiled");
+        copyButton.disabled = false;
+      });
+
+      copyButton.addEventListener("click", async () => {
+        const text = output.textContent || "";
+
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus("Compiler result copied to the clipboard.", "success");
+        } catch {
+          setStatus(
+            "Clipboard access was denied by the browser. Select the result text and copy it manually.",
+            "error"
+          );
+        }
+      });
+
+      source.addEventListener("input", updateSourceStats);
+
+      source.addEventListener("keydown", (event) => {
+        if (event.key === "Tab") {
+          event.preventDefault();
+
+          const start = source.selectionStart;
+          const end = source.selectionEnd;
+
+          source.setRangeText("  ", start, end, "end");
+          source.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+
+          if (!compileButton.disabled) {
+            compilePlan();
+          }
+        }
+      });
+
+      // Do not retain the API key after the page is closed or navigated away.
+      window.addEventListener("pagehide", () => {
+        apiKeyInput.value = "";
+      });
+
+      updateSourceStats();
+    })();
+  </script>
+</body>
+</html>
