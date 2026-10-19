@@ -360,9 +360,7 @@ def _ai_sync(
         if requested_hub == "auto" and selected_hub != "auto":
             route_tag = f"[Auto → {legacy.HUB_LABELS.get(selected_hub, selected_hub.title())}]"
             if not assistant_text.startswith("[Auto →"):
-                assistant_text = route_tag + "
-
-" + assistant_text
+                assistant_text = route_tag + "\n\n" + assistant_text
 
         session["messages"].append({"role": "assistant", "content": assistant_text})
         if memory_user_oid is not None:
