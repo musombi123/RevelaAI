@@ -1627,6 +1627,8 @@ FEATURES = load_features()
 
 def process_uploaded_document(
     file_storage,
+    *,
+    prompt: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
 
     if file_storage is None:
@@ -1707,10 +1709,7 @@ def process_uploaded_document(
         )
 
         prompt = (
-            request.form.get(
-                "message",
-                "",
-            )
+            (request.form.get("message", "") if prompt is None else prompt)
             or ""
         ).strip()
 
@@ -1804,10 +1803,7 @@ def process_uploaded_document(
         ]
 
         prompt = (
-            request.form.get(
-                "message",
-                "",
-            )
+            (request.form.get("message", "") if prompt is None else prompt)
             or ""
         ).strip()
 
@@ -1881,10 +1877,7 @@ def process_uploaded_document(
         ]
 
         prompt = (
-            request.form.get(
-                "message",
-                "",
-            )
+            (request.form.get("message", "") if prompt is None else prompt)
             or ""
         ).strip()
 
@@ -2149,6 +2142,8 @@ def generate_image_asset(
     message: str,
     *,
     image_options: dict[str, Any] | None = None,
+    request_base_url: str | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Generate one image/design asset.
@@ -2239,11 +2234,7 @@ def generate_image_asset(
         "request_id=%s | kind=%s | engine=%s | "
         "style=%s | layout=%s | text=%s | "
         "aspect=%s | size=%sx%s",
-        getattr(
-            g,
-            "request_id",
-            None,
-        ),
+        (request_id if request_id is not None else getattr(g, "request_id", None)),
         image_plan.get(
             "kind"
         ),
@@ -2331,8 +2322,13 @@ def generate_image_asset(
 
         asset_type = "png"
 
+    base_url = (
+        str(request_base_url).rstrip("/")
+        if request_base_url
+        else request.host_url.rstrip("/")
+    )
     image_url = (
-        request.host_url.rstrip("/")
+        base_url
         + "/ai/images/"
         + filename
     )
@@ -2341,11 +2337,7 @@ def generate_image_asset(
         "IMAGE GENERATED SUCCESSFULLY | "
         "request_id=%s | file=%s | "
         "asset_type=%s | kind=%s | aspect=%s",
-        getattr(
-            g,
-            "request_id",
-            None,
-        ),
+        (request_id if request_id is not None else getattr(g, "request_id", None)),
         filename,
         asset_type,
         image_plan.get(
