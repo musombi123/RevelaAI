@@ -1,4 +1,4 @@
-"""Import alias for the native FastAPI explainability router."""
-from fastapi_routes.explain import router as explain_bp
+"""Framework-neutral import path for the native explainability router."""
+from fastapi_routes.explain import router
 
-__all__ = ["explain_bp"]
+__all__ = ["router"]
