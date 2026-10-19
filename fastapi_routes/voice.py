@@ -21,6 +21,11 @@ from starlette.concurrency import run_in_threadpool
 
 import app as legacy
 from services.conversation_store import MAX_HISTORY, build_server_context, get_session, save_session
+from services.runtime_config import (
+    AUDIO_DIR, REVELAAI_BUILD_ID, REVELAAI_ENABLE_HF_TTS,
+    cleanup_generated_files, configured_image_model, get_active_text_model,
+    get_active_text_provider,
+)
 
 router = APIRouter(tags=["Voice"])
 logger = logging.getLogger("revelaai.fastapi.voice")
@@ -32,7 +37,7 @@ def _error(code: str, message: str, status_code: int):
         {
             "status": "error",
             "error": {"code": code, "message": message},
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "build_id": REVELAAI_BUILD_ID,
         },
         status_code=status_code,
     )
@@ -74,7 +79,7 @@ def _voice_sync(
     session_id: str,
     request_base_url: str,
 ):
-    legacy.cleanup_generated_files()
+    cleanup_generated_files()
 
     if not audio_bytes:
         return _error("EMPTY_AUDIO", "Uploaded audio is empty.", 400)
@@ -123,8 +128,8 @@ def _voice_sync(
                     "intent": "image_generation",
                     "domain": "image",
                     "provider": "huggingface" if asset_type == "png" else "huggingface-svg",
-                    "model": legacy.configured_image_model() if asset_type == "png" else None,
-                    "build_id": legacy.REVELAAI_BUILD_ID,
+                    "model": configured_image_model() if asset_type == "png" else None,
+                    "build_id": REVELAAI_BUILD_ID,
                     "image_engine": (asset.get("image_plan") or {}).get("engine"),
                     "memory": {
                         "enabled": True,
@@ -180,8 +185,8 @@ def _voice_sync(
                         "intent": "image_generation",
                         "domain": "image",
                         "provider": "huggingface" if asset_type == "png" else "huggingface-svg",
-                        "model": legacy.configured_image_model() if asset_type == "png" else None,
-                        "build_id": legacy.REVELAAI_BUILD_ID,
+                        "model": configured_image_model() if asset_type == "png" else None,
+                        "build_id": REVELAAI_BUILD_ID,
                         "image_engine": (asset.get("image_plan") or {}).get("engine"),
                     },
                 }
@@ -197,8 +202,8 @@ def _voice_sync(
     session["messages"].append({"role": "assistant", "content": response_text})
     save_session(session_id, session)
 
-    provider = ai_result.get("provider", legacy.get_active_text_provider())
-    model = ai_result.get("model", legacy.get_active_text_model())
+    provider = ai_result.get("provider", get_active_text_provider())
+    model = ai_result.get("model", get_active_text_model())
     memory_meta = {
         "enabled": True,
         "type": "conversation",
@@ -207,7 +212,7 @@ def _voice_sync(
         "session_id": session_id,
     }
 
-    if not legacy.REVELAAI_ENABLE_HF_TTS:
+    if not REVELAAI_ENABLE_HF_TTS:
         return {
             "status": "success",
             "heard": heard,
@@ -222,7 +227,7 @@ def _voice_sync(
                 "domain": ai_result.get("domain", "general"),
                 "provider": provider,
                 "model": model,
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
                 "memory": memory_meta,
             },
         }
@@ -249,7 +254,7 @@ def _voice_sync(
                 "domain": ai_result.get("domain", "general"),
                 "provider": provider,
                 "model": model,
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
                 "memory": memory_meta,
             },
         }
@@ -257,7 +262,7 @@ def _voice_sync(
     mime_type = str(os.getenv("HF_TTS_MIME_TYPE", "audio/wav")).strip() or "audio/wav"
     extension = legacy.audio_extension_for_mime(mime_type)
     filename = f"revelaai_voice_{uuid.uuid4().hex}{extension}"
-    output_path = Path(legacy.AUDIO_DIR) / filename
+    output_path = Path(AUDIO_DIR) / filename
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(audio_output)
@@ -277,7 +282,7 @@ def _voice_sync(
                 "domain": ai_result.get("domain", "general"),
                 "provider": provider,
                 "model": model,
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
                 "memory": memory_meta,
             },
         }
@@ -304,7 +309,7 @@ def _voice_sync(
             "domain": ai_result.get("domain", "general"),
             "provider": provider,
             "model": model,
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "build_id": REVELAAI_BUILD_ID,
             "memory": memory_meta,
         },
     }
