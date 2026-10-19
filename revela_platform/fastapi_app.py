@@ -37,6 +37,7 @@ from core_billing.plans import get_plan
 from core_billing.service import enforce_tool_creation_quota, require_active_license
 from core_meter.meter import record_usage, usage_summary
 from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
+from core_foundry.attestation import AttestationError, sign_approved_manifest
 from core_seed.seed_runner import SeedError, SeedRunner
 from core_auditor.ledger import AuditLedger, AuditLedgerError
 from marketplace.service import country_bundle, creator_earnings, safety_screen
@@ -766,9 +767,19 @@ def review_factory_build(build_id: str, body: FactoryReviewInput,
     target_status = "approved" if body.approved else "rejected"
     try:
         manifest = FoundryBuilder.transition_manifest(record.manifest_json, target_status)
-        # Filesystem copy is useful to the owner-local CLI, while SQL remains the
-        # hosted source of truth and survives stateless service restarts.
-        FoundryBuilder().store_manifest(manifest)
+        if body.approved:
+            try:
+                manifest = sign_approved_manifest(manifest, reviewer_id=user_id)
+            except AttestationError as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Factory review signing is not configured; approval was not recorded.",
+                ) from exc
+        # SQL is the hosted source of truth. A local manifest cache is best-effort.
+        try:
+            FoundryBuilder().store_manifest(manifest)
+        except (OSError, FactoryBuildError):
+            pass
     except FactoryBuildError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     record.status = target_status
