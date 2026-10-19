@@ -155,6 +155,29 @@ def test_foundry_manifest_is_hash_checked_and_requires_review(tmp_path):
         builder.get_manifest(proposal["build_id"])
 
 
+def test_factory_approval_attestation_is_signed_and_tamper_evident(tmp_path, monkeypatch):
+    _keypair(monkeypatch)
+    builder = FoundryBuilder(tmp_path / "factories")
+    proposal = builder.build_plan(
+        owner_user_id="signed-owner",
+        name="Signed Factory",
+        description="A factory proposal whose approval is cryptographically attested.",
+        requirements=["Read local records", "Validate schema"],
+    )
+    approved = builder.set_status(proposal["build_id"], "approved")
+    signed = sign_approved_manifest(approved, reviewer_id="trusted-reviewer")
+    builder.store_manifest(signed)
+    from core_foundry.attestation import verify_approval_attestation
+    verified = verify_approval_attestation(builder.get_manifest(proposal["build_id"]))
+    assert verified["review_attestation"]["reviewer_user_id"] == "trusted-reviewer"
+
+    altered = dict(verified)
+    altered["review_attestation"] = dict(verified["review_attestation"])
+    altered["review_attestation"]["signature"] = "A" * 86
+    with pytest.raises(Exception, match="signature verification failed"):
+        verify_approval_attestation(altered)
+
+
 def test_seed_child_is_offline_verifiable_and_tamper_evident(tmp_path, monkeypatch):
     _keypair(monkeypatch)
     builder = FoundryBuilder(tmp_path / "factories")
