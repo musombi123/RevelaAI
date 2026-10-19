@@ -6,9 +6,13 @@ on:
       - "core-two/**"
       - "ai/core_mesh.py"
       - "ai/orchestrator.py"
+      - "ai/unknown_learning.py"
+      - "ai/worldwide_context.py"
+      - "ai/living_brain.py"
       - "services/ai_service.py"
       - "app.py"
       - "tests/test_core_mesh.py"
+      - "tests/test_unknown_learning.py"
       - ".github/workflows/usect-two-ci.yml"
   pull_request:
     paths:
@@ -54,6 +58,6 @@ jobs:
       - name: Install test-only dependencies
         run: python -m pip install "requests>=2.31" "pytest>=8,<9"
       - name: Compile integration modules
-        run: python -m py_compile app.py ai/core_mesh.py ai/orchestrator.py services/ai_service.py
+        run: python -m py_compile app.py ai/core_mesh.py ai/orchestrator.py ai/unknown_learning.py ai/worldwide_context.py ai/living_brain.py services/ai_service.py
       - name: Test Core Mesh routing and safety contracts
-        run: python -m pytest -q tests/test_core_mesh.py
+        run: python -m pytest -q tests/test_core_mesh.py tests/test_unknown_learning.py
