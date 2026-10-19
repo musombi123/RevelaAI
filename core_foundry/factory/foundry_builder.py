@@ -168,7 +168,7 @@ class FoundryBuilder:
         manifest["manifest_sha256"] = digest
         target = self.output_root / build_id / "manifest.json"
         temporary = target.with_name(".manifest.tmp")
-        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
+        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, target)
         return manifest
 
