@@ -82,6 +82,7 @@ from ai.core_mesh import (
     propose_genesis_invention,
     propose_mind_evolution,
 )
+from ai.unknown_learning import attach_genesis_proposal, list_known, save_teaching
 
 
 # =========================================================
@@ -2956,6 +2957,66 @@ def core_mesh_mind_evolve_api():
         app.logger.warning("Core Mesh Mind evolution request failed.")
         return jsonify({"status": "error", "error": {"code": "mind_evolution_failed", "message": "Infinite Mind could not create the proposal."}}), 502
     return jsonify({"status": "success", "data": result}), 202
+
+
+# =========================================================
+# LIVING BRAIN — USER-TAUGHT KNOWLEDGE
+# =========================================================
+
+@app.route("/v1/learn/unknown", methods=["POST"])
+def learn_unknown_api():
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "error": {"code": "invalid_json", "message": "Send topic and steps."}}), 400
+    country = str(request.args.get("country") or body.get("country") or "KE").strip()[:80]
+    language = str(request.args.get("lang") or body.get("language") or "").strip()[:20]
+    try:
+        saved = save_teaching(
+            topic=body.get("topic", ""),
+            user_id=user_id,
+            steps=body.get("steps"),
+            country=country,
+            language=language,
+            photo_hash=str(body.get("photo_hash") or "").strip(),
+            consent_to_share=body.get("consent_to_share") is True,
+            source_request=str(body.get("source_request") or ""),
+        )
+    except PermissionError as exc:
+        return jsonify({"status": "blocked", "error": {"code": "worldwide_guardian_block", "message": str(exc)}}), 403
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": {"code": "invalid_teaching_submission", "message": str(exc)}}), 400
+    except OSError:
+        app.logger.warning("Living Brain could not persist a teaching record.")
+        return jsonify({"status": "error", "error": {"code": "learning_storage_unavailable", "message": "Knowledge could not be saved; no tool proposal was triggered."}}), 503
+
+    result = {"saved": True, **saved, "genesis": {"status": "not_requested"}}
+    if saved.get("genesis_needed") and saved.get("consent_to_share") is True:
+        steps = body.get("steps") if isinstance(body.get("steps"), list) else []
+        short_steps = "; ".join(str(step).strip()[:90] for step in steps[:3] if str(step).strip())
+        demand = (
+            f"Create a safe reviewable tool proposal for {str(body.get('topic') or '')[:140]}. "
+            f"Country {saved.get('country')}; language {saved.get('language')}. "
+            f"Unverified user notes: {short_steps[:170]}. Include a localized supplier directory, quote-required BOM, "
+            "hardware guide, tests and safety gates. Await human merge."
+        )[:495]
+        try:
+            proposal = propose_genesis_invention(demand, country=saved["country"], language=saved["language"])
+            attached = attach_genesis_proposal(saved["topic_key"], proposal)
+            result["genesis"] = {
+                "status": attached.get("status", "await_merge"),
+                "proposal": attached.get("proposal", {}),
+                "human_approval_required": True,
+                "automatic_execution": False,
+                "automatic_merge": False,
+            }
+        except CoreMeshError as exc:
+            result["genesis"] = {"status": "awaiting_genesis", "error_code": exc.code, "retry_allowed": True}
+    elif not saved.get("consent_to_share"):
+        result["genesis"] = {"status": "private_until_explicit_sharing_consent", "proposal_created": False}
+    return jsonify({"status": "accepted", "data": result}), 202
 
 
 # =========================================================
