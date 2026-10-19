@@ -33,6 +33,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/ready" in schema["paths"]
     assert "/capabilities" in schema["paths"]
     assert "/ai/images/{filename}" in schema["paths"]
+    assert "/webhook/whatsapp" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -159,6 +160,41 @@ def test_native_system_routes_keep_response_contracts() -> None:
     ready = client.get("/ready")
     assert ready.status_code in (200, 503)
     assert ready.json()["status"] in ("ready", "degraded")
+
+
+def test_whatsapp_verification_route_preserves_token_boundary() -> None:
+    from fastapi_routes.whatsapp import VERIFY_TOKEN
+
+    verified = client.get(
+        "/webhook/whatsapp",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": VERIFY_TOKEN,
+            "hub.challenge": "migration-challenge",
+        },
+    )
+    assert verified.status_code == 200
+    assert verified.text == "migration-challenge"
+
+    rejected = client.get(
+        "/webhook/whatsapp",
+        params={
+            "hub.mode": "subscribe",
+            "hub.verify_token": "not-the-token",
+            "hub.challenge": "migration-challenge",
+        },
+    )
+    assert rejected.status_code == 403
+    assert rejected.text == "Verification failed"
+
+
+def test_whatsapp_ignores_webhook_notifications_without_messages() -> None:
+    response = client.post(
+        "/webhook/whatsapp",
+        json={"entry": [{"changes": [{"value": {}}]}]},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"status": "no message"}
 
 
 def test_unmigrated_direct_route_still_uses_compatibility_bridge() -> None:
