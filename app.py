@@ -82,7 +82,7 @@ from ai.core_mesh import (
     propose_genesis_invention,
     propose_mind_evolution,
 )
-from ai.unknown_learning import attach_genesis_proposal, list_known, save_teaching
+from ai.unknown_learning import attach_genesis_proposal, list_known, publish_known, save_teaching
 
 
 # =========================================================
@@ -3026,6 +3026,32 @@ def learn_known_api():
         return failure
     records = list_known()
     return jsonify({"status": "success", "data": {"count": len(records), "known": records}})
+
+
+@app.route("/v1/learn/known/<topic_key>/publish", methods=["POST"])
+def publish_known_learning_api(topic_key: str):
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    operator_failure = _require_core_mesh_operator(user_id)
+    if operator_failure:
+        return operator_failure
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "error": {"code": "invalid_json", "message": "Send tool_name, endpoint and merge_commit."}}), 400
+    try:
+        result = publish_known(
+            topic_key=topic_key,
+            operator_id=user_id,
+            tool_name=body.get("tool_name", ""),
+            endpoint=body.get("endpoint", ""),
+            merge_commit=body.get("merge_commit", ""),
+        )
+    except PermissionError as exc:
+        return jsonify({"status": "error", "error": {"code": "learning_consent_required", "message": str(exc)}}), 403
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": {"code": "learning_publish_rejected", "message": str(exc)}}), 422
+    return jsonify({"status": "success", "data": result}), 202
 
 
 # =========================================================
