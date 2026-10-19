@@ -1,0 +1,133 @@
+{
+  "schema_version": "usect-zero.worldwide-failure-db.v1",
+  "status": "curated_advisory_patterns_not_exhaustive",
+  "regions": [
+    "North America",
+    "European Union",
+    "United Kingdom",
+    "China",
+    "Japan",
+    "India",
+    "Australia",
+    "East Africa",
+    "Worldwide"
+  ],
+  "patterns": [
+    {
+      "id": "port_in_use",
+      "category": "runtime",
+      "match_any": [
+        "address already in use",
+        "eaddrinuse"
+      ],
+      "recommendation": "Identify the owning process and intended listener; do not terminate unknown production processes automatically.",
+      "risk": "low"
+    },
+    {
+      "id": "permission_denied",
+      "category": "filesystem",
+      "match_any": [
+        "permission denied",
+        "eacces",
+        "access is denied"
+      ],
+      "recommendation": "Inspect ownership, ACLs and service identity; do not relax permissions recursively.",
+      "risk": "medium"
+    },
+    {
+      "id": "certificate_validation",
+      "category": "network_security",
+      "match_any": [
+        "certificate verify failed",
+        "x509: certificate signed by unknown authority",
+        "certificate has expired"
+      ],
+      "recommendation": "Verify hostname, trusted chain and system clock. Never disable TLS verification as a repair.",
+      "risk": "high"
+    },
+    {
+      "id": "disk_full",
+      "category": "storage",
+      "match_any": [
+        "no space left on device",
+        "disk full",
+        "enospc"
+      ],
+      "recommendation": "Measure usage and identify approved cache/log candidates; preserve audit logs and user data.",
+      "risk": "medium"
+    },
+    {
+      "id": "dns_resolution",
+      "category": "network",
+      "match_any": [
+        "name or service not known",
+        "temporary failure in name resolution",
+        "getaddrinfo failed"
+      ],
+      "recommendation": "Check resolver health, DNS record and network policy; do not bypass network controls.",
+      "risk": "low"
+    },
+    {
+      "id": "dependency_integrity",
+      "category": "supply_chain",
+      "match_any": [
+        "checksum mismatch",
+        "invalid signature",
+        "lockfile out of date"
+      ],
+      "recommendation": "Stop installation and verify publisher signatures and pinned versions before retrying.",
+      "risk": "high"
+    },
+    {
+      "id": "out_of_memory",
+      "category": "runtime",
+      "match_any": [
+        "out of memory",
+        "cannot allocate memory",
+        "oomkilled"
+      ],
+      "recommendation": "Review measured resource use and bounded workload settings.",
+      "risk": "medium"
+    },
+    {
+      "id": "tls_protocol",
+      "category": "network_security",
+      "match_any": [
+        "tls handshake failure",
+        "remote error: tls",
+        "ssl routines"
+      ],
+      "recommendation": "Check TLS compatibility, clock, SNI and certificates; do not fall back to clear text off loopback.",
+      "risk": "high"
+    },
+    {
+      "id": "database_unavailable",
+      "category": "data",
+      "match_any": [
+        "connection refused",
+        "too many connections",
+        "server selection timeout"
+      ],
+      "recommendation": "Check service health, pool use and routing; do not expose database credentials.",
+      "risk": "medium"
+    },
+    {
+      "id": "power_or_voltage",
+      "category": "hardware",
+      "match_any": [
+        "undervoltage",
+        "overvoltage",
+        "brownout",
+        "overcurrent"
+      ],
+      "recommendation": "De-energize equipment and consult exact ratings and qualified electrical personnel.",
+      "risk": "critical"
+    }
+  ],
+  "guardrails": [
+    "Patterns are triage, not root-cause proof.",
+    "Never execute repair solely from a phrase match.",
+    "Preserve backups, signatures and audit records.",
+    "This dataset is not a complete legal code."
+  ]
+}
