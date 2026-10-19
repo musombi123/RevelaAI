@@ -49,38 +49,43 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           app_source = Path("app.py").read_text(encoding="utf-8")
           asgi_source = Path("asgi.py").read_text(encoding="utf-8")
           requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
+          def has_flask_import(source):
+              return any(
+                  line.strip().startswith(("from flask ", "from flask."))
+                  or line.strip() == "import flask"
+                  or line.strip().startswith("import flask ")
+                  for line in source.splitlines()
+              )
+
           assert "from asgi import app" in app_source
           assert "WSGIMiddleware" not in asgi_source
           assert "legacy_flask_app" not in asgi_source
-          assert not re.search(r"^\s*(?:from|import)\s+flask(?:\.|\s)", asgi_source, re.M)
-          assert not re.search(r"^\s*(?:from|import)\s+flask(?:\.|\s)", app_source, re.M)
+          assert not has_flask_import(asgi_source)
+          assert not has_flask_import(app_source)
+
           requirement_lines = [
               line.strip() for line in requirements.splitlines()
               if line.strip() and not line.lstrip().startswith("#")
           ]
           for dependency in ("flask", "flask-cors", "a2wsgi"):
               assert not any(
-                  re.match(rf"^{re.escape(dependency)}(?:[\[\s<>=!~;]|$)", line)
+                  line == dependency or line.startswith((
+                      dependency + " ", dependency + "<", dependency + ">",
+                      dependency + "=", dependency + "[", dependency + "~",
+                      dependency + "!", dependency + ";",
+                  ))
                   for line in requirement_lines
               ), dependency
+
           assert not Path("legacy_flask_app.py").exists()
-          active_roots = (
-              Path("fastapi_routes"),
-              Path("services"),
-              Path("revelai/sci_core"),
-          )
-          for root in active_roots:
+          for root in (Path("fastapi_routes"), Path("services"), Path("revelai/sci_core")):
               for source in root.rglob("*.py"):
-                  code = source.read_text(encoding="utf-8")
-                  assert not re.search(
-                      r"^\s*(?:from|import)\s+flask(?:\.|\s)", code, re.M
-                  ), f"Flask import found in active module: {source}"
+                  assert not has_flask_import(source.read_text(encoding="utf-8")), str(source)
           print("FastAPI-only runtime contract verified.")
           PY
       - name: Run FastAPI gateway regression tests
