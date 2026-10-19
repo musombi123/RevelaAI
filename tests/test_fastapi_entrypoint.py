@@ -25,6 +25,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert schema["info"]["title"] == "RevelaAI API"
     assert "/api/chat" in schema["paths"]
     assert "/api/vision/analyze" in schema["paths"]
+    assert "/voice" in schema["paths"]
     assert "/api/revelaai/v2/brain/chat" in schema["paths"]
     assert "/api/revelaai/hubs/" in schema["paths"]
     assert "/api/core-mesh/dashboard" in schema["paths"]
@@ -150,6 +151,12 @@ def test_primary_chat_still_requires_identity() -> None:
     response = client.post("/api/chat/", json={"message": "hello"})
     assert response.status_code in (401, 503)
     assert response.json().get("status") == "error"
+
+
+def test_native_voice_requires_audio_upload() -> None:
+    response = client.post("/voice")
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "AUDIO_REQUIRED"
 
 
 def test_live_vision_still_requires_identity() -> None:
