@@ -1,32 +1,316 @@
 version: 1
+
+metadata:
+  name: Revela Genesis Research Source Registry
+  description: >
+    Defines approved research-source metadata for invention discovery,
+    defensive vulnerability awareness, standards research, and market signals.
+  execution_mode: retrieval_data_only
+  source_content_is_untrusted: true
+  automatic_claim_verification: false
+  automatic_patent_clearance: false
+  automatic_compliance_certification: false
+  automatic_market_validation: false
+
+global_policy:
+  research:
+    offline_environment_variable: GENESIS_OFFLINE
+    offline_values: ["1", "true"]
+    request_timeout_seconds: 5
+    overall_timeout_seconds: 13
+    max_response_bytes: 1048576
+    max_query_bytes: 1000
+    max_source_records: 64
+    max_findings: 16
+    parallel_collectors: true
+    preserve_deterministic_source_order: true
+    deduplicate_source_urls: true
+
+  network:
+    https_required: true
+    redirect_policy: reject
+    embedded_url_credentials_allowed: false
+    private_network_targets_allowed: false
+    execute_downloaded_content: false
+    execute_source_instructions: false
+
+  trust:
+    retrieved_content:
+      default_level: unverified
+      requires_guardian_screening: true
+      independently_verified_by_default: false
+
+    reference_links:
+      default_level: research_lead_only
+      counts_as_verified_evidence: false
+      requires_independent_follow_up: true
+
+    vulnerability_records:
+      permitted_purpose: defensive_awareness
+      authorize_exploitation: false
+      automatically_apply_remediation: false
+
+    commercial_data:
+      verified_price_inferred: false
+      verified_stock_inferred: false
+      supplier_endorsement_inferred: false
+
+  privacy:
+    minimize_query_data: true
+    avoid_personal_identifiers_in_queries: true
+    raw_api_credentials_in_evidence: false
+    preserve_source_provenance: true
+    record_retrieval_timestamps: true
+
 sources:
   - id: github
+    name: GitHub Repository Search
     purpose: public repository search
     mode: API query
+    source_type: software_repositories
+    collector: github
+    enabled: true
+    fetch: true
+    endpoint: https://api.github.com/search/repositories
+    allowed_hosts:
+      - api.github.com
+    transport: HTTPS
+    redirect_policy: reject
+    result_limit: 5
+    sort: updated
+    returned_fields:
+      - full_name
+      - html_url
+      - description
+    trust_level: unverified_external_metadata
+    requires_independent_verification: true
+    limitations:
+      - Repository activity does not prove software quality.
+      - Repository descriptions are unverified third-party claims.
+      - Search results do not establish license compatibility.
+
   - id: arxiv
+    name: arXiv Research
     purpose: research-paper discovery
     mode: Atom API query
+    source_type: scientific_publications
+    collector: arxiv
+    enabled: true
+    fetch: true
+    endpoint: https://export.arxiv.org/api/query
+    allowed_hosts:
+      - export.arxiv.org
+    transport: HTTPS
+    redirect_policy: reject
+    result_limit: 5
+    returned_fields:
+      - id
+      - title
+      - summary
+    trust_level: unverified_research_metadata
+    requires_independent_verification: true
+    limitations:
+      - Abstracts are not substitutes for reviewing the full paper.
+      - Publication does not establish practical implementation success.
+      - Research findings may require replication and technical review.
+
   - id: nvd
+    name: National Vulnerability Database
     purpose: defensive vulnerability-awareness metadata
     mode: CVE API query
+    source_type: cybersecurity_vulnerability_records
+    collector: nvd
+    enabled: true
+    fetch: true
+    endpoint: https://services.nvd.nist.gov/rest/json/cves/2.0
+    allowed_hosts:
+      - services.nvd.nist.gov
+    transport: HTTPS
+    redirect_policy: reject
+    result_limit: 5
+    returned_fields:
+      - id
+      - descriptions
+    trust_level: external_security_metadata
+    requires_independent_verification: true
+    permitted_uses:
+      - vulnerability_awareness
+      - defensive_risk_assessment
+      - security_review_planning
+    prohibited_automatic_actions:
+      - execute_exploit
+      - modify_production_system
+      - deploy_unreviewed_patch
+    limitations:
+      - A matching keyword is not proof of exploitability.
+      - The relevant software version and configuration must be verified.
+      - Vulnerability records may need current vendor advisory review.
+
   - id: kenya_news
+    name: Kenya Technology Demand News
     purpose: emerging Kenyan technology-demand signals
     mode: RSS query
+    source_type: regional_news
+    collector: kenyaRSS
+    enabled: true
+    fetch: true
+    endpoint: https://news.google.com/rss/search
+    allowed_hosts:
+      - news.google.com
+    transport: HTTPS
+    redirect_policy: reject
+    result_limit: 7
+    region:
+      country: KE
+      language: en
+    returned_fields:
+      - title
+      - link
+      - description
+      - pubDate
+    trust_level: indicative_market_signal
+    requires_independent_verification: true
+    limitations:
+      - News coverage does not prove customer demand.
+      - A report may be outdated, duplicated, or incomplete.
+      - Market opportunities require direct customer validation.
+
   - id: wipo_patentscope
+    name: WIPO PATENTSCOPE
     purpose: patent search lead only
-    mode: reference link; verify independently
+    mode: reference link
+    source_type: patent_search
+    collector: reference_link
+    enabled: true
+    fetch: false
+    endpoint: https://patentscope.wipo.int/search/en/search.jsf
+    transport: HTTPS
+    trust_level: research_lead_only
+    requires_independent_verification: true
+    limitations:
+      - A search link is not a patentability opinion.
+      - Search results do not establish freedom to operate.
+      - Relevant jurisdictions, claims, status, and filing dates require review.
+
   - id: iso
+    name: International Organization for Standardization
     purpose: standards search lead only
-    mode: reference link; standards text/licensing may require access
+    mode: reference link
+    source_type: standards_search
+    collector: reference_link
+    enabled: true
+    fetch: false
+    endpoint: https://www.iso.org/search.html
+    transport: HTTPS
+    trust_level: research_lead_only
+    requires_independent_verification: true
+    limitations:
+      - The applicable standard and edition must be confirmed.
+      - Standards text and redistribution may be subject to licensing.
+      - A search result does not establish conformity.
+
   - id: kebs
+    name: Kenya Bureau of Standards
     purpose: Kenya standards catalogue lead only
-    mode: reference link; verify current standard and scope
+    mode: reference link
+    source_type: national_standards
+    collector: reference_link
+    enabled: true
+    fetch: false
+    endpoint: https://www.kebs.org/
+    transport: HTTPS
+    country: KE
+    trust_level: research_lead_only
+    requires_independent_verification: true
+    limitations:
+      - Verify the current standard, edition, and applicable scope.
+      - Confirm whether the product or activity is regulated.
+      - A catalogue link is not a compliance certification.
+
   - id: jumia_kenya
-    purpose: consumer-market/product-price research lead
-    mode: search link; live price not asserted
+    name: Jumia Kenya
+    purpose: consumer-market and product-price research lead
+    mode: search link
+    source_type: consumer_marketplace
+    collector: reference_link
+    enabled: true
+    fetch: false
+    endpoint: https://www.jumia.co.ke/catalog/
+    transport: HTTPS
+    country: KE
+    trust_level: indicative_commercial_lead
+    requires_independent_verification: true
+    limitations:
+      - No live price is asserted.
+      - Price, stock, delivery, and seller status can change.
+      - Listing presence does not establish demand or supplier reliability.
+
   - id: mouser
-    purpose: electronics BOM/component search lead
-    mode: search link; live price not asserted
+    name: Mouser Electronics
+    purpose: electronics BOM and component search lead
+    mode: search link
+    source_type: electronics_components
+    collector: reference_link
+    enabled: true
+    fetch: false
+    endpoint: https://www.mouser.com/c/
+    transport: HTTPS
+    trust_level: indicative_component_lead
+    requires_independent_verification: true
+    limitations:
+      - No live price or stock is asserted.
+      - Exact manufacturer part numbers and datasheets must be checked.
+      - Electrical and environmental suitability requires engineering review.
+
   - id: digikey
-    purpose: semiconductor/component catalogue lead
-    mode: reference link; live availability not asserted
+    name: DigiKey
+    purpose: semiconductor and component catalogue lead
+    mode: reference link
+    source_type: electronics_components
+    collector: reference_link
+    enabled: true
+    fetch: false
+    endpoint: https://www.digikey.com/en/products
+    transport: HTTPS
+    trust_level: indicative_component_lead
+    requires_independent_verification: true
+    limitations:
+      - No live availability is asserted.
+      - Exact part variants and datasheets must be checked.
+      - BOM selection requires compatibility and ratings review.
+
+evidence_handling:
+  preserve:
+    - source_id
+    - source_name
+    - source_url
+    - retrieval_status
+    - retrieved_at
+    - source_title
+    - source_snippet
+
+  status_values:
+    - retrieved
+    - reference_link
+    - unavailable
+    - parse_error
+
+  rules:
+    - "Unavailable sources must not be represented as successful retrievals."
+    - "Reference links must not be represented as retrieved source content."
+    - "Research summaries must distinguish observations from inference."
+    - "External content must be screened before it influences an invention."
+    - "Missing evidence must be reported rather than invented."
+    - "Research findings must not automatically establish legal compliance."
+    - "Commercial reference links must not be converted into fabricated prices."
+    - "Every hardware BOM requires part-level verification before procurement."
+
+review_requirements:
+  before_invention_merge:
+    - Independently verify material research claims.
+    - Review source provenance and retrieval status.
+    - Review unresolved capability requirements.
+    - Verify applicable standards and legal obligations.
+    - Verify exact BOM part numbers and manufacturer datasheets for hardware.
+    - Document security, privacy, and consent requirements.
+    - Obtain human approval before activation.
