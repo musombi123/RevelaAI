@@ -50,9 +50,9 @@ def test_public_key_request_stays_pending_and_needs_no_platform_admin(monkeypatc
 def test_admin_key_list_fails_closed_before_calling_core(monkeypatch, test_client):
     called = False
 
-    def deny_admin():
+    def deny_admin(authorization=""):
         nonlocal called
-        return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
+        return None, JSONResponse({"status": "error", "code": "admin_required"}, status_code=403)
 
     def fake_core(*args, **kwargs):
         nonlocal called
