@@ -29,6 +29,8 @@ from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
 from fastapi_routes.meta_engineer import router as meta_engineer_router
 from fastapi_routes.vision import router as vision_router
+from fastapi_routes.research import router as research_router
+from fastapi_routes.users import router as users_router
 from fastapi_routes.voice import router as voice_router
 from fastapi_routes.system import router as system_router
 from fastapi_routes.stream import router as stream_router
@@ -94,6 +96,8 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/v1/learn/known",
         "/api/chat",
         "/api/chat/",
+        "/api/research",
+        "/api/users",
         "/api/memory/chat",
         "/api/memory/ideas",
         "/webhook/whatsapp",
@@ -112,6 +116,8 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/v1/learn/",
         "/api/memory/",
         "/api/chat/",
+        "/api/research/",
+        "/api/users/",
         "/api/vision/",
         "/api/revelaai/hubs",
         "/api/revelaai/v2/",
@@ -202,6 +208,8 @@ app.include_router(core_mesh_router)
 app.include_router(memory_router)
 app.include_router(meta_engineer_router)
 app.include_router(chat_router)
+app.include_router(research_router)
+app.include_router(users_router)
 app.include_router(explain_router)
 app.include_router(fastapi_hub_router)
 app.include_router(living_brain_router)
