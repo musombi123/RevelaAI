@@ -39,6 +39,10 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/webhook/whatsapp" in schema["paths"]
     assert "/api/agi/manifest" in schema["paths"]
     assert "/api/agi/status" in schema["paths"]
+    assert "/api/agi/brain-os/status" in schema["paths"]
+    assert "/api/agi/brain-os/outcomes" in schema["paths"]
+    assert "/api/agi/brain-os/heal/actions/simulate" in schema["paths"]
+    assert "/api/agi/brain-os/engineering/guardrails" in schema["paths"]
     assert "/api/sci/shield/dashboard" in schema["paths"]
     assert "/api/meta-engineer/health" in schema["paths"]
     assert "/api/meta-engineer/scan" in schema["paths"]
@@ -263,6 +267,21 @@ def test_meta_engineer_health_keeps_status_contract() -> None:
     assert set(body["checks"]) == {
         "proposal_generator", "sandbox_pytest", "sandbox_memory_monitor", "audit_storage"
     }
+
+
+def test_agi_brain_os_routes_keep_authoritative_admin_gate() -> None:
+    requests = [
+        client.get("/api/agi/brain-os/status"),
+        client.post("/api/agi/brain-os/outcomes", json={"category": "chat", "success": True}),
+        client.post("/api/agi/brain-os/routing/shadow-evaluate", json={}),
+        client.get("/api/agi/brain-os/heal/actions"),
+        client.post("/api/agi/brain-os/heal/actions/simulate", json={}),
+        client.post("/api/agi/brain-os/heal/diagnose"),
+        client.get("/api/agi/brain-os/engineering/guardrails"),
+    ]
+    for response in requests:
+        assert response.status_code == 401
+        assert response.json()["code"] == "authentication_required"
 
 
 def test_sci_core_dashboard_keeps_authoritative_admin_boundary() -> None:
