@@ -41,6 +41,10 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/agi/status" in schema["paths"]
     assert "/api/sci/shield/dashboard" in schema["paths"]
     assert "/api/meta-engineer/health" in schema["paths"]
+    assert "/api/meta-engineer/scan" in schema["paths"]
+    assert "/api/meta-engineer/propose" in schema["paths"]
+    assert "/api/meta-engineer/approve/{idea_id}" in schema["paths"]
+    assert "/api/meta-engineer/pruner/audit" in schema["paths"]
     assert "/api/usect-zero/health" in schema["paths"]
     assert "/api/automation-fabric/health" in schema["paths"]
     assert "/api/automation-fabric/consent" in schema["paths"]
@@ -216,6 +220,19 @@ def test_usect_zero_health_is_explicitly_disabled_without_opt_in(monkeypatch) ->
     assert body["module"] == "usect-zero"
     assert body["enabled"] is False
     assert body["model_free"] is True
+
+
+def test_meta_engineer_privileged_routes_keep_authoritative_admin_gate() -> None:
+    calls = [
+        client.get("/api/meta-engineer/scan"),
+        client.post("/api/meta-engineer/propose", json={"spec": "test"}),
+        client.post("/api/meta-engineer/approve/example-id"),
+        client.get("/api/meta-engineer/audit"),
+        client.post("/api/meta-engineer/pruner/audit"),
+    ]
+    for response in calls:
+        assert response.status_code == 401
+        assert response.json()["code"] == "authentication_required"
 
 
 def test_meta_engineer_health_keeps_status_contract() -> None:
