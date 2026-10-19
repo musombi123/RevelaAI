@@ -4,18 +4,17 @@ import base64
 import io
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 from PIL import Image
 
-from routes import vision_routes
+from asgi import app
+from fastapi_routes import vision as vision_routes
 
 
 @pytest.fixture
 def client():
-    app = Flask(__name__)
-    app.register_blueprint(vision_routes.vision_bp, url_prefix="/api/vision")
-    app.config.update(TESTING=True)
-    return app.test_client()
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -32,34 +31,37 @@ def valid_image_payload():
 def test_vision_requires_authenticated_identity(client, monkeypatch, valid_image_payload):
     monkeypatch.setattr(
         vision_routes,
-        "_require_identity",
-        lambda: (None, None, (jsonify(status="error", code="unauthorized"), 401)),
+        "authenticate_identity",
+        lambda *args, **kwargs: (
+            None, None,
+            JSONResponse({"status": "error", "code": "unauthorized"}, status_code=401),
+        ),
     )
     response = client.post("/api/vision/analyze", json=valid_image_payload)
     assert response.status_code == 401
 
 
 def test_vision_rejects_invalid_image_before_provider_call(client, monkeypatch):
-    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "user-1", None))
+    monkeypatch.setattr(vision_routes, "authenticate_identity", lambda *args, **kwargs: (None, "user-1", None))
     response = client.post("/api/vision/analyze", json={
         "image": "not-base64",
         "mimeType": "image/jpeg",
         "prompt": "Describe this scene.",
     })
     assert response.status_code == 400
-    assert response.get_json()["code"] == "invalid_image"
+    assert response.json()["code"] == "invalid_image"
 
 
 def test_vision_rejects_user_identity_mismatch(client, monkeypatch, valid_image_payload):
-    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "authenticate_identity", lambda *args, **kwargs: (None, "verified-user", None))
     valid_image_payload["userId"] = "different-user"
     response = client.post("/api/vision/analyze", json=valid_image_payload)
     assert response.status_code == 403
-    assert response.get_json()["code"] == "user_identity_mismatch"
+    assert response.json()["code"] == "user_identity_mismatch"
 
 
 def test_vision_sends_ephemeral_frame_to_gemini(client, monkeypatch, valid_image_payload):
-    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "authenticate_identity", lambda *args, **kwargs: (None, "verified-user", None))
     monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
     monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
@@ -88,25 +90,25 @@ def test_vision_sends_ephemeral_frame_to_gemini(client, monkeypatch, valid_image
     monkeypatch.setattr(vision_routes.requests, "post", mock_post)
     response = client.post("/api/vision/analyze", json=valid_image_payload)
     assert response.status_code == 200
-    payload = response.get_json()["data"]
+    payload = response.json()["data"]
     assert payload["reply"] == "A small scene with visible objects."
     assert payload["visionUsed"] is True
     assert payload["mediaRetained"] is False
 
 
 def test_vision_reports_missing_provider_configuration(client, monkeypatch, valid_image_payload):
-    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "authenticate_identity", lambda *args, **kwargs: (None, "verified-user", None))
     monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
     monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "")
     monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
     response = client.post("/api/vision/analyze", json=valid_image_payload)
     assert response.status_code == 503
-    assert response.get_json()["code"] == "vision_provider_not_configured"
+    assert response.json()["code"] == "vision_provider_not_configured"
 
 
 
 def test_vision_maps_gemini_request_errors_to_actionable_message(client, monkeypatch, valid_image_payload):
-    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "authenticate_identity", lambda *args, **kwargs: (None, "verified-user", None))
     monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
     monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
@@ -123,14 +125,14 @@ def test_vision_maps_gemini_request_errors_to_actionable_message(client, monkeyp
     response = client.post("/api/vision/analyze", json=valid_image_payload)
 
     assert response.status_code == 502
-    body = response.get_json()
+    body = response.json()
     assert body["code"] == "vision_provider_request_rejected"
     assert body["providerStatus"] == 400
     assert "Gemini rejected" in body["message"]
 
 
 def test_vision_reports_provider_quota_errors(client, monkeypatch, valid_image_payload):
-    monkeypatch.setattr(vision_routes, "_require_identity", lambda: (None, "verified-user", None))
+    monkeypatch.setattr(vision_routes, "authenticate_identity", lambda *args, **kwargs: (None, "verified-user", None))
     monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
     monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
@@ -147,4 +149,4 @@ def test_vision_reports_provider_quota_errors(client, monkeypatch, valid_image_p
     response = client.post("/api/vision/analyze", json=valid_image_payload)
 
     assert response.status_code == 503
-    assert response.get_json()["code"] == "vision_rate_limited"
+    assert response.json()["code"] == "vision_rate_limited"
