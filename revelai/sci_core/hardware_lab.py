@@ -2,7 +2,6 @@
 DEFENSIVE_ONLY = True
 import json
 from datetime import datetime, timezone
-from flask import jsonify, request
 from .research_engine import is_offensive_query
 from .storage import collection
 
@@ -23,16 +22,3 @@ def build_prototype(domain, spec):
     col.insert_one(record.copy())
     record["storage_backend"] = getattr(col, "backend", "mongodb")
     return record
-
-def register_routes(bp):
-    @bp.post("/lab/prototype")
-    def prototype():
-        body=request.get_json(silent=True) or {}
-        domain=str(body.get("domain") or "").lower()
-        spec=str(body.get("spec") or "").strip()
-        if domain not in {"software","hardware","electronics"}: return jsonify({"error":"domain must be software, hardware, or electronics"}),400
-        if not spec or len(spec)>800: return jsonify({"error":"spec must be 1–800 characters"}),400
-        try: return jsonify(build_prototype(domain,spec)),201
-        except Exception as exc:
-            if getattr(exc,"code",None)==403: return jsonify({"error":"RevelaAI Sci-Core is defensive & civilian research only"}),403
-            return jsonify({"error":"Prototype generation or audit storage failed"}),503
