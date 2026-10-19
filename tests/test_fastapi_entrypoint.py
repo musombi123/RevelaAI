@@ -18,6 +18,18 @@ def test_app_compatibility_facade_preserves_legacy_imports() -> None:
     assert compatibility._SCI_REQUEST_TIMES is legacy_flask_app._SCI_REQUEST_TIMES
 
 
+
+def test_native_core_routers_do_not_import_the_flask_compatibility_module() -> None:
+    from fastapi_routes import ai as ai_routes
+    from fastapi_routes import stream as stream_routes
+    from fastapi_routes import voice as voice_routes
+    from fastapi_routes import system as system_routes
+
+    for module in (ai_routes, stream_routes, voice_routes, system_routes):
+        assert "legacy" not in module.__dict__
+        assert "legacy_flask_app" not in module.__dict__
+
+
 def test_fastapi_health_endpoint_and_security_headers() -> None:
     response = client.get("/_fastapi/health")
     assert response.status_code == 200
