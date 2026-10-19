@@ -19,17 +19,23 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-import legacy_flask_app as legacy
+from ai.ai_client import generate_hf_speech, transcribe_hf_audio
+from ai.intent_router import classify_intent
+from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
+from services.ai_service import detect_capability, process_message
+from services.audio_utils import audio_extension_for_mime
+from services.conversation_store import save_image_conversation
+from services.image_service import generate_image_asset
 from services.conversation_store import MAX_HISTORY, build_server_context, get_session, save_session
 from services.runtime_config import (
-    AUDIO_DIR, REVELAAI_BUILD_ID, REVELAAI_ENABLE_HF_TTS,
+    AUDIO_DIR, REVELAAI_BUILD_ID, REVELAAI_ENABLE_HF_TTS, VOICE_MAX_BYTES,
     cleanup_generated_files, configured_image_model, get_active_text_model,
     get_active_text_provider,
 )
 
 router = APIRouter(tags=["Voice"])
 logger = logging.getLogger("revelaai.fastapi.voice")
-VOICE_MAX_BYTES = int(getattr(legacy, "VOICE_MAX_BYTES", 12 * 1024 * 1024))
+
 
 
 def _error(code: str, message: str, status_code: int):
@@ -44,7 +50,7 @@ def _error(code: str, message: str, status_code: int):
 
 
 def _subject_from_bearer(authorization: str) -> str | None:
-    secret = str(getattr(legacy, "JWT_SECRET", "") or "").strip()
+    secret = JWT_SECRET
     header = str(authorization or "").strip()
     if not secret or not header.startswith("Bearer ") or not header[7:].strip():
         return None
@@ -52,7 +58,7 @@ def _subject_from_bearer(authorization: str) -> str | None:
         claims = jwt.decode(
             header[7:].strip(),
             secret,
-            algorithms=[getattr(legacy, "JWT_ALGORITHM", "HS256")],
+            algorithms=[JWT_ALGORITHM],
             options={"require": ["sub", "iat", "exp"]},
         )
     except jwt.InvalidTokenError:
@@ -87,7 +93,7 @@ def _voice_sync(
         return _error("AUDIO_TOO_LARGE", "Audio exceeds the maximum allowed size.", 413)
 
     try:
-        transcription = legacy.transcribe_hf_audio(audio_bytes)
+        transcription = transcribe_hf_audio(audio_bytes)
     except Exception:
         logger.exception("Voice transcription failed")
         return _error("VOICE_TRANSCRIPTION_FAILED", "Voice transcription is temporarily unavailable.", 502)
@@ -100,12 +106,12 @@ def _voice_sync(
 
     session = get_session(session_id)
     previous_context = build_server_context(session)
-    intent = legacy.classify_intent(heard)
-    capability = legacy.detect_capability(heard, intent=intent)
+    intent = classify_intent(heard)
+    capability = detect_capability(heard, intent=intent)
     if capability == "image_generation":
         intent = "image_generation"
         try:
-            asset = legacy.generate_image_asset(heard)
+            asset = generate_image_asset(heard, request_base_url=request_base_url)
             session["messages"].append({"role": "user", "content": heard})
             session["messages"].append({
                 "role": "assistant",
@@ -149,7 +155,7 @@ def _voice_sync(
     session["messages"] = session["messages"][-MAX_HISTORY:]
 
     try:
-        ai_result = legacy.process_message(
+        ai_result = process_message(
             message=heard,
             context=previous_context,
             intent=intent,
@@ -167,8 +173,8 @@ def _voice_sync(
         action_type = str(action.get("type") or "").strip().lower()
         if action_type == "image_generation":
             try:
-                asset = legacy.generate_image_asset(heard)
-                legacy.save_image_conversation(session_id, session, heard, success=True)
+                asset = generate_image_asset(heard, request_base_url=request_base_url)
+                save_image_conversation(session_id, session, heard, success=True)
                 asset_type = str(asset.get("asset_type") or "png")
                 return {
                     "status": "success",
@@ -233,7 +239,7 @@ def _voice_sync(
         }
 
     try:
-        audio_output = legacy.generate_hf_speech(response_text)
+        audio_output = generate_hf_speech(response_text)
     except Exception:
         logger.exception("Voice synthesis failed")
         audio_output = None
@@ -260,7 +266,7 @@ def _voice_sync(
         }
 
     mime_type = str(os.getenv("HF_TTS_MIME_TYPE", "audio/wav")).strip() or "audio/wav"
-    extension = legacy.audio_extension_for_mime(mime_type)
+    extension = audio_extension_for_mime(mime_type)
     filename = f"revelaai_voice_{uuid.uuid4().hex}{extension}"
     output_path = Path(AUDIO_DIR) / filename
     try:
