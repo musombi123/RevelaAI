@@ -153,23 +153,61 @@ class FoundryBuilder:
             "manifest": manifest,
         }
 
-    def set_status(self, build_id: str, status: str) -> dict[str, Any]:
-        """Update a build's review state and re-hash the manifest."""
+    @staticmethod
+    def validate_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+        """Validate a manifest from a file or database without trusting its storage."""
+        if not isinstance(manifest, dict):
+            raise FactoryBuildError("Factory manifest must be an object.")
+        payload = dict(manifest)
+        build_id = payload.get("build_id")
+        if not isinstance(build_id, str) or not re.fullmatch(r"fab_[a-f0-9]{24}", build_id):
+            raise FactoryBuildError("Invalid factory build identifier.")
+        claimed_hash = payload.pop("manifest_sha256", None)
+        actual_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if not isinstance(claimed_hash, str) or not hmac_compare(claimed_hash, actual_hash):
+            raise FactoryBuildError("Factory manifest integrity check failed.")
+        payload["manifest_sha256"] = claimed_hash
+        return payload
+
+    @classmethod
+    def transition_manifest(cls, manifest: dict[str, Any], status: str) -> dict[str, Any]:
+        """Apply a review decision to a verified manifest and recalculate its digest."""
         if status not in {"await_merge", "approved", "rejected"}:
             raise FactoryBuildError("Unsupported review status.")
-        manifest = self.get_manifest(build_id)
-        if manifest.get("status") == "rejected" and status != "rejected":
+        verified = cls.validate_manifest(manifest)
+        current = verified.get("status")
+        if current == "rejected" and status != "rejected":
             raise FactoryBuildError("Rejected factory proposals cannot be reactivated by this method.")
-        if manifest.get("status") == "approved" and status == "await_merge":
+        if current == "approved" and status == "await_merge":
             raise FactoryBuildError("Approved factory proposals cannot be demoted to draft.")
-        manifest["status"] = status
-        manifest.pop("manifest_sha256", None)
-        digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        manifest["manifest_sha256"] = digest
-        target = self.output_root / build_id / "manifest.json"
+        payload = dict(verified)
+        payload.pop("manifest_sha256", None)
+        payload["status"] = status
+        payload["manifest_sha256"] = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return payload
+
+    def store_manifest(self, manifest: dict[str, Any]) -> Path:
+        """Persist an already-validated manifest under its deterministic build directory."""
+        verified = self.validate_manifest(manifest)
+        build_id = verified["build_id"]
+        target_dir = (self.output_root / build_id).resolve()
+        if self.output_root.resolve() not in target_dir.parents:
+            raise FactoryBuildError("Factory manifest path is outside the factory root.")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / "manifest.json"
         temporary = target.with_name(".manifest.tmp")
-        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(json.dumps(verified, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, target)
+        return target
+
+    def set_status(self, build_id: str, status: str) -> dict[str, Any]:
+        """Update a build's review state and re-hash the manifest."""
+        manifest = self.transition_manifest(self.get_manifest(build_id), status)
+        self.store_manifest(manifest)
         return manifest
 
     def get_manifest(self, build_id: str) -> dict[str, Any]:
@@ -184,12 +222,7 @@ class FoundryBuilder:
             raise FactoryBuildError("Factory build not found.") from exc
         except (OSError, json.JSONDecodeError) as exc:
             raise FactoryBuildError("Factory manifest is unreadable.") from exc
-        claimed_hash = manifest.pop("manifest_sha256", None)
-        actual_hash = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        manifest["manifest_sha256"] = claimed_hash
-        if not isinstance(claimed_hash, str) or not hmac_compare(claimed_hash, actual_hash):
-            raise FactoryBuildError("Factory manifest integrity check failed.")
-        return manifest
+        return self.validate_manifest(manifest)
 
 
 def hmac_compare(left: str, right: str) -> bool:
