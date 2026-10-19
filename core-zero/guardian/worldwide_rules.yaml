@@ -1,0 +1,19 @@
+version: 1
+mode: fail_closed
+core_law: "Protect, not destroy. Apply the strictest relevant safety and privacy controls; require human review for meaningful system changes."
+coverage:
+  status: "awareness index, not a complete legal compliance engine"
+  jurisdictions:
+    - "Kenya: Data Protection Act, 2019 and applicable KEBS/product requirements"
+    - "European Union: GDPR, applicable national law and product-safety requirements"
+    - "United States: applicable federal, state, sector-specific and local requirements"
+    - "United Kingdom: UK GDPR and applicable product-safety requirements"
+    - "China: applicable personal-information, cybersecurity and product rules"
+    - "Japan: applicable privacy, electrical and product-safety rules"
+    - "Other countries: local law must be independently researched and verified"
+block_categories: [weapons, warfare, explosives, malware_and_credential_theft, covert_surveillance, non_consensual_tracking, privacy_violations, unauthorized_safety_control_bypass, illegal_operation]
+required_gates: [deterministic_guardian_screening, candidate_validation, provenance_and_integrity_checks, professional_review_for_hazardous_hardware, human_approval, explicit_merge]
+notes:
+  - "This policy index is not legal advice or proof of universal compliance."
+  - "Pattern screening is layered defense, not perfect semantic understanding."
+  - "No automatic hardware actuation, deployment, or merge."
