@@ -842,12 +842,18 @@ def verify_seed(seed_id: str, user_id: str = Depends(authenticated_user),
         raise HTTPException(status_code=404, detail="Seeded child not found")
     if record.owner_user_id != user_id and not _reviewer(user_id):
         raise HTTPException(status_code=403, detail="Seeded child belongs to another user")
-    now = int(datetime.now(timezone.utc).timestamp())
+    try:
+        local_lease = SeedRunner().verify_child_offline(seed_id)
+    except SeedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "seed_id": record.id, "status": record.status, "license_id": record.license_id,
         "offline_until": record.offline_until,
-        "offline_authorized": now <= record.offline_until and record.status == "seeded_review_required",
-        "note": "This endpoint verifies the registered lease status; local child runtime must also verify the signed token offline.",
+        "offline_authorized": bool(local_lease["offline_authorized"])
+            and record.offline_until == local_lease["offline_until"]
+            and record.status == "seeded_review_required",
+        "signed_lease_verified": True,
+        "note": "The child bundle's hash and signed token were verified. The declarative bundle still does not enable arbitrary code execution.",
     }
 
 
