@@ -42,6 +42,9 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/sci/shield/dashboard" in schema["paths"]
     assert "/api/meta-engineer/health" in schema["paths"]
     assert "/api/usect-zero/health" in schema["paths"]
+    assert "/api/automation-fabric/health" in schema["paths"]
+    assert "/api/automation-fabric/consent" in schema["paths"]
+    assert "/api/automation-fabric/execute" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -183,6 +186,25 @@ def test_native_system_routes_keep_response_contracts() -> None:
     ready = client.get("/ready")
     assert ready.status_code in (200, 503)
     assert ready.json()["status"] in ("ready", "degraded")
+
+
+def test_automation_fabric_health_and_privileged_routes() -> None:
+    health = client.get("/api/automation-fabric/health")
+    assert health.status_code == 200
+    assert health.json()["module"] == "revelaai-automation-fabric"
+    assert health.json()["generated_code_autorun"] is False
+    assert health.json()["hardware_actuation"] is False
+
+    tools = client.get("/api/automation-fabric/tools")
+    assert tools.status_code in (401, 503)
+    assert tools.json().get("status") == "error"
+
+    consent = client.post(
+        "/api/automation-fabric/consent",
+        json={"accepted": True, "scopes": ["read"]},
+    )
+    assert consent.status_code in (401, 503)
+    assert consent.json().get("status") == "error"
 
 
 def test_usect_zero_health_is_explicitly_disabled_without_opt_in(monkeypatch) -> None:
