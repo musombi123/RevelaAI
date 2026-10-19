@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from a2wsgi import WSGIMiddleware
 
 from fastapi_routes.agi import router as agi_router
+from fastapi_routes.ai import router as ai_router
 from fastapi_routes.automation_fabric import router as automation_fabric_router
 from fastapi_routes.sci_core import router as sci_core_router
 from fastapi_routes.chat import router as chat_router
@@ -96,6 +97,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/api/memory/ideas",
         "/webhook/whatsapp",
         "/voice",
+        "/ai",
         "/api/vision/analyze",
         "/api/sci/shield/dashboard",
         "/api/automation-fabric/health",
@@ -188,6 +190,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 # Native FastAPI routes precede the catch-all WSGI mount so these endpoints no
 # longer execute through Flask.
 app.include_router(system_router)
+app.include_router(ai_router)
 app.include_router(agi_router)
 app.include_router(sci_core_router)
 app.include_router(usect_zero_router)
