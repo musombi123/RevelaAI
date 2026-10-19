@@ -298,7 +298,7 @@ def _public_proposal(payload: dict) -> dict:
     return result
 
 
-def propose_genesis_invention(demand: str) -> dict:
+def propose_genesis_invention(demand: str, country: str = "KE", language: str = "") -> dict:
     demand = str(demand or "").strip()
     if not 3 <= len(demand) <= 500:
         raise CoreMeshError("Demand must contain between 3 and 500 characters.", status_code=400, code="invalid_invention_demand")
@@ -309,7 +309,7 @@ def propose_genesis_invention(demand: str) -> dict:
         mind_base,
         "/v1/genesis/invent",
         method="POST",
-        payload={"demand": demand},
+        payload={"demand": demand, "country": str(country or "KE")[:80], "language": str(language or "")[:20]},
         headers=_upstream_headers(include_genesis=True, mutation=True),
         timeout=40.0,
     )

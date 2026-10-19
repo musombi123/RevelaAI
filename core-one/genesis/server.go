@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"revela-genesis.local/core-one/rvx"
+	"revela-genesis.local/core-one/endpoint"
 )
 
 type Server struct{ Engine *Engine }
