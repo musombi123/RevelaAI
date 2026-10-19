@@ -13,6 +13,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 import app as legacy
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
+from services.runtime_config import (
+    REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, configured_image_model,
+    get_active_text_model, get_active_text_provider,
+)
 
 router = APIRouter(tags=["AI Streaming"])
 logger = logging.getLogger("revelaai.fastapi.stream")
@@ -71,11 +75,11 @@ def _image_payload(message: str, asset: dict[str, Any], session_id: str, memory_
         "sources": [],
         "meta": {
             "provider": "huggingface" if asset_type == "png" else "huggingface-svg",
-            "model": legacy.configured_image_model() if asset_type == "png" else None,
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "model": configured_image_model() if asset_type == "png" else None,
+            "build_id": REVELAAI_BUILD_ID,
             "intent": "image_generation",
             "image_engine": plan.get("engine"),
-            "engine_version": legacy.REVELAAI_IMAGE_ENGINE_VERSION,
+            "engine_version": REVELAAI_IMAGE_ENGINE_VERSION,
             "memory": {
                 "enabled": True,
                 "type": "conversation",
@@ -235,10 +239,10 @@ async def ai_stream(request: Request):
             metadata = {
                 "intent": ai_result.get("intent", intent),
                 "domain": ai_result.get("domain", "general"),
-                "provider": ai_result.get("provider", legacy.get_active_text_provider()),
-                "model": ai_result.get("model", legacy.get_active_text_model()),
+                "provider": ai_result.get("provider", get_active_text_provider()),
+                "model": ai_result.get("model", get_active_text_model()),
                 "capability": ai_result.get("capability", "text"),
-                "build_id": legacy.REVELAAI_BUILD_ID,
+                "build_id": REVELAAI_BUILD_ID,
                 "memory": {
                     "enabled": True,
                     "type": "conversation",
