@@ -28,6 +28,7 @@ from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
 from fastapi_routes.meta_engineer import router as meta_engineer_router
 from fastapi_routes.vision import router as vision_router
+from fastapi_routes.voice import router as voice_router
 from fastapi_routes.system import router as system_router
 from fastapi_routes.usect_zero import router as usect_zero_router
 from fastapi_routes.whatsapp import router as whatsapp_router
@@ -94,6 +95,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/api/memory/chat",
         "/api/memory/ideas",
         "/webhook/whatsapp",
+        "/voice",
         "/api/vision/analyze",
         "/api/sci/shield/dashboard",
         "/api/automation-fabric/health",
@@ -199,6 +201,7 @@ app.include_router(fastapi_hub_router)
 app.include_router(living_brain_router)
 app.include_router(vision_router)
 app.include_router(whatsapp_router)
+app.include_router(voice_router)
 
 # Temporary bridge: remaining Flask endpoints retain their established contract.
 app.mount("/", WSGIMiddleware(legacy_flask_app), name="legacy-flask")
