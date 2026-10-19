@@ -29,6 +29,10 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/core-mesh/dashboard" in schema["paths"]
     assert "/api/core-mesh/genesis/invent" in schema["paths"]
     assert "/v1/learn/known" in schema["paths"]
+    assert "/health" in schema["paths"]
+    assert "/ready" in schema["paths"]
+    assert "/capabilities" in schema["paths"]
+    assert "/ai/images/{filename}" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -134,11 +138,33 @@ def test_core_mesh_routes_keep_authentication_boundary() -> None:
     assert known.json()["error"]["code"] == "authentication_required"
 
 
-def test_legacy_health_route_remains_available_through_wsgi_bridge() -> None:
-    # This route has not been ported yet and should still work through the
-    # compatibility mount with the old response and response headers.
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+def test_native_system_routes_keep_response_contracts() -> None:
+    root = client.get("/")
+    assert root.status_code == 200
+    assert root.json()["service"] == "revelaai"
+    assert root.json()["message"] == "RevelaAI is live."
+
+    capabilities = client.get("/capabilities")
+    assert capabilities.status_code == 200
+    body = capabilities.json()
+    assert body["status"] == "success"
+    assert {"text", "image_generation", "online_research", "pdf", "voice", "ecosystem"} <= set(body["capabilities"])
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+    assert health.headers.get("X-Request-ID")
+    assert health.headers.get("X-Content-Type-Options") == "nosniff"
+
+    ready = client.get("/ready")
+    assert ready.status_code in (200, 503)
+    assert ready.json()["status"] in ("ready", "degraded")
+
+
+def test_unmigrated_direct_route_still_uses_compatibility_bridge() -> None:
+    # GET /voice is not an implemented Flask method. A 405 demonstrates that
+    # requests outside the native route set still reach the legacy adapter.
+    response = client.get("/voice")
+    assert response.status_code == 405
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
