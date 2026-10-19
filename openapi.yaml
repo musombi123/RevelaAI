@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: RevelaAI Living Brain Learning API
-  version: 1.0.0
+  title: RevelaAI Platform and Living Brain API
+  version: 1.1.0
   description: |
     Authenticated endpoints for submitting user-taught knowledge and retrieving
     human-reviewed shared learning. Born in Nairobi, Built for Worldwide.
@@ -115,6 +115,232 @@ paths:
           description: Operator permission or explicit sharing consent missing.
         '422':
           description: Topic not ready or input validation failed.
+  /v1/billing/plans:
+    get:
+      operationId: getBillingPlans
+      summary: List USD platform plans and quotas
+      responses:
+        '200':
+          description: Current plan catalogue
+  /v1/billing/buy:
+    post:
+      operationId: createBillingCheckout
+      summary: Create a Stripe subscription checkout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan, country]
+              properties:
+                plan:
+                  type: string
+                  enum: [local, pro, enterprise]
+                country:
+                  type: string
+                  default: KE
+      responses:
+        '202':
+          description: Checkout created; no license until a verified payment webhook confirms settlement
+        '401':
+          description: Authentication required
+        '503':
+          description: Payment provider not configured
+  /v1/billing/license/{intent_id}:
+    get:
+      operationId: retrievePaidLicense
+      summary: Issue or rotate a license after confirmed payment
+      parameters:
+        - name: intent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Signed platform license
+        '409':
+          description: Payment not confirmed
+  /v1/billing/verify:
+    get:
+      operationId: verifyLicenseCompatibility
+      deprecated: true
+      summary: Verify a signed license (POST preferred; query strings may be logged)
+      parameters:
+        - name: license_key
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Valid or invalid license result
+    post:
+      operationId: verifyLicense
+      summary: Verify a signed license without placing it in the URL
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [license_key]
+              properties:
+                license_key:
+                  type: string
+      responses:
+        '200':
+          description: Valid or invalid license result
+  /v1/billing/webhooks/stripe:
+    post:
+      operationId: stripePaymentWebhook
+      summary: Verify and process Stripe payment/subscription webhooks
+      description: Requires a valid Stripe-Signature header; never trust the browser success redirect.
+      responses:
+        '200':
+          description: Event accepted or already processed
+        '400':
+          description: Invalid webhook signature or event
+  /v1/meter/usage:
+    get:
+      operationId: getMeterUsage
+      summary: Get authenticated account usage by country and tool
+      parameters:
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+            default: KE
+      responses:
+        '200':
+          description: Usage totals and reviewed cost-savings only
+        '403':
+          description: Caller cannot view another account
+  /v1/marketplace/search:
+    get:
+      operationId: searchGlobalMarketplace
+      summary: Search reviewed tools with country BOM and language guide selection
+      parameters:
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+            default: KE
+        - name: industry
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: lang
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Published tools and available localized assets
+  /v1/marketplace/publish:
+    post:
+      operationId: submitMarketplaceTool
+      summary: Submit a licensed tool for human review
+      parameters:
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool_id, name, description, endpoint, price_usd_cents]
+              properties:
+                tool_id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                endpoint:
+                  type: string
+                price_usd_cents:
+                  type: integer
+                country_origin:
+                  type: string
+                  default: KE
+                bom_by_country:
+                  type: object
+                guides_by_language:
+                  type: object
+      responses:
+        '202':
+          description: Listing saved as pending_review
+        '402':
+          description: Valid license required
+  /v1/marketplace/buy:
+    post:
+      operationId: createMarketplaceCheckout
+      summary: Create a one-time checkout for a reviewed listing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool_id, license_key, buyer_country]
+              properties:
+                tool_id:
+                  type: string
+                license_key:
+                  type: string
+                buyer_country:
+                  type: string
+                  default: KE
+      responses:
+        '202':
+          description: Checkout created; delivery follows verified payment
+        '402':
+          description: Valid platform license required
+        '503':
+          description: Payment provider not configured
+  /v1/marketplace/purchases/{purchase_id}:
+    get:
+      operationId: deliverMarketplacePurchase
+      summary: Get the localized tool bundle after payment confirmation
+      parameters:
+        - name: purchase_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tool endpoint, available country BOM and guide
+        '409':
+          description: Payment not confirmed
+  /v1/marketplace/earnings/me:
+    get:
+      operationId: getCreatorEarnings
+      summary: Read creator earnings and pending payout balance
+      responses:
+        '200':
+          description: Paid sales with creator/platform split; payouts may remain pending
+
 components:
   securitySchemes:
     RevelaCodeBearer:
