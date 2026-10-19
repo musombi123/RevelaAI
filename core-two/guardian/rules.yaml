@@ -1,0 +1,38 @@
+version: 1
+mode: fail_closed
+core_law: "Protect, not destroy. Stage proposals; never auto-merge or execute generated code."
+block_categories:
+  - weapons_and_weapon_efficiency
+  - warfare_and_explosives
+  - malware_and_credential_theft
+  - covert_surveillance_and_privacy_violations
+  - evasion_of_safety_controls
+  - unauthorized_access_or_destruction
+  - illegal_operations_and_evasion_of_law
+mandatory_checks:
+  - screen the objective before creating mutation directories
+  - use Core-One Guardian as a mandatory dependency
+  - check core-zero/guardian/rules.yaml when present; if present but invalid, fail closed
+  - if Core-Zero has no dedicated Guardian file, report the gap and use restrictive local controls plus Core-One Guardian
+  - run the Core-Zero RV Lang and radar library integration probes
+  - require a measured improvement and a verified RVX artifact-protection proposal
+  - never execute candidate code, install hardware, or merge into existing cores
+  - retain only evidence-backed proposals awaiting explicit human review
+  - mark Kenya-law, KEBS, and Data Protection compliance as pending human review; do not assert certification without evidence
+  - never store provider secrets or cryptographic keys in source control
+extra_terms:
+  - weapon search
+  - faster weapon
+  - weapon efficiency
+  - explosive optimization
+  - credential theft
+  - ransomware
+  - spyware
+  - disable guardian
+  - disable safety controls
+  - delete audit logs
+  - illegal operation
+  - evade law
+  - bypass law
+  - violate privacy
+  - covert surveillance

@@ -1,0 +1,10 @@
+{
+  "id": "canonical-spec-cache",
+  "category": "spec_cache",
+  "purpose": "Fingerprint canonical immutable specification data so exact repeats can be identified",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

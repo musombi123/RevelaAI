@@ -15,6 +15,8 @@ type Demand struct {
 	CreatedAt time.Time `json:"created_at"`
 	Status    string    `json:"status"`
 	Error     string    `json:"error,omitempty"`
+	Country   string    `json:"country,omitempty"`
+	Language  string    `json:"language,omitempty"`
 }
 
 type ResearchSource struct {
@@ -47,6 +49,16 @@ type ToolSpec struct {
 	Outputs            []string `json:"outputs"`
 	Safeguards         []string `json:"safeguards"`
 	NeedsHardwareGuide bool     `json:"needs_hardware_guide"`
+	Country string `json:"country,omitempty"`
+	CountryName string `json:"country_name,omitempty"`
+	Language string `json:"language,omitempty"`
+	Currency string `json:"currency,omitempty"`
+	SupplierDirectory []string `json:"supplier_directory,omitempty"`
+	NominalACVoltage int `json:"nominal_ac_voltage_v,omitempty"`
+	FrequencyHz string `json:"frequency_hz,omitempty"`
+	LocalAdaptations []string `json:"local_adaptations,omitempty"`
+	LegalFrameworks []string `json:"legal_framework_awareness,omitempty"`
+	BOM map[string]any `json:"bom,omitempty"`
 	ModelAssisted      bool     `json:"model_assisted"`
 	ModelNote          string   `json:"model_note,omitempty"`
 }
@@ -62,6 +74,12 @@ type Invention struct {
 	Model     string           `json:"model"`
 	Category  string           `json:"category"`
 	Industry  string           `json:"industry"`
+	Country string `json:"country,omitempty"`
+	CountryName string `json:"country_name,omitempty"`
+	Language string `json:"language,omitempty"`
+	Currency string `json:"currency,omitempty"`
+	SupplierDirectory []string `json:"supplier_directory,omitempty"`
+	BOM map[string]any `json:"bom,omitempty"`
 	Files     []string         `json:"files"`
 	Evidence          ResearchEvidence `json:"evidence"`
 	Summary           string           `json:"summary"`

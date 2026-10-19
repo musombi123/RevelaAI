@@ -1,0 +1,1 @@
+{"at":"2026-10-19T00:00:00Z","stage":"acceptance_fixture","input_sha256":"cb758e5a71befc82fc5aba9a628fb4b96ddb7e0abeb4d60f1d9fcc6919501782","reason":"Synthetic acceptance check: weapon-efficiency evolution must be blocked before mutation files are created."}

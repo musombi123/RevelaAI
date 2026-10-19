@@ -1,0 +1,10 @@
+{
+  "id": "repository-path-index",
+  "category": "path_index",
+  "purpose": "Create a read-only index for deterministic repository path lookups",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

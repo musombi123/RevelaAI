@@ -1,0 +1,15 @@
+{
+  "schema_version":"usect-two.research-evidence.v1",
+  "observed_at":"2026-10-18T23:02:33Z",
+  "repository_snapshot":{"repository":"musombi123/RevelaAI","branch_baseline":"main","baseline_commit":"40dc1caf07419ad14f771be88fc238baa51d4480","source":"GitHub tree scan before Core-Two branch changes"},
+  "core_zero":{"exists":true,"module":"usect-zero.local/core-zero","imports":["usect-zero.local/core-zero/mind","usect-zero.local/core-zero/radar"],"guardian_rules_present":false},
+  "core_one":{"exists":true,"module":"revela-genesis.local/core-one","imports":["revela-genesis.local/core-one/genesis"],"observed_production_inventions":0,"inventions_path_observed":["core-one/inventions/README.md"],"created_library_source_files_observed":0},
+  "production_invention_count":0,
+  "average_time_to_invent_ms":null,
+  "average_bom_cost_kes":null,
+  "average_human_merge_time_ms":null,
+  "data_quality":{"historical_time_measurements_available":false,"verified_bom_costs_available":false,"zero_guardian_policy_file_present":false,"synthetic_fixture_counted_as_production_tool":false},
+  "synthetic_replay":{"fixture_id":"offline-vault-graph-replay-v1","source":"core-two/testdata/inventions/offline_vault/replay.json","baseline_ns_per_round":2656694,"candidate_ns_per_round":421937,"speedup_percent":529.64,"throughput_ratio":6.3,"replay_rounds":5,"synthetic_only":true,"scope":"graph traversal phase only; not end-to-end invention latency"},
+  "repository_inventory_snapshot":{"baseline_tree_entries_observed":318,"complete_github_tree_response":true,"zero_openapi_path":"core-zero/openapi.yaml","one_openapi_path":"core-one/openapi.yaml","root_openapi_path_present":false,"tracked_changelog_or_audit_log_paths_found":0,"note":"Runtime Mirror inventories the local full checkout, including ignored audit paths; values above are the baseline tracked Git tree scan."},
+  "note":"No historic production invention receipts were present. Unknown time, KES price, merge time, and safety scores remain null; the synthetic offline_vault benchmark is not counted as a Core-One tool or as verified savings. The absence of core-zero/guardian/rules.yaml is an integration gap, not a policy that Mind claims to have imported."
+}

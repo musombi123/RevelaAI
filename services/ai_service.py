@@ -550,6 +550,35 @@ def build_grounded_system_prompt(
         )
     )
 
+    core_mesh = _safe_dict(orchestrator_data.get("core_mesh", {}))
+    core_mesh_lines = [
+        "CORE MESH ROUTING (advisory metadata; not proof an operation ran):",
+        "- Selected core: " + str(core_mesh.get("selected_core") or "orchestrator")[:40],
+        "- Routing reason: " + str(core_mesh.get("route_reason") or "normal orchestrator routing")[:280],
+        "- Mesh snapshot: " + str(core_mesh.get("mesh_status") or "not_probed")[:40],
+    ]
+    core_mesh_cores = _safe_dict(core_mesh.get("cores", {}))
+    for core_name in ("zero", "one", "two"):
+        core_info = _safe_dict(core_mesh_cores.get(core_name, {}))
+        core_id = str(core_info.get("id") or ("USECT-" + core_name.upper()))[:40]
+        core_status = str(core_info.get("status") or "unknown")[:40]
+        reachable = core_info.get("reachable")
+        if reachable is True:
+            reachable_label = "reachable"
+        elif reachable is False:
+            reachable_label = "unavailable"
+        else:
+            reachable_label = "not yet probed"
+        core_mesh_lines.append(
+            "- " + core_id + ": " + core_status + "; reachability=" + reachable_label
+        )
+    core_mesh_lines.extend([
+        "- All invention/evolution actions require the approved operator API.",
+        "- Never claim an invention, mutation, repair, deployment, or merge occurred from routing metadata alone.",
+        "- Guardian checks remain authoritative; generated proposals require human review.",
+    ])
+    core_mesh_context = "\n".join(core_mesh_lines)
+
     runtime_truth = f"""
 REVELAAI CURRENT RUNTIME TRUTH
 
@@ -707,6 +736,9 @@ For user-scoped ecosystem requests:
 - Use actual retrieved user context when available.
 - If no authenticated user context exists, explain that personalized
   access requires a signed-in RevelaCode account.
+
+CORE MESH:
+{core_mesh_context}
 
 GROUNDING CONTEXT:
 {grounded_context}

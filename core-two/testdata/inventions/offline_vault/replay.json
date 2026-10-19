@@ -1,0 +1,13 @@
+{
+  "fixture_id": "offline-vault-graph-replay-v1",
+  "fixture_only": true,
+  "historical_core_one_invention": false,
+  "description": "Synthetic graph-traversal workload used because the scanned Core-One inventions directory has no recorded invention evidence.json files.",
+  "nodes": 1800,
+  "edges_per_node": 4,
+  "replay_rounds": 5,
+  "measurement_scope": "graph-traversal phase only; not end-to-end invention-generation time",
+  "cost_currency": null,
+  "production_bom_cost_kes": null,
+  "source_commit": "40dc1caf07419ad14f771be88fc238baa51d4480"
+}

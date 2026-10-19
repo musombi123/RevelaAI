@@ -1,0 +1,10 @@
+{
+  "id": "tamper-evident-audit-chain",
+  "category": "audit_integrity",
+  "purpose": "Hash-link audit entries to make edits detectable without claiming deletion-proof storage",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

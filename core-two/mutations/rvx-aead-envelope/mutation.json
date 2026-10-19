@@ -1,0 +1,10 @@
+{
+  "id": "rvx-aead-envelope",
+  "category": "rvx_protection",
+  "purpose": "Use authenticated AES-GCM envelopes with externally held keys; confidentiality/integrity, not impossible copying",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

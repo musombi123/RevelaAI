@@ -76,6 +76,13 @@ from typing import Any
 import jwt
 from dotenv import load_dotenv
 
+from ai.core_mesh import (
+    CoreMeshError,
+    get_core_mesh_dashboard,
+    propose_genesis_invention,
+    propose_mind_evolution,
+)
+
 
 # =========================================================
 # ENVIRONMENT
@@ -2819,6 +2826,139 @@ def feature_chat():
 
 
 # =========================================================
+# USECT CORE MESH - SERVER-SIDE ORCHESTRATOR INTEGRATION
+# =========================================================
+
+def _core_mesh_admin_allowed(user_id: str | None) -> bool:
+    configured = (
+        os.getenv("CORE_MESH_ADMIN_USER_IDS", "")
+        or os.getenv("META_ENGINEER_ADMIN_USER_IDS", "")
+    )
+    allowed = {
+        item.strip()
+        for item in configured.split(",")
+        if item.strip()
+    }
+    return bool(user_id and allowed and user_id in allowed)
+
+
+def _core_mesh_error_response(exc: CoreMeshError):
+    return jsonify({
+        "status": "error",
+        "error": {"code": exc.code, "message": str(exc)},
+    }), exc.status_code
+
+
+def _require_core_mesh_user():
+    user_id = resolve_revelacode_user_id()
+    if not user_id:
+        return None, (jsonify({
+            "status": "error",
+            "error": {
+                "code": "authentication_required",
+                "message": "Sign in with a valid RevelaCode session to access core status.",
+            },
+        }), 401)
+    return user_id, None
+
+
+def _require_core_mesh_operator(user_id: str):
+    configured = (
+        os.getenv("CORE_MESH_ADMIN_USER_IDS", "")
+        or os.getenv("META_ENGINEER_ADMIN_USER_IDS", "")
+    ).strip()
+    if not configured:
+        return (jsonify({
+            "status": "error",
+            "error": {
+                "code": "core_mesh_operator_not_configured",
+                "message": "Configure CORE_MESH_ADMIN_USER_IDS server-side before enabling invention/evolution actions.",
+            },
+        }), 503)
+    if not _core_mesh_admin_allowed(user_id):
+        return (jsonify({
+            "status": "error",
+            "error": {
+                "code": "core_mesh_operator_required",
+                "message": "This operation is restricted to an approved Core Mesh operator.",
+            },
+        }), 403)
+    return None
+
+
+@app.route(
+    "/api/core-mesh/dashboard",
+    methods=["GET"],
+)
+def core_mesh_dashboard_api():
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    try:
+        snapshot = get_core_mesh_dashboard(
+            force_refresh=request.args.get("refresh", "").strip() == "1"
+        )
+    except Exception:
+        app.logger.warning("Core Mesh dashboard snapshot failed.")
+        return jsonify({
+            "status": "error",
+            "error": {"code": "core_mesh_status_unavailable", "message": "Core Mesh status could not be assembled."},
+        }), 503
+    return jsonify({"status": "success", "data": snapshot})
+
+
+@app.route(
+    "/api/core-mesh/genesis/invent",
+    methods=["POST"],
+)
+def core_mesh_genesis_invent_api():
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    operator_failure = _require_core_mesh_operator(user_id)
+    if operator_failure:
+        return operator_failure
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "error": {"code": "invalid_json", "message": "Send a JSON object containing demand."}}), 400
+    try:
+        result = propose_genesis_invention(body.get("demand", ""))
+    except CoreMeshError as exc:
+        return _core_mesh_error_response(exc)
+    except Exception:
+        app.logger.warning("Core Mesh Genesis proposal request failed.")
+        return jsonify({"status": "error", "error": {"code": "genesis_proposal_failed", "message": "Genesis could not create the proposal."}}), 502
+    return jsonify({"status": "success", "data": result}), 202
+
+
+@app.route(
+    "/api/core-mesh/mind/evolve",
+    methods=["POST"],
+)
+def core_mesh_mind_evolve_api():
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    operator_failure = _require_core_mesh_operator(user_id)
+    if operator_failure:
+        return operator_failure
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "error": {"code": "invalid_json", "message": "Send a JSON object containing objective and tool_name."}}), 400
+    try:
+        result = propose_mind_evolution(
+            body.get("objective", ""),
+            body.get("tool_name", "offline_vault_fixture"),
+        )
+    except CoreMeshError as exc:
+        return _core_mesh_error_response(exc)
+    except Exception:
+        app.logger.warning("Core Mesh Mind evolution request failed.")
+        return jsonify({"status": "error", "error": {"code": "mind_evolution_failed", "message": "Infinite Mind could not create the proposal."}}), 502
+    return jsonify({"status": "success", "data": result}), 202
+
+
+# =========================================================
 # ROOT
 # =========================================================
 
@@ -3572,6 +3712,35 @@ def ai_assistant():
 
             orchestrator_data = {}
 
+        core_mesh_data = orchestrator_data.get("core_mesh", {})
+        if not isinstance(core_mesh_data, dict):
+            core_mesh_data = {}
+        else:
+            core_mesh_data = {
+                "mode": str(core_mesh_data.get("mode") or "advisory_only")[:40],
+                "selected_core": str(core_mesh_data.get("selected_core") or "orchestrator")[:40],
+                "route_reason": str(core_mesh_data.get("route_reason") or "")[:280],
+                "domain": str(core_mesh_data.get("domain") or "general")[:80],
+                "intent": str(core_mesh_data.get("intent") or "general")[:80],
+                "mesh_status": str(core_mesh_data.get("mesh_status") or "not_probed")[:40],
+                "cores": {
+                    str(name)[:16]: {
+                        "id": str(info.get("id") or "")[:40],
+                        "status": str(info.get("status") or "unknown")[:40],
+                        "reachable": info.get("reachable") if info.get("reachable") in (True, False, None) else None,
+                        "version": str(info.get("version") or "")[:40],
+                    }
+                    for name, info in core_mesh_data.get("cores", {}).items()
+                    if isinstance(name, str) and isinstance(info, dict)
+                } if isinstance(core_mesh_data.get("cores"), dict) else {},
+                "safety": {
+                    "operation_executed": False,
+                    "human_approval_required": True,
+                    "automatic_merge": False,
+                    "automatic_execution": False,
+                },
+            }
+
         online_data = (
             orchestrator_data.get(
                 "online",
@@ -3751,6 +3920,8 @@ def ai_assistant():
             ),
 
             "usect_zero_tool": usect_tool_metadata,
+
+            "core_mesh": core_mesh_data,
 
             "build_id": REVELAAI_BUILD_ID,
         }

@@ -43,14 +43,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !s.allowMutation(w, r) {
 			return
 		}
-		var body struct { Demand string `json:"demand"` }
+		var body struct { Demand string `json:"demand"`; Country string `json:"country,omitempty"`; Language string `json:"language,omitempty"` }
 		if err := decodeAPIJSON(w, r, &body); err != nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_json", "Request must contain a valid JSON object with demand.")
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
 		defer cancel()
-		inv, err := s.Engine.Invent(ctx, body.Demand)
+		profile, profileErr := endpoint.ResolveWorldContext(r, body.Country, body.Language)
+		if profileErr != nil { writeAPIError(w, http.StatusBadRequest, "invalid_country", profileErr.Error()); return }
+		inv, err := s.Engine.InventWorldwide(ctx, body.Demand, profile.Code, profile.Language)
 		if err != nil {
 			if errors.Is(err, ErrBlocked) { writeAPIError(w, http.StatusForbidden, "guardian_block", "Guardian blocked the demand; no invention package was created."); return }
 			if errors.Is(err, ErrAlreadyExists) { writeAPIError(w, http.StatusConflict, "already_exists", err.Error()); return }
@@ -59,9 +61,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeAPIJSON(w, http.StatusCreated, inv)
 	case path == "/v1/genesis/queue" && r.Method == http.MethodPost:
 		if !s.allowMutation(w, r) { return }
-		var body struct { Demand string `json:"demand"`; Source string `json:"source,omitempty"` }
+		var body struct { Demand string `json:"demand"`; Source string `json:"source,omitempty"`; Country string `json:"country,omitempty"`; Language string `json:"language,omitempty"` }
 		if err := decodeAPIJSON(w, r, &body); err != nil { writeAPIError(w, http.StatusBadRequest, "invalid_json", "Request must contain demand."); return }
-		item, err := s.Engine.Enqueue(body.Demand, body.Source)
+		profile, profileErr := endpoint.ResolveWorldContext(r, body.Country, body.Language)
+		if profileErr != nil { writeAPIError(w, http.StatusBadRequest, "invalid_country", profileErr.Error()); return }
+		item, err := s.Engine.EnqueueWorldwide(body.Demand, body.Source, profile.Code, profile.Language)
 		if err != nil { if errors.Is(err, ErrBlocked) { writeAPIError(w, http.StatusForbidden, "guardian_block", "Guardian blocked the demand before queueing."); return }; writeAPIError(w, http.StatusBadRequest, "invalid_demand", err.Error()); return }
 		s.Engine.publish(Event{Type: "demand_queued", At: time.Now().UTC(), Message: "Demand accepted into the local queue for the next daemon cycle.", Status: "queued"})
 		writeAPIJSON(w, http.StatusAccepted, map[string]any{"status": "queued", "demand_id": item.ID, "next_scan": "within the configured daemon interval"})
@@ -110,8 +114,8 @@ func (s *Server) serveTool(w http.ResponseWriter, r *http.Request, part string) 
 	if len(parts) == 0 || !validResourceName(parts[0]) { writeAPIError(w, 400, "invalid_tool_name", "Invalid tool name."); return }
 	name := parts[0]; dir := filepath.Join(s.Engine.CoreRoot, "inventions", name)
 	if len(parts) == 2 && parts[1] == "hardware_guide" {
-		b, err := os.ReadFile(filepath.Join(dir, "hardware_guide.md")); if err != nil { writeAPIError(w, 404, "tool_not_found", "Tool or hardware guide not found."); return }
-		writeAPIJSON(w, 200, map[string]any{"name": name, "status": "await_merge", "hardware_guide": string(b)}); return
+		guide, profile, err := s.Engine.WorldwideHardwareGuide(name, r.URL.Query().Get("country"), r.URL.Query().Get("lang")); if err != nil { writeAPIError(w, 404, "tool_not_found", "Guide or country profile unavailable."); return }
+		writeAPIJSON(w, 200, map[string]any{"name": name, "status": "await_merge", "country_context": profile, "hardware_guide": guide}); return
 	}
 	if len(parts) == 2 && parts[1] == "capability_plan" {
 		b, err := os.ReadFile(filepath.Join(dir, "capability_plan.json"))

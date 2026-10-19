@@ -1,0 +1,8 @@
+{
+  "schema_version":"usect-two.evolution-evidence.v1","created_at":"2026-10-18T23:02:33Z","version":"v0.1.0","tool_name":"offline_vault_fixture","objective":"Improve offline_vault graph traversal efficiency using an indexed visited set","status":"await_merge","selected_mutation":"graph-indexed","mutation_batch":"static-example-proposal","mutation_count":10,
+  "benchmark":{"fixture_id":"offline-vault-graph-replay-v1","fixture_only":true,"replay_rounds":5,"node_count":1800,"edge_count":7200,"baseline_ns_per_round":2656694,"candidate_ns_per_round":421937,"speedup_percent":529.64,"improvement_ratio":6.3,"measurement_scope":"synthetic graph traversal phase only; machine dependent"},
+  "historical_core_one_invention_count":0,"time_to_invent_ms":null,"bom_cost_kes":null,"human_merge_time_ms":null,"fixture_only":true,
+  "safety":{"core_two_guardian":"passed in local tests","core_one_guardian":"existing Guardian dependency","core_zero_library_probe":"RV Lang and Radar imports","core_zero_dedicated_guardian_policy_file_present":false,"candidate_template_tests_executed":true,"repository_sourced_code_executed":false,"os_level_sandbox":false,"automatic_merge":false},
+  "rvx_protection":{"proposal":"AES-256-GCM with external key","tamper_detection_tested":true,"numeric_security_score":null,"uncopyable_forever_claim":false},
+  "provenance_note":"Synthetic acceptance fixture, not historical Core-One invention evidence. No production invention-time or BOM savings claim is supported."
+}

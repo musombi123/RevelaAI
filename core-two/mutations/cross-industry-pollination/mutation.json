@@ -1,0 +1,10 @@
+{
+  "id": "cross-industry-pollination",
+  "category": "pollination",
+  "purpose": "Compare safe capability tags across industries; never auto-connect or deploy",
+  "status": "candidate_for_human_review",
+  "source_core": "core-one",
+  "fixture_only": true,
+  "source_execution": false,
+  "automatic_merge": false
+}

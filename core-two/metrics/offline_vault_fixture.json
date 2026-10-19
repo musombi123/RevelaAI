@@ -1,0 +1,21 @@
+{
+  "tool_name": "offline_vault_fixture",
+  "observed_at": "2026-10-18T23:02:33Z",
+  "fixture_only": true,
+  "evidence_status": "synthetic_fixture_replay_not_production_invention",
+  "fixture_id": "offline-vault-graph-replay-v1",
+  "baseline_ns_per_round": 2656694,
+  "candidate_ns_per_round": 421937,
+  "speedup_percent": 529.64,
+  "throughput_ratio": 6.3,
+  "replay_rounds": 5,
+  "node_count": 1800,
+  "edge_count": 7200,
+  "measurement_scope": "graph traversal phase only; not end-to-end invention-generation time",
+  "time_to_invent_ms": null,
+  "bom_cost_kes": null,
+  "human_merge_time_ms": null,
+  "historical_core_one_invention": false,
+  "production_tool_count_at_baseline_commit": 0,
+  "measurement_note": "Captured from the local API-compatible acceptance harness after warmed median benchmarking. Numbers are machine-dependent, illustrative, and only for the synthetic graph-traversal phase."
+}

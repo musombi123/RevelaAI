@@ -10,18 +10,29 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"revela-worldwide.local/libs/country"
+	"revela-worldwide.local/libs/guardian"
 )
 
 func (e *Engine) Enqueue(demand, source string) (Demand, error) {
+	return e.EnqueueWorldwide(demand, source, "KE", "")
+}
+
+func (e *Engine) EnqueueWorldwide(demand, source, countryCode, language string) (Demand, error) {
+	profile, profileErr := country.Resolve(countryCode, language)
+	if profileErr != nil { return Demand{}, profileErr }
 	demand = strings.TrimSpace(demand)
 	if demand == "" || len(demand) > 3999 { return Demand{}, errors.New("demand must contain 1 to 3999 characters") }
+	globalDecision := guardian.CheckText(demand)
+	if !globalDecision.Allowed { return Demand{}, ErrBlocked }
 	decision := e.Guardian.Check(demand)
 	if !decision.Allowed {
 		if err := e.Guardian.LogBlocked("queued_demand", demand, decision.Reason); err != nil { return Demand{}, fmt.Errorf("guardian blocked demand and audit logging failed: %w", err) }
 		e.publish(Event{Type:"blocked",At:time.Now().UTC(),Message:"Guardian blocked a queued demand before it entered the queue.",Status:decision.Code})
 		return Demand{}, ErrBlocked
 	}
-	item := Demand{ID:newID("demand"),Demand:demand,Source:limitText(source,100),CreatedAt:time.Now().UTC(),Status:"queued"}
+	item := Demand{ID:newID("demand"),Demand:demand,Source:limitText(source,100),Country:profile.Code,Language:profile.Language,CreatedAt:time.Now().UTC(),Status:"queued"}
 	if err:=writeJSON(filepath.Join(e.CoreRoot,"state","queue","pending",item.ID+".json"),item);err!=nil{return Demand{},fmt.Errorf("persist queued demand: %w",err)}
 	e.publish(Event{Type:"demand_queued",At:time.Now().UTC(),Message:"A validated demand was durably queued for daemon processing.",Status:"queued"})
 	return item,nil
@@ -69,7 +80,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 		}
 		item.Status="processing";item.Error=""
 		if err:=writeJSON(claim,item);err!=nil{if firstErr==nil{firstErr=fmt.Errorf("persist processing state: %w",err)};_ = os.Rename(claim,src);continue}
-		inv,inventErr:=e.Invent(ctx,item.Demand)
+		inv,inventErr:=e.InventWorldwide(ctx,item.Demand,item.Country,item.Language)
 		if errors.Is(inventErr,context.Canceled)||errors.Is(inventErr,context.DeadlineExceeded) {
 			item.Status="queued";item.Error="processing interrupted; demand returned to pending queue"
 			if err:=writeJSON(claim,item);err!=nil { if firstErr==nil { firstErr=fmt.Errorf("persist interrupted queue state: %w",err) }; return firstErr }

@@ -127,7 +127,7 @@ This demand was classified as a software tool. No physical interface has been as
 2. Record the bill of materials (BOM), exact part numbers, ratings, and supplier evidence.
 3. Keep physical-device control disabled until test fixtures and review are complete.
 4. Publish the host API only after merge and deployment approval.
-`, spec.Title)
+`, spec.Title) + generatedWorldGuide(spec)
 	}
 	camera := containsAny(strings.ToLower(spec.Demand), "cctv", "camera")
 	privacy := "For any device collecting information about people, provide visible notice, documented lawful purpose, access controls, retention limits, deletion procedures, and audit logs. Do not deploy covert capture or collect data without appropriate authorization and consent."
@@ -191,5 +191,5 @@ The proposed contract is POST /v1/%s/plan. It is not active until this invention
 - [ ] Unit, integration, failure-mode and recovery tests pass
 - [ ] Privacy, access, retention and consent controls verified
 - [ ] Owner approves code, wiring and deployment before activation
-`, spec.Title, privacy, spec.Name)
+`, spec.Title, privacy, spec.Name) + generatedWorldGuide(spec)
 }
