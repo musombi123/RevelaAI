@@ -27,6 +27,8 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/revelaai/v2/brain/chat" in schema["paths"]
     assert "/api/revelaai/hubs/" in schema["paths"]
     assert "/api/core-mesh/dashboard" in schema["paths"]
+    assert "/api/memory/chat" in schema["paths"]
+    assert "/api/memory/ideas" in schema["paths"]
     assert "/api/core-mesh/genesis/invent" in schema["paths"]
     assert "/v1/learn/known" in schema["paths"]
     assert "/health" in schema["paths"]
@@ -123,6 +125,16 @@ def test_live_vision_still_requires_identity() -> None:
     response = client.post("/api/vision/analyze", json={})
     assert response.status_code in (401, 503)
     assert response.json().get("status") == "error"
+
+
+def test_smart_memory_routes_require_identity() -> None:
+    response = client.post("/api/memory/chat", json={"userMessage": "remember this"})
+    assert response.status_code in (401, 503)
+    assert response.json().get("status") == "error"
+
+    idea_list = client.get("/api/memory/ideas/507f1f77bcf86cd799439011")
+    assert idea_list.status_code in (401, 503)
+    assert idea_list.json().get("status") == "error"
 
 
 def test_core_mesh_routes_keep_authentication_boundary() -> None:
