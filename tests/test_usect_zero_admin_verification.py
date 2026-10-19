@@ -119,7 +119,8 @@ def test_admin_verification_timeout_fails_closed_without_logging_token(
     assert response.get_json()["code"] == "admin_verification_unavailable"
     assert "Timeout" in caplog.text
     assert "test-jwt" not in caplog.text
-    assert observed == {}
+    assert observed["timeout"] == (3.05, admin_routes.ADMIN_TIMEOUT)
+    assert observed["headers"]["Authorization"] == "Bearer test-jwt"
 
 
 def test_non_admin_remains_forbidden_not_unavailable(monkeypatch):
