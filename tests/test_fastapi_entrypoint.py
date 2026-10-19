@@ -32,6 +32,31 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "swagger-ui" in docs.text.lower()
 
 
+def test_native_fastapi_routes_preserve_trusted_origin_cors() -> None:
+    response = client.options(
+        "/api/chat/",
+        headers={
+            "Origin": "https://revelacode.co.ke",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("Access-Control-Allow-Origin") == "https://revelacode.co.ke"
+    assert "Authorization" in response.headers.get("Access-Control-Allow-Headers", "")
+
+
+def test_untrusted_origin_is_not_reflected_by_native_fastapi_routes() -> None:
+    response = client.options(
+        "/api/chat/",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.headers.get("Access-Control-Allow-Origin") != "https://untrusted.example"
+
+
 def test_explain_route_preserves_response_contract() -> None:
     response = client.post("/", json={"answer": "Evidence supports this claim."})
     assert response.status_code == 200
