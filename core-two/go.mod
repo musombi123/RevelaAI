@@ -9,3 +9,7 @@ require (
 
 replace revela-genesis.local/core-one => ../core-one
 replace usect-zero.local/core-zero => ../core-zero
+	revela-worldwide.local/libs v0.0.0
+)
+
+replace revela-worldwide.local/libs => ../lib/worldwide
