@@ -40,6 +40,7 @@ class FactoryRecord(Base):
     status: Mapped[str] = mapped_column(String(32), default="await_merge", index=True)
     country: Mapped[str] = mapped_column(String(2), default="KE")
     manifest_sha256: Mapped[str] = mapped_column(String(64))
+    manifest_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
