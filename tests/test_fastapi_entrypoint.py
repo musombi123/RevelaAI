@@ -37,6 +37,8 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/capabilities" in schema["paths"]
     assert "/ai/images/{filename}" in schema["paths"]
     assert "/webhook/whatsapp" in schema["paths"]
+    assert "/api/agi/manifest" in schema["paths"]
+    assert "/api/agi/status" in schema["paths"]
 
     docs = client.get("/docs")
     assert docs.status_code == 200
@@ -178,6 +180,21 @@ def test_native_system_routes_keep_response_contracts() -> None:
     ready = client.get("/ready")
     assert ready.status_code in (200, 503)
     assert ready.json()["status"] in ("ready", "degraded")
+
+
+def test_agi_manifest_and_status_routes_preserve_shape() -> None:
+    manifest = client.get("/api/agi/manifest")
+    assert manifest.status_code == 200
+    body = manifest.json()
+    assert body["identity"]["name"] == "RevelaAI"
+    assert body["persistence"]["collection"] == "agi_manifest"
+
+    status = client.get("/api/agi/status")
+    assert status.status_code == 200
+    body = status.json()
+    assert body["name"] == "RevelaAI"
+    assert "database" in body
+    assert "all_modules_present" in body
 
 
 def test_whatsapp_verification_route_preserves_token_boundary() -> None:
