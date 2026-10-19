@@ -740,29 +740,34 @@ app.wsgi_app = ProxyFix(
 
 def parse_cors_origins() -> list[str]:
     """
-    Read trusted frontend origins.
+    Read trusted frontend origins, with deployment configuration extending
+    the built-in allowlist rather than replacing production origins.
     """
 
-    raw = (
+    default_origins = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://revelacode-frontend.onrender.com",
+        "https://revelacode.co.ke",
+        "https://www.revelacode.co.ke",
+        "https://localhost",
+    )
+
+    configured = (
         os.getenv(
             "CORS_ORIGINS",
-            (
-                "http://localhost:5173,"
-                "http://127.0.0.1:5173,"
-                "https://revelacode-frontend.onrender.com,"
-                "https://localhost"
-            ),
+            "",
         )
         or ""
     )
 
     origins: list[str] = []
 
-    for item in raw.split(","):
+    for item in list(default_origins) + configured.split(","):
 
-        origin = item.strip()
+        origin = item.strip().rstrip("/")
 
-        if origin:
+        if origin and origin not in origins:
 
             origins.append(
                 origin
