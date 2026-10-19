@@ -76,3 +76,18 @@ Set the same JWT_SECRET as the trusted RevelaCode issuer. For a real service con
 The API's payment integration currently uses Stripe Checkout and Stripe webhooks. PayPal and M-Pesa Global still require payment-provider adapters and credentials; no endpoint claims they are live. FX conversions, taxes, local regulatory compliance, refunds, disputes, billing portal/subscription changes, and real creator payouts need provider-specific implementation and review. Prices are USD list prices, not live exchange-rate quotes. The deterministic marketplace screen is not a full Guardian or safety certification; human review is mandatory before publication.
 
 Source-code encryption cannot retroactively hide publicly committed Go or Python source. The pre-commit protection added to this branch prevents key material from being committed; it does not rewrite Git history or remove source from previous commits.
+
+
+## Signed factory review and RVXP1 invocation
+
+Generate a separate reviewer signing pair locally:
+
+    python -m core_foundry.keys --output-dir ~/.revelaai/review-keys
+
+Keep `review_private.pem` only in the API service secret manager as `REVELA_REVIEW_PRIVATE_KEY_PATH`. Distribute `review_public.pem` to owner machines as `REVELA_REVIEW_PUBLIC_KEY_PATH`. A factory approval is not trusted for offline compilation or seeding unless this Ed25519 attestation verifies; SHA-256 alone is only an integrity checksum.
+
+Registered tool calls are routed to an explicitly configured `tool.<tool_id>` adapter in `REVELA_RVX_ROUTES`. That adapter must speak RVXP1. Python peers can mount `mesh.receiver.create_rvx_receiver_router` with an explicit handler allowlist. Core-Zero, Core-One and Core-Two are still Go services and cannot receive these packets until Go-side RVXP1 support has been separately implemented and tested.
+
+RVXP1 encrypts packet contents with AES-GCM, binds route + UTC day + hourly key window + unique message ID, and rejects stale or duplicate packets within the receiver process. Multi-worker/distributed receiver deployments require a shared replay store or equivalent coordination. The outer envelope exposes protocol metadata but not payload content.
+
+Hosted Foundry review requires a configured review private key. If it is absent, the API refuses the approval instead of silently marking the factory approved. Local compiler and offline child verifier require the corresponding review public key.
