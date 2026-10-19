@@ -134,3 +134,26 @@ Memory API (all user-specific requests require a valid Bearer JWT):
 - `DELETE /api/memory/useless/:userId` — prunes legacy noise from stored conversation messages.
 
 Noise is discarded before persistence. Idea records are proposals with status `new`; generated chat text is not executed as code or written into production files automatically. Implementation should be tested and reviewed before being marked implemented.
+
+
+## Worldwide country adapters and user-taught learning
+
+**Born in Nairobi, Built for Worldwide.** Kenya remains the default country profile (KE) for backward compatibility. Requests may send a country and language; the shared adapters provide a country-specific currency label, supplier directory, language choice, nominal electrical reference and local-regulation reminders. Supplier names are lookup leads, not verified quotes or stock. Electrical guides require datasheet and qualified local review.
+
+### Unknown-topic learning lifecycle
+
+1. The existing orchestrator compares a niche request against the local Core-One inventory and human-published Living Brain records. A low-evidence specialist request is marked unknown; it is not repeatedly retried or sent to the language model to invent technical steps.
+2. The chat asks for one to three safe steps. An authenticated caller may submit the teaching packet to POST /v1/learn/unknown. The API accepts text steps and an optional SHA-256 photo reference, not raw image bytes.
+3. Content is screened before it is stored. Matching restricted content is rejected and only a minimized audit record is written. Submitted notes are private by default; cross-user use requires explicit consent_to_share: true.
+4. With that consent, RevelaAI may ask the existing Core-One Genesis to create a proposal. The result is await_merge, not a deployed endpoint. Genesis retains its own Guardian; no automatic execution or merge is enabled.
+5. Only an authenticated Core Mesh operator may publish a shared knowledge record, attesting that the tool and endpoint were reviewed/merged and providing a merge commit SHA. Publication requires a consented submission. At that point, existing Core-Two Mind may stage one improvement proposal, which also remains await_merge.
+6. GET /v1/learn/known returns only explicitly shared, human-reviewed records. It does not disclose the submitter's user ID.
+
+### Learning API and deployment
+
+- POST /v1/learn/unknown: requires the normal RevelaCode Bearer JWT. Body fields: topic, steps (1–12 strings), optional country, language, photo_hash, source_request, and explicit Boolean consent_to_share.
+- GET /v1/learn/known: authenticated list of reviewed, shareable knowledge and the staged improvement status, if any.
+- POST /v1/learn/known/{topic_key}/publish: authenticated Core Mesh operator only. Attests review/publication with tool_name, endpoint and merge_commit. The server checks input format and consent; the operator remains responsible for confirming the merge really exists.
+- Configure REVELAAI_LEARNING_ROOT to a persistent, access-controlled storage directory in production. Defaults point to the repository's living-brain/ folder for local development. The application needs write permissions; back up and restrict this directory.
+
+This feature is a deterministic unknown detector plus a reviewed learning workflow. It is not proof of AGI, perfect safety detection, legal compliance, or uncopyability. RVX/provider secrets must remain in server-side secret storage and never in public commits.

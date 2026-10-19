@@ -82,6 +82,7 @@ from ai.core_mesh import (
     propose_genesis_invention,
     propose_mind_evolution,
 )
+from ai.unknown_learning import attach_genesis_proposal, attach_improvement_proposal, list_known, publish_known, save_teaching
 
 
 # =========================================================
@@ -2959,6 +2960,117 @@ def core_mesh_mind_evolve_api():
 
 
 # =========================================================
+# LIVING BRAIN — USER-TAUGHT KNOWLEDGE
+# =========================================================
+
+@app.route("/v1/learn/unknown", methods=["POST"])
+def learn_unknown_api():
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "error": {"code": "invalid_json", "message": "Send topic and steps."}}), 400
+    country = str(request.args.get("country") or body.get("country") or "KE").strip()[:80]
+    language = str(request.args.get("lang") or body.get("language") or "").strip()[:20]
+    try:
+        saved = save_teaching(
+            topic=body.get("topic", ""),
+            user_id=user_id,
+            steps=body.get("steps"),
+            country=country,
+            language=language,
+            photo_hash=str(body.get("photo_hash") or "").strip(),
+            consent_to_share=body.get("consent_to_share") is True,
+            source_request=str(body.get("source_request") or ""),
+        )
+    except PermissionError as exc:
+        return jsonify({"status": "blocked", "error": {"code": "worldwide_guardian_block", "message": str(exc)}}), 403
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": {"code": "invalid_teaching_submission", "message": str(exc)}}), 400
+    except OSError:
+        app.logger.warning("Living Brain could not persist a teaching record.")
+        return jsonify({"status": "error", "error": {"code": "learning_storage_unavailable", "message": "Knowledge could not be saved; no tool proposal was triggered."}}), 503
+
+    result = {"saved": True, **saved, "genesis": {"status": "not_requested"}}
+    if saved.get("genesis_needed") and saved.get("consent_to_share") is True:
+        steps = body.get("steps") if isinstance(body.get("steps"), list) else []
+        short_steps = "; ".join(str(step).strip()[:90] for step in steps[:3] if str(step).strip())
+        demand = (
+            f"Create a safe reviewable tool proposal for {str(body.get('topic') or '')[:140]}. "
+            f"Country {saved.get('country')}; language {saved.get('language')}. "
+            f"Unverified user notes: {short_steps[:170]}. Include a localized supplier directory, quote-required BOM, "
+            "hardware guide, tests and safety gates. Await human merge."
+        )[:495]
+        try:
+            proposal = propose_genesis_invention(demand, country=saved["country"], language=saved["language"])
+            attached = attach_genesis_proposal(saved["topic_key"], proposal)
+            result["genesis"] = {
+                "status": attached.get("status", "await_merge"),
+                "proposal": attached.get("proposal", {}),
+                "human_approval_required": True,
+                "automatic_execution": False,
+                "automatic_merge": False,
+            }
+        except CoreMeshError as exc:
+            result["genesis"] = {"status": "awaiting_genesis", "error_code": exc.code, "retry_allowed": True}
+    elif not saved.get("consent_to_share"):
+        result["genesis"] = {"status": "private_until_explicit_sharing_consent", "proposal_created": False}
+    return jsonify({"status": "accepted", "data": result}), 202
+
+
+@app.route("/v1/learn/known", methods=["GET"])
+def learn_known_api():
+    _, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    records = list_known()
+    return jsonify({"status": "success", "data": {"count": len(records), "known": records}})
+
+
+@app.route("/v1/learn/known/<topic_key>/publish", methods=["POST"])
+def publish_known_learning_api(topic_key: str):
+    user_id, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    operator_failure = _require_core_mesh_operator(user_id)
+    if operator_failure:
+        return operator_failure
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"status": "error", "error": {"code": "invalid_json", "message": "Send tool_name, endpoint and merge_commit."}}), 400
+    try:
+        result = publish_known(
+            topic_key=topic_key,
+            operator_id=user_id,
+            tool_name=body.get("tool_name", ""),
+            endpoint=body.get("endpoint", ""),
+            merge_commit=body.get("merge_commit", ""),
+        )
+    except PermissionError as exc:
+        return jsonify({"status": "error", "error": {"code": "learning_consent_required", "message": str(exc)}}), 403
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": {"code": "learning_publish_rejected", "message": str(exc)}}), 422
+    result["mind"] = {"status": "not_staged"}
+    tool_name = str(result.get("tool_name") or "")
+    try:
+        objective = f"Review measured worldwide outcomes for {tool_name}; propose one evidence-gated improvement."
+        proposal = propose_mind_evolution(objective, tool_name)
+        attach_improvement_proposal(topic_key, proposal)
+        result["mind"] = {
+            "status": "await_merge",
+            "proposal": {key: proposal[key] for key in ("status", "version", "tool_name", "selected_mutation", "await_merge_path") if key in proposal},
+            "human_approval_required": True,
+            "automatic_merge": False,
+        }
+    except CoreMeshError as exc:
+        result["mind"] = {"status": "not_staged", "error_code": exc.code, "retry_allowed": True}
+    except ValueError:
+        result["mind"] = {"status": "not_staged", "error_code": "mind_proposal_rejected", "retry_allowed": True}
+    return jsonify({"status": "success", "data": result}), 202
+
+
+# =========================================================
 # ROOT
 # =========================================================
 
@@ -3587,6 +3699,8 @@ def ai_assistant():
             ai_result = process_message(
                 message=message, context=previous_context, intent=intent,
                 session_id=session_id, user_id=user_id,
+                country=str(brain_payload.get("country") or "KE"),
+                language=str(brain_payload.get("language") or ""),
             )
 
         # -------------------------------------------------
@@ -3831,7 +3945,21 @@ def ai_assistant():
                 if _summary:
                     usect_tool_metadata["result_summary"] = _summary
 
+        _unknown_learning = orchestrator_data.get("unknown_learning", {})
+        if not isinstance(_unknown_learning, dict):
+            _unknown_learning = {}
+        _unknown_public = {
+            "is_unknown": bool(_unknown_learning.get("is_unknown", False)),
+            "topic": str(_unknown_learning.get("topic") or "")[:120],
+            "wisdom_score": _unknown_learning.get("wisdom_score"),
+            "threshold": _unknown_learning.get("threshold", 0.5),
+            "next_action": str(_unknown_learning.get("next_action") or "use_existing_knowledge")[:40],
+            "automatic_retries": False,
+            "known_matches": _unknown_learning.get("known_matches", [])[:3] if isinstance(_unknown_learning.get("known_matches"), list) else [],
+        }
+
         meta = {
+            "unknown_learning": _unknown_public,
             "ai_model": ai_result.get(
                 "model"
             ),

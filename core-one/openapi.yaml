@@ -1,222 +1,223 @@
 openapi: 3.1.0
 info:
   title: Revela Genesis Core-One API
-  version: 0.3.0-alpha
-  description: Standalone, model-optional tool-invention service. Generated tool paths remain proposals until human merge and registration.
+  version: 0.4.0-alpha
+  description: |
+    Existing Genesis service. Tool generation is a proposal, not live activation.
+    Country defaults to Kenya (KE) for backward compatibility. Country and language
+    settings localize supplier directories, currency labels and hardware guides;
+    no verified supplier price or stock is inferred.
 servers:
   - url: http://127.0.0.1:8781
-    description: Local-only default; remote access requires configuration and review.
+    description: Loopback default. Remote access requires TLS and a configured token.
+security:
+  - GenesisToken: []
 paths:
   /v1/genesis/health:
     get:
       summary: Health and execution-mode status
+      security: []
       responses:
-        '200': {description: Engine is responsive; no claim about external source reachability}
+        '200':
+          description: Engine is responsive; this does not verify external sources or deployment readiness.
   /v1/genesis/invent:
     post:
-      summary: Research and create a new reviewable tool proposal
-      security: [{GenesisToken: []}]
+      summary: Research and create one reviewable tool proposal
+      description: The request passes Genesis Guardian checks. Generated content remains staged and awaits human review and merge.
+      parameters:
+        - $ref: '#/components/parameters/Country'
+        - $ref: '#/components/parameters/Language'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [demand]
               properties:
-                demand: {type: string, minLength: 1, maxLength: 3999}
+                demand:
+                  type: string
+                  minLength: 1
+                  maxLength: 3999
+                country:
+                  type: string
+                  default: KE
+                language:
+                  type: string
+                  enum: [en, de, zh, ja, fr, es, sw]
       responses:
-        '201': {description: Proposal generated and awaiting merge}
-        '403': {description: Guardian blocked demand or source}
-        '409': {description: Proposal already exists; overwrite is prohibited}
-        '422': {description: Research or generation failed}
+        '201':
+          description: Proposal generated and awaits merge.
+        '400':
+          description: Invalid country, language or JSON.
+        '403':
+          description: Guardian blocked the request.
+        '409':
+          description: A proposal already exists; overwrite is prohibited.
+        '422':
+          description: Research or generation failed.
   /v1/genesis/queue:
     post:
-      summary: Queue a demand for the daemon
-      security: [{GenesisToken: []}]
+      summary: Queue a demand for later daemon processing
+      parameters:
+        - $ref: '#/components/parameters/Country'
+        - $ref: '#/components/parameters/Language'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [demand]
               properties:
-                demand: {type: string, minLength: 1, maxLength: 3999}
-                source: {type: string, maxLength: 100}
+                demand:
+                  type: string
+                  minLength: 1
+                  maxLength: 3999
+                source:
+                  type: string
+                  maxLength: 100
+                country:
+                  type: string
+                  default: KE
+                language:
+                  type: string
+                  enum: [en, de, zh, ja, fr, es, sw]
       responses:
-        '202': {description: Demand persisted for next scheduled scan}
-        '403': {description: Guardian blocked demand}
+        '202':
+          description: Demand persisted. Any later result remains a proposal.
+        '400':
+          description: Invalid demand or country.
+        '403':
+          description: Guardian blocked the request.
   /v1/genesis/status:
     get:
-      summary: Read queue, invention, research and Guardian operational status
+      summary: Read queue, invention, research and Guardian status
       responses:
-        '200': {description: Current local operational snapshot}
-        '500': {description: Status could not be read}
+        '200':
+          description: Current service status.
+        '500':
+          description: Status could not be read.
   /v1/genesis/tools:
     get:
       summary: List generated invention proposals
       responses:
-        '200': {description: Proposal list}
+        '200':
+          description: Proposal list and count.
   /v1/genesis/tools/{name}:
     get:
       summary: Read a proposal manifest
       parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
+        - $ref: '#/components/parameters/ToolName'
       responses:
-        '200': {description: Proposal metadata and evidence summary}
-        '404': {description: Proposal not found}
+        '200':
+          description: Proposal metadata and evidence summary.
+        '404':
+          description: Proposal not found.
   /v1/genesis/tools/{name}/hardware_guide:
     get:
-      summary: Read the proposal's hardware integration guide
+      summary: Render a country- and language-specific guide for an existing proposal
       parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}  /v1/genesis/stream:
-    get:
-      summary: Server-sent stream of research, queue, Guardian, and invention events
+        - $ref: '#/components/parameters/ToolName'
+        - $ref: '#/components/parameters/Country'
+        - $ref: '#/components/parameters/Language'
       responses:
-        '200': {description: text/event-stream}
-  /v1/genesis/key:
-    get:
-      summary: Read key-request endpoint status; does not reveal secrets
-      responses:
-        '200': {description: Status}
-    post:
-      summary: Submit a provider-key request for human approval
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [client_id, reason]
-              properties:
-                client_id: {type: string, maxLength: 120}
-                reason: {type: string, maxLength: 500}
-      responses:
-        '202': {description: Request recorded as pending approval; no secret issued}
-  /v1/rvx/compile:
-    post:
-      summary: Compile RVX to a bounded JSON intermediate representation
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [source]
-              properties:
-                source: {type: string, maxLength: 16384}
-      responses:
-        '200': {description: Parsed declarative JSON IR; no code executed and no WASM emitted}
-        '422': {description: Invalid RVX program}
-components:
-  securitySchemes:
-    GenesisToken:
-      type: http
-      scheme: bearer
-}}
-      responses:
-        '200': {description: Hardware guide; wiring must be verified against exact part datasheets}
-        '404': {description: Guide not found}
+        '200':
+          description: Localized reference guide, BOM supplier directory and safety caveats. No wiring certification or live quotes are implied.
+        '404':
+          description: Proposal or guide not found.
   /v1/genesis/tools/{name}/capability_plan:
     get:
       summary: Read the generated capability graph and requirement plan
       parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}  /v1/genesis/stream:
-    get:
-      summary: Server-sent stream of research, queue, Guardian, and invention events
+        - $ref: '#/components/parameters/ToolName'
       responses:
-        '200': {description: text/event-stream}
-  /v1/genesis/key:
-    get:
-      summary: Read key-request endpoint status; does not reveal secrets
-      responses:
-        '200': {description: Status}
-    post:
-      summary: Submit a provider-key request for human approval
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [client_id, reason]
-              properties:
-                client_id: {type: string, maxLength: 120}
-                reason: {type: string, maxLength: 500}
-      responses:
-        '202': {description: Request recorded as pending approval; no secret issued}
-  /v1/rvx/compile:
-    post:
-      summary: Compile RVX to a bounded JSON intermediate representation
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [source]
-              properties:
-                source: {type: string, maxLength: 16384}
-      responses:
-        '200': {description: Parsed declarative JSON IR; no code executed and no WASM emitted}
-        '422': {description: Invalid RVX program}
-components:
-  securitySchemes:
-    GenesisToken:
-      type: http
-      scheme: bearer
-}}
-      responses:
-        '200': {description: Capability plan with native matches, reusable candidates, requirements, gaps and acceptance criteria}
-        '404': {description: Capability plan not found}
+        '200':
+          description: Capability plan, requirements, gaps and acceptance criteria.
+        '404':
+          description: Capability plan not found.
   /v1/genesis/stream:
     get:
-      summary: Server-sent stream of research, queue, Guardian, and invention events
+      summary: Stream research, queue, Guardian and invention events
       responses:
-        '200': {description: text/event-stream}
+        '200':
+          description: text/event-stream.
   /v1/genesis/key:
     get:
-      summary: Read key-request endpoint status; does not reveal secrets
+      summary: Read key-request endpoint status without revealing secrets
+      security: []
       responses:
-        '200': {description: Status}
+        '200':
+          description: Key-request status only.
     post:
       summary: Submit a provider-key request for human approval
-      security: [{GenesisToken: []}]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [client_id, reason]
               properties:
-                client_id: {type: string, maxLength: 120}
-                reason: {type: string, maxLength: 500}
+                client_id:
+                  type: string
+                  maxLength: 120
+                reason:
+                  type: string
+                  maxLength: 500
       responses:
-        '202': {description: Request recorded as pending approval; no secret issued}
+        '202':
+          description: Request queued for approval; no secret is issued by this operation.
   /v1/rvx/compile:
     post:
-      summary: Compile RVX to a bounded JSON intermediate representation
-      security: [{GenesisToken: []}]
+      summary: Parse RVX to a bounded JSON intermediate representation
+      description: No generated code is executed and no WASM is emitted by this endpoint.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              additionalProperties: false
               required: [source]
               properties:
-                source: {type: string, maxLength: 16384}
+                source:
+                  type: string
+                  maxLength: 16384
       responses:
-        '200': {description: Parsed declarative JSON IR; no code executed and no WASM emitted}
-        '422': {description: Invalid RVX program}
+        '200':
+          description: Parsed declarative intermediate representation.
+        '422':
+          description: Invalid RVX program.
 components:
   securitySchemes:
     GenesisToken:
       type: http
       scheme: bearer
+  parameters:
+    Country:
+      name: country
+      in: query
+      required: false
+      schema:
+        type: string
+        default: KE
+      description: Country profile; KE is the backward-compatible origin default.
+    Language:
+      name: lang
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [en, de, zh, ja, fr, es, sw]
+      description: Guide language; defaults from the selected country profile.
+    ToolName:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9_-]{1,64}$'

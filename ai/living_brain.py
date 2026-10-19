@@ -212,3 +212,19 @@ def describe_vision(analysis: dict | None, prompt: str = "") -> dict[str, Any]:
         "engine": "local-vision-summary",
         "networkUsed": False,
     }
+
+
+# User-taught knowledge integration for the existing Living Brain.
+def assess_knowledge_gap(message: str, user_id: str | None = None, country: str = "KE", language: str = "") -> dict[str, Any]:
+    from ai.unknown_learning import assess_unknown
+    return assess_unknown(message, user_id=user_id, country=country, language=language)
+
+
+def save_user_taught_knowledge(topic: str, user_id: str, steps: list[str], **kwargs: Any) -> dict[str, Any]:
+    from ai.unknown_learning import save_teaching
+    return save_teaching(topic, user_id, steps, **kwargs)
+
+
+def retrieve_reviewed_knowledge(message: str, root=None) -> list[dict[str, Any]]:
+    from ai.unknown_learning import known_matches
+    return known_matches(message, root=root)

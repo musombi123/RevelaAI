@@ -50,6 +50,8 @@ from ai.emotion import detect_emotion
 from ai.ecosystem import ecosystem
 from ai.platform_knowledge import get_platform_knowledge
 from ai.core_mesh import orchestrator_core_context
+from ai.unknown_learning import assess_unknown, known_matches
+from ai.worldwide_context import resolve_worldwide_context
 
 from services.scraper import (
     extract_urls,
@@ -1890,6 +1892,8 @@ class Orchestrator:
         document_context: dict | None = None,
         transcript: str | None = None,
         image_description: str | None = None,
+        country: str = "KE",
+        language: str = "",
     ) -> dict:
         """
         Execute the complete orchestration pipeline.
@@ -2202,7 +2206,18 @@ class Orchestrator:
         # FINAL ORCHESTRATION RESULT
         # -------------------------------------------------
 
+        world_context = resolve_worldwide_context(country, language)
+        unknown_assessment = assess_unknown(
+            normalized_message,
+            user_id=resolved_user_id,
+            country=world_context["country"],
+            language=world_context["language"],
+        )
+        unknown_assessment["known_matches"] = known_matches(normalized_message)
+
         return {
+            "country_context": world_context,
+            "unknown_learning": unknown_assessment,
             "core_mesh": orchestrator_core_context(
                 message=normalized_message,
                 domain=primary_domain,

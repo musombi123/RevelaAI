@@ -17,6 +17,7 @@ import (
 	"usect-zero.local/core-zero/diagnostics"
 	"usect-zero.local/core-zero/forge"
 	"usect-zero.local/core-zero/heal"
+	globalhealer "usect-zero.local/core-zero/healer"
 	"usect-zero.local/core-zero/internal/kernel"
 	"usect-zero.local/core-zero/mind"
 	"usect-zero.local/core-zero/radar"
@@ -90,6 +91,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		replyJSON(w, 200, map[string]any{"status": "ok", "service": "USECT-ZERO", "model_free": true, "offline_mode": true, "repository_root": k.Root, "execution_policy": "human-gated", "hardware_actuation": false})
 		return
 	}
+	if r.URL.Path == "/v1/heal/global-classify" && r.Method == http.MethodPost {
+		if _, ok := s.requireScope(w, r, "scan:read"); !ok { return }
+		var body map[string]string
+		if err := decodeJSON(w, r, &body); err != nil {
+			replyJSON(w, 400, apiError{"error", "invalid_json", "Send error_text and optional country/language."})
+			return
+		}
+		countryCode := strings.TrimSpace(r.URL.Query().Get("country"))
+		if countryCode == "" { countryCode = body["country"] }
+		language := strings.TrimSpace(r.URL.Query().Get("lang"))
+		if language == "" { language = body["language"] }
+		result, err := globalhealer.Classify(body["error_text"], countryCode, language, k.Root)
+		if err != nil {
+			replyJSON(w, 422, apiError{"error", "global_diagnostic_unavailable", err.Error()})
+			return
+		}
+		replyJSON(w, 200, map[string]any{"status": "ok", "result": result, "automatic_repair": false, "human_review_required": true})
+		return
+	}
+
 	if r.URL.Path == "/v1/keys/requests" && r.Method == http.MethodGet {
 		if !s.requireAdmin(w, r) { return }
 		status := strings.TrimSpace(r.URL.Query().Get("status"))

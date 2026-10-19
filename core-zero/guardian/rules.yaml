@@ -1,0 +1,32 @@
+version: 1
+mode: fail_closed
+core_law: "Protect, not destroy. Do not permit harmful engineering or unauthorized actions; human review remains required."
+block_categories:
+  - weapons
+  - warfare
+  - explosives
+  - malware_and_credential_theft
+  - privacy_violations
+  - covert_surveillance
+  - non_consensual_tracking
+  - unauthorized_safety_control_bypass
+  - illegal_operation
+required_gates:
+  - validate_inputs
+  - guardian_screening
+  - verify_provenance_and_integrity
+  - candidate_tests
+  - qualified_professional_review_for_hazardous_hardware
+  - explicit_human_approval
+  - explicit_merge
+extra_terms:
+  - "credential theft"
+  - "covert surveillance"
+  - "non-consensual tracking"
+  - "delete audit logs"
+  - "disable safety controls"
+notes:
+  - "This policy is a control index, not a complete legal compliance engine."
+  - "Phrase screening is not perfect semantic understanding and cannot guarantee that all harm is blocked."
+  - "Law must be independently verified for the deployment jurisdiction."
+  - "No auto-repair may execute an unreviewed command; no hardware is actuated automatically."

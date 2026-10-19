@@ -64,6 +64,7 @@ from being produced for actual image requests.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -71,6 +72,8 @@ from ai.ai_client import ask_hf
 from ai.system_prompt import SYSTEM_PROMPT
 from ai.orchestrator import Orchestrator
 from ai.usect_zero_tools import execute_for_message, tool_catalog_prompt
+from ai.unknown_learning import attach_genesis_proposal, clear_pending_unknown_ask, get_pending_unknown_ask, register_unknown_ask, save_teaching
+from ai.core_mesh import CoreMeshError, propose_genesis_invention
 
 
 # =========================================================
@@ -916,6 +919,8 @@ def process_message(
     intent: str = "general",
     session_id: str | None = None,
     user_id: str | None = None,
+    country: str = "KE",
+    language: str = "",
 ) -> dict:
     """
     Execute the RevelaAI intelligence pipeline.
@@ -955,6 +960,93 @@ def process_message(
             "error": "message is required",
             "error_code": "empty_message",
             "capability": "text",
+        }
+
+    # A deliberate TEACH: prefix turns the next chat message into a learning packet.
+    # Ordinary chat text is never silently ingested as training data.
+    if normalized_message.lower().startswith("teach:"):
+        pending = get_pending_unknown_ask(str(user_id or ""), str(session_id or ""))
+        if not pending:
+            return {
+                "response": "I don't have a pending learning request for this chat. Ask about the topic first, then reply with TEACH: followed by 1–3 safe steps.",
+                "confidence": "low", "intent": "learning_submission", "session_id": session_id,
+                "user_id": user_id, "capability": "learning_prompt", "provider": "revelaai-unknown-detector",
+                "model": "deterministic-no-model",
+            }
+        raw_steps = normalized_message.split(":", 1)[1].strip()
+        consent_to_share = bool(re.search(r"(?:^|\s)SHARE\s*:\s*YES(?:\s|$)", raw_steps, re.I))
+        raw_steps = re.sub(r"(?:^|\\s)SHARE\\s*:\\s*YES(?:\\s|$)", " ", raw_steps, flags=re.I).strip()
+        pieces = re.split(r"\n+|;\s*", raw_steps)
+        steps = []
+        for piece in pieces:
+            clean_step = re.sub(r"^(?:step\s*\d+\s*[:.)-]?|\d+[.)-])\s*", "", piece.strip(), flags=re.I)
+            if clean_step:
+                steps.append(clean_step[:500])
+        if not steps:
+            return {
+                "response": "Please add at least one clear step after TEACH:. Each step can go on a new line or be separated with a semicolon.",
+                "confidence": "low", "intent": "learning_submission", "session_id": session_id,
+                "user_id": user_id, "capability": "learning_prompt", "provider": "revelaai-unknown-detector",
+                "model": "deterministic-no-model",
+            }
+        try:
+            saved = save_teaching(
+                topic=pending.get("topic", "unknown topic"),
+                user_id=str(user_id or ""),
+                steps=steps[:12],
+                country=str(pending.get("country") or country or "KE"),
+                language=str(pending.get("language") or language or ""),
+                consent_to_share=consent_to_share,
+                source_request=str(pending.get("source_request") or ""),
+            )
+            clear_pending_unknown_ask(str(user_id or ""), str(session_id or ""))
+        except PermissionError as exc:
+            clear_pending_unknown_ask(str(user_id or ""), str(session_id or ""))
+            return {
+                "response": "I could not save those notes because they matched a restricted safety rule. No teaching text was retained; please provide a safe, authorized scope.",
+                "confidence": "low", "intent": "learning_blocked", "session_id": session_id,
+                "user_id": user_id, "capability": "learning_prompt", "provider": "revelaai-guardian",
+                "model": "deterministic-no-model", "guardian_blocked": True,
+            }
+        except (ValueError, OSError) as exc:
+            return {
+                "response": "I could not validate or persist those notes. Nothing was sent to Genesis; please shorten the steps or retry.",
+                "confidence": "low", "intent": "learning_submission", "session_id": session_id,
+                "user_id": user_id, "capability": "learning_prompt", "provider": "revelaai-unknown-detector",
+                "model": "deterministic-no-model",
+            }
+
+        proposal_status = "private_until_explicit_sharing_consent"
+        proposal_meta = {}
+        if consent_to_share:
+            first_steps = "; ".join(steps[:3])
+            demand = (
+                f"Create a safe reviewable tool proposal for {str(pending.get('topic') or '')[:140]}. "
+                f"Country {saved.get('country')}; language {saved.get('language')}. "
+                f"Unverified user notes: {first_steps[:170]}. Include localized supplier directory, quote-required BOM, "
+                "hardware guide, tests and safety gates. Await human merge."
+            )[:495]
+            try:
+                proposal = propose_genesis_invention(demand, country=saved["country"], language=saved["language"])
+                attached = attach_genesis_proposal(saved["topic_key"], proposal)
+                proposal_status = attached.get("status", "await_merge")
+                proposal_meta = attached.get("proposal", {})
+            except CoreMeshError as exc:
+                proposal_status = "awaiting_genesis"
+                proposal_meta = {"error_code": exc.code, "retry_allowed": True}
+
+        if consent_to_share:
+            response = f"Thanks. I saved your notes for “{saved['topic']}” and requested a guarded Genesis proposal. Status: {proposal_status}. It is not a live tool yet; review and merge are still required."
+        else:
+            response = f"Thanks. I saved your notes for “{saved['topic']}” privately. They have not been shared with other users or sent to Genesis. To create a shared tool, submit the same topic with SHARE: YES after confirming you consent to reuse."
+        return {
+            "response": response, "confidence": "medium", "intent": "learning_submission",
+            "domain": "engineering", "session_id": session_id, "user_id": user_id,
+            "capability": "learning_submission", "action_required": False,
+            "provider": "revelaai-living-brain", "model": "deterministic-no-model",
+            "learning": {"status": saved.get("status"), "topic": saved.get("topic"), "consent_to_share": consent_to_share,
+                         "genesis_status": proposal_status, "proposal": proposal_meta,
+                         "human_approval_required": True, "automatic_merge": False},
         }
 
     conversation_context = (
@@ -1081,6 +1173,8 @@ def process_message(
                 intent=intent,
                 session_id=session_id,
                 user_id=user_id,
+                country=country,
+                language=language,
             )
         )
 
@@ -1249,6 +1343,64 @@ def process_message(
         "online"
     ] = online_data
 
+    # Unknown niche engineering requests bypass model generation instead of inviting guesses.
+    unknown_data = orchestrator_data.get("unknown_learning", {})
+    if isinstance(unknown_data, dict) and unknown_data.get("is_unknown") is True and not tool_execution:
+        topic = str(unknown_data.get("topic") or "this topic")[:120]
+        locale = str((orchestrator_data.get("country_context") or {}).get("language") or language or "en")
+        ask_messages = {
+            "de": f"Ich habe dazu noch kein verifiziertes Tool, keine Bibliothek und kein geprüftes gemeinsames Wissen: „{topic}“. Ich werde keine Schritte erfinden. Kannst du mir 1–3 sichere Arbeitsschritte beisteuern? Entferne persönliche und vertrauliche Daten. Notizen bleiben zunächst privat; Teilen erfordert deine ausdrückliche Zustimmung. Eine Genesis-Erstellung bleibt bis zur Prüfung und Freigabe ein Vorschlag.",
+            "zh": f"我目前没有关于“{topic}”的已验证工具、库或审核过的共享知识，因此不会编造步骤。你能提供 1–3 个安全步骤吗？请删除个人和机密信息。笔记默认私有；共享需要明确同意。Genesis 创建结果在审核批准前只是提案。",
+            "ja": f"「{topic}」について、検証済みのツール・ライブラリ・共有知識がまだないため、手順を推測しません。安全な手順を1〜3個共有できますか。個人情報や機密情報は除いてください。メモは最初は非公開で、共有には明示的な同意が必要です。Genesis の生成物は審査・承認まで提案のままです。",
+            "fr": f"Je n'ai pas encore d'outil, de bibliothèque ni de connaissance partagée vérifiée pour « {topic} » ; je ne vais pas inventer de procédure. Peux-tu fournir 1 à 3 étapes sûres, sans données personnelles ni confidentielles ? Les notes restent privées par défaut ; le partage exige un consentement explicite. Toute proposition Genesis attend une revue et une approbation.",
+            "es": f"Aún no tengo una herramienta, biblioteca ni conocimiento compartido verificado sobre «{topic}», así que no inventaré los pasos. ¿Puedes aportar 1–3 pasos seguros? Elimina datos personales y confidenciales. Las notas serán privadas por defecto; compartirlas requiere consentimiento explícito. Toda propuesta de Genesis espera revisión y aprobación.",
+            "sw": f"Bado sina zana, maktaba au maarifa ya pamoja yaliyothibitishwa kuhusu “{topic}”; sitabuni hatua. Unaweza kutoa hatua 1–3 salama? Ondoa taarifa binafsi na za siri. Maelezo yatabaki ya faragha mwanzoni; kushiriki kunahitaji idhini ya wazi. Pendekezo la Genesis litasubiri ukaguzi na idhini.",
+        }
+        reply = ask_messages.get(
+            locale,
+            f"I don't yet have a verified tool, library, or reviewed shared memory for “{topic}”. I won't guess. Could you share 1–3 safe steps? Remove personal and confidential details first. Notes stay private by default; sharing requires explicit consent. Any Genesis tool remains a proposal until it is reviewed and approved.",
+        )
+        pending_registration = register_unknown_ask(
+            topic=topic,
+            user_id=str(user_id or ""),
+            session_id=str(session_id or ""),
+            country=str((orchestrator_data.get("country_context") or {}).get("country") or country or "KE"),
+            language=str((orchestrator_data.get("country_context") or {}).get("language") or language or ""),
+            source_request=normalized_message,
+        )
+        if pending_registration.get("registered"):
+            teaching_instructions = {
+                "de": "Antworte mit TEACH: und 1–3 sicheren Schritten. Nutze eine Zeile pro Schritt oder Semikolons. Schreibe SHARE: YES nur, wenn du der Nutzung durch andere ausdrücklich zustimmst; sonst bleiben die Notizen privat.",
+                "zh": "请回复 TEACH: 并附上 1–3 个安全步骤，每行一个或用分号分隔。只有明确同意其他用户复用时才添加 SHARE: YES；否则笔记保持私有。",
+                "ja": "TEACH: に続けて安全な手順を1〜3個入力してください。共有に明示的に同意する場合だけ SHARE: YES を追加してください。それ以外は非公開で保存されます。",
+                "fr": "Réponds avec TEACH: suivi de 1 à 3 étapes sûres. Ajoute SHARE: YES uniquement si tu consens explicitement au partage ; sinon les notes restent privées.",
+                "es": "Responde con TEACH: seguido de 1–3 pasos seguros. Añade SHARE: YES solo si consientes explícitamente compartirlos; de lo contrario, las notas serán privadas.",
+                "sw": "Jibu kwa TEACH: kisha hatua 1–3 salama. Ongeza SHARE: YES tu ikiwa unakubali wazi kushiriki na wengine; vinginevyo maelezo yatabaki ya faragha.",
+            }
+            teaching_suffix = teaching_instructions.get(
+                locale,
+                "Reply with TEACH: followed by 1–3 safe steps, one per line or separated by semicolons. Add SHARE: YES only if you explicitly consent to reuse by other users; otherwise the notes stay private.",
+            )
+            reply += chr(10) + chr(10) + teaching_suffix
+        else:
+            reply += chr(10) + chr(10) + "Sign in to RevelaCode to submit teaching notes. No new knowledge has been stored yet."
+
+        return {
+            "response": reply,
+            "confidence": "low",
+            "intent": "unknown_knowledge_gap",
+            "domain": orchestrator_data.get("domain", "general"),
+            "emotion": orchestrator_data.get("emotion", "unknown"),
+            "session_id": session_id,
+            "user_id": user_id,
+            "capability": "learning_prompt",
+            "action_required": False,
+            "provider": "revelaai-unknown-detector",
+            "model": "deterministic-no-model",
+            "orchestrator": orchestrator_data,
+            "unknown_learning": unknown_data,
+        }
+
     # =====================================================
     # DYNAMIC MODEL PROMPT
     # =====================================================
@@ -1261,6 +1413,16 @@ def process_message(
     )
 
     model_system_prompt += "\n\n" + tool_catalog_prompt()
+
+    reviewed_knowledge = unknown_data.get("known_matches", []) if isinstance(unknown_data, dict) else []
+    if isinstance(reviewed_knowledge, list) and reviewed_knowledge:
+        model_system_prompt += (
+            "\n\nREVIEWED REVELACODE LEARNING LIBRARY (source-bound; do not embellish):\n"
+            + json.dumps(reviewed_knowledge[:3], ensure_ascii=False, default=str)[:9000]
+            + "\nExplain that these are reviewed community notes, preserve endpoint and country context, "
+              "and distinguish them from live supplier prices or certified installation instructions. "
+              "Do not infer details not present in the records."
+        )
 
     # =====================================================
     # TEXT MODEL
