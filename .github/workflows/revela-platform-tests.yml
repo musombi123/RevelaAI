@@ -1,0 +1,42 @@
+name: RevelaAI Python Platform Tests
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rvx-and-license-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt "pytest>=8,<10"
+      - name: Compile all new Python modules
+        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor
+      - name: Import FastAPI and verify route registration
+        run: |
+          python - <<'PY'
+          from revela_platform.fastapi_app import app
+          paths = {getattr(route, "path", "") for route in app.routes}
+          required = {
+              "/v1/platform/health",
+              "/v1/billing/buy",
+              "/v1/billing/webhooks/stripe",
+              "/v1/meter/usage",
+              "/v1/marketplace/search",
+              "/v1/foundry/build",
+              "/v1/seed/{build_id}",
+              "/v1/auditor/verify",
+          }
+          missing = sorted(required - paths)
+          assert not missing, f"Required routes missing: {missing}"
+          print(f"FastAPI import and route smoke test passed ({len(required)} required routes).")
+          PY
+      - name: Run RVX, key, license, Foundry, Seed and Auditor tests
+        run: python -m pytest -q tests/test_revela_security.py tests/test_fastapi_revenue.py tests/test_mesh_receiver.py

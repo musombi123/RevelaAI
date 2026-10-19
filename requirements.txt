@@ -35,3 +35,11 @@ PyJWT>=2.8.0
 # Tests and bounded process monitoring
 pytest>=8.0,<9
 psutil>=5.9,<8
+
+# Python-native RVX security, billing and platform API
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2.7,<3
+SQLAlchemy>=2.0,<3
+cryptography>=42,<47
+psycopg[binary]>=3.2,<4
