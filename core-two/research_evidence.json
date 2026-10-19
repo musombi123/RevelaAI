@@ -1,15 +1,242 @@
 {
-  "schema_version":"usect-two.research-evidence.v1",
-  "observed_at":"2026-10-18T23:02:33Z",
-  "repository_snapshot":{"repository":"musombi123/RevelaAI","branch_baseline":"main","baseline_commit":"40dc1caf07419ad14f771be88fc238baa51d4480","source":"GitHub tree scan before Core-Two branch changes"},
-  "core_zero":{"exists":true,"module":"usect-zero.local/core-zero","imports":["usect-zero.local/core-zero/mind","usect-zero.local/core-zero/radar"],"guardian_rules_present":false},
-  "core_one":{"exists":true,"module":"revela-genesis.local/core-one","imports":["revela-genesis.local/core-one/genesis"],"observed_production_inventions":0,"inventions_path_observed":["core-one/inventions/README.md"],"created_library_source_files_observed":0},
-  "production_invention_count":0,
-  "average_time_to_invent_ms":null,
-  "average_bom_cost_kes":null,
-  "average_human_merge_time_ms":null,
-  "data_quality":{"historical_time_measurements_available":false,"verified_bom_costs_available":false,"zero_guardian_policy_file_present":false,"synthetic_fixture_counted_as_production_tool":false},
-  "synthetic_replay":{"fixture_id":"offline-vault-graph-replay-v1","source":"core-two/testdata/inventions/offline_vault/replay.json","baseline_ns_per_round":2656694,"candidate_ns_per_round":421937,"speedup_percent":529.64,"throughput_ratio":6.3,"replay_rounds":5,"synthetic_only":true,"scope":"graph traversal phase only; not end-to-end invention latency"},
-  "repository_inventory_snapshot":{"baseline_tree_entries_observed":318,"complete_github_tree_response":true,"zero_openapi_path":"core-zero/openapi.yaml","one_openapi_path":"core-one/openapi.yaml","root_openapi_path_present":false,"tracked_changelog_or_audit_log_paths_found":0,"note":"Runtime Mirror inventories the local full checkout, including ignored audit paths; values above are the baseline tracked Git tree scan."},
-  "note":"No historic production invention receipts were present. Unknown time, KES price, merge time, and safety scores remain null; the synthetic offline_vault benchmark is not counted as a Core-One tool or as verified savings. The absence of core-zero/guardian/rules.yaml is an integration gap, not a policy that Mind claims to have imported."
+  "schema_version": "usect-two.research-evidence.v1",
+  "record_type": "repository_baseline_and_research_evidence",
+  "record_id": "baseline-main-40dc1caf07419ad14f771be88fc238baa51d4480",
+  "observed_at": "2026-10-18T23:02:33Z",
+  "purpose": "Establish an auditable pre-Core-Two baseline for repository structure, production invention evidence, data quality, and synthetic capability-graph performance.",
+  "interpretation": {
+    "record_is_historical_snapshot": true,
+    "represents_current_runtime_state": false,
+    "synthetic_results_are_production_evidence": false,
+    "unknown_values_must_remain_null": true,
+    "recommendations_are_observations": false
+  },
+  "repository_snapshot": {
+    "repository": "musombi123/RevelaAI",
+    "branch_baseline": "main",
+    "baseline_commit": "40dc1caf07419ad14f771be88fc238baa51d4480",
+    "source": "GitHub tree scan before Core-Two branch changes",
+    "snapshot_kind": "tracked_repository_tree",
+    "is_baseline_reference": true
+  },
+  "core_zero": {
+    "exists": true,
+    "module": "usect-zero.local/core-zero",
+    "imports": [
+      "usect-zero.local/core-zero/mind",
+      "usect-zero.local/core-zero/radar"
+    ],
+    "guardian_rules_present": false,
+    "guardian_policy_status": "missing_in_baseline_snapshot",
+    "integration_status": "requires_verification",
+    "evidence_interpretation": "The absence of core-zero/guardian/rules.yaml is an integration gap. It does not establish that Mind imported or enforced an external Guardian policy."
+  },
+  "core_one": {
+    "exists": true,
+    "module": "revela-genesis.local/core-one",
+    "imports": [
+      "revela-genesis.local/core-one/genesis"
+    ],
+    "observed_production_inventions": 0,
+    "inventions_path_observed": [
+      "core-one/inventions/README.md"
+    ],
+    "created_library_source_files_observed": 0,
+    "baseline_interpretation": "No production invention receipts or created library source files were observed in the inspected baseline inventory."
+  },
+  "production_metrics": {
+    "production_invention_count": {
+      "value": 0,
+      "unit": "inventions",
+      "status": "observed",
+      "scope": "inspected baseline repository snapshot"
+    },
+    "average_time_to_invent_ms": {
+      "value": null,
+      "unit": "milliseconds",
+      "status": "unknown",
+      "reason": "Historical production invention timing measurements were unavailable."
+    },
+    "average_bom_cost_kes": {
+      "value": null,
+      "unit": "KES",
+      "status": "unknown",
+      "reason": "Verified bill-of-materials costs were unavailable."
+    },
+    "average_human_merge_time_ms": {
+      "value": null,
+      "unit": "milliseconds",
+      "status": "unknown",
+      "reason": "Historical human-review and merge-time measurements were unavailable."
+    },
+    "production_safety_score": {
+      "value": null,
+      "status": "not_measured",
+      "reason": "No validated production safety-scoring dataset was available."
+    }
+  },
+  "data_quality": {
+    "historical_time_measurements_available": false,
+    "verified_bom_costs_available": false,
+    "zero_guardian_policy_file_present": false,
+    "synthetic_fixture_counted_as_production_tool": false,
+    "production_invention_receipts_observed": false,
+    "human_merge_measurements_available": false,
+    "production_safety_score_available": false,
+    "unknown_measurements_preserved_as_null": true,
+    "inventory_scope_documented": true
+  },
+  "synthetic_replay": {
+    "fixture_id": "offline-vault-graph-replay-v1",
+    "source": "core-two/testdata/inventions/offline_vault/replay.json",
+    "baseline_ns_per_round": 2656694,
+    "candidate_ns_per_round": 421937,
+    "speedup_percent": 529.64,
+    "throughput_ratio": 6.3,
+    "latency_reduction_percent": 84.12,
+    "replay_rounds": 5,
+    "synthetic_only": true,
+    "scope": "graph traversal phase only; not end-to-end invention latency",
+    "production_measurement": false,
+    "counts_as_production_invention": false,
+    "verification_status": "synthetic_result_requires_reproduction",
+    "metric_definitions": {
+      "throughput_ratio": "baseline_ns_per_round / candidate_ns_per_round",
+      "speedup_percent": "(throughput_ratio - 1) * 100",
+      "latency_reduction_percent": "(baseline_ns_per_round - candidate_ns_per_round) / baseline_ns_per_round * 100"
+    },
+    "interpretation": "The candidate reduced measured graph-traversal time in this synthetic replay. This result does not establish equivalent gains in full invention latency, research, artifact generation, safety, correctness, or production throughput."
+  },
+  "repository_inventory_snapshot": {
+    "baseline_tree_entries_observed": 318,
+    "complete_github_tree_response": true,
+    "inventory_scope": "baseline tracked Git tree",
+    "zero_openapi_path": "core-zero/openapi.yaml",
+    "one_openapi_path": "core-one/openapi.yaml",
+    "root_openapi_path_present": false,
+    "tracked_changelog_or_audit_log_paths_found": 0,
+    "runtime_mirror_scope_note": "Runtime Mirror inventories the local full checkout, including ignored audit paths. The values in this record describe the baseline tracked Git tree scan, not the complete local runtime filesystem.",
+    "invention_inventory_note": "The absence of production invention artifacts in this baseline inventory must not be interpreted as proof that future or external runtime artifacts do not exist."
+  },
+  "evidence_rules": {
+    "observed_facts_require_provenance": true,
+    "derived_metrics_require_documented_formulas": true,
+    "synthetic_benchmarks_must_be_labeled": true,
+    "unknown_values_must_not_be_replaced_with_zero": true,
+    "reference_links_are_not_verified_evidence": true,
+    "production_counts_require_defined_scope": true,
+    "historical_snapshots_must_not_be_presented_as_live_state": true,
+    "safety_claims_require_defined_validation_evidence": true
+  },
+  "core_two_measurement_requirements": {
+    "invention_receipts": [
+      "invention_id",
+      "demand_received_at",
+      "guardian_decision",
+      "research_started_at",
+      "research_completed_at",
+      "generation_started_at",
+      "generation_completed_at",
+      "artifact_inventory",
+      "validation_results",
+      "proposal_status",
+      "review_started_at",
+      "review_decision_at",
+      "merge_commit"
+    ],
+    "performance_metrics": [
+      "end_to_end_invention_latency_ms",
+      "research_latency_ms",
+      "capability_planning_latency_ms",
+      "artifact_generation_latency_ms",
+      "validation_latency_ms",
+      "human_review_duration_ms"
+    ],
+    "bom_evidence": [
+      "manufacturer",
+      "part_number",
+      "quantity",
+      "currency",
+      "unit_price",
+      "shipping_and_tax_basis",
+      "observed_at",
+      "supplier_source",
+      "verification_status"
+    ],
+    "benchmark_requirements": [
+      "record_baseline_and_candidate_revisions",
+      "record_environment_and_configuration",
+      "record_sample_count",
+      "separate_graph_traversal_from_end_to_end_latency",
+      "verify_output_correctness",
+      "report_variability_when_sample_size_supports_it",
+      "exclude_synthetic_fixtures_from_production_counts"
+    ]
+  },
+  "derived_recommendations": [
+    {
+      "id": "REC-001",
+      "priority": "high",
+      "area": "guardian_integration",
+      "recommendation": "Resolve the observed Core-Zero Guardian-policy gap and verify the actual policy loading and enforcement path.",
+      "basis": "core_zero.guardian_rules_present is false",
+      "status": "proposed",
+      "is_observed_fact": false
+    },
+    {
+      "id": "REC-002",
+      "priority": "high",
+      "area": "invention_provenance",
+      "recommendation": "Introduce durable invention receipts that distinguish attempted, blocked, failed, staged, reviewed, merged, and production-verified outcomes.",
+      "basis": "Historical production receipts and lifecycle measurements were unavailable.",
+      "status": "proposed",
+      "is_observed_fact": false
+    },
+    {
+      "id": "REC-003",
+      "priority": "high",
+      "area": "measurement",
+      "recommendation": "Measure end-to-end invention time and each major processing phase separately.",
+      "basis": "The supplied benchmark covers graph traversal only.",
+      "status": "proposed",
+      "is_observed_fact": false
+    },
+    {
+      "id": "REC-004",
+      "priority": "high",
+      "area": "bom_accounting",
+      "recommendation": "Collect verified part-level BOM evidence before reporting average invention costs or cost savings.",
+      "basis": "Verified BOM costs were unavailable.",
+      "status": "proposed",
+      "is_observed_fact": false
+    },
+    {
+      "id": "REC-005",
+      "priority": "medium",
+      "area": "repository_inventory",
+      "recommendation": "Report tracked Git inventory, local runtime inventory, ignored files, generated proposals, and production tools as separate inventory categories.",
+      "basis": "The baseline tracked-tree inventory and Runtime Mirror inventory have different scopes.",
+      "status": "proposed",
+      "is_observed_fact": false
+    },
+    {
+      "id": "REC-006",
+      "priority": "medium",
+      "area": "performance_validation",
+      "recommendation": "Reproduce the graph benchmark with more rounds, controlled execution conditions, and correctness checks before using it as a release-level performance claim.",
+      "basis": "The supplied synthetic replay used five rounds.",
+      "status": "proposed",
+      "is_observed_fact": false
+    }
+  ],
+  "limitations": [
+    "This record describes a historical baseline snapshot, not the current repository or runtime state.",
+    "No historic production invention receipts were present in the inspected baseline evidence.",
+    "Unknown invention time, BOM cost, human merge time, and safety scores remain null.",
+    "The synthetic offline_vault fixture is not counted as a Core-One production invention.",
+    "The graph traversal benchmark is not an end-to-end invention benchmark.",
+    "The absence of a tracked changelog or audit-log path does not prove that no untracked or external logs exist.",
+    "The missing Core-Zero Guardian rules file is an integration gap, not evidence that Mind imported a policy."
+  ],
+  "note": "No historic production invention receipts were present. Unknown time, KES price, merge time, and safety scores remain null; the synthetic offline_vault benchmark is not counted as a Core-One tool or as verified savings. The absence of core-zero/guardian/rules.yaml is an integration gap, not a policy that Mind claims to have imported."
 }
