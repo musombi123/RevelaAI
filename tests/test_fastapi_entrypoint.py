@@ -35,6 +35,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/v1/learn/known" in schema["paths"]
     assert "/health" in schema["paths"]
     assert "/ai" in schema["paths"]
+    assert "/ai/stream" in schema["paths"]
     assert "/ready" in schema["paths"]
     assert "/capabilities" in schema["paths"]
     assert "/ai/images/{filename}" in schema["paths"]
@@ -374,10 +375,9 @@ def test_whatsapp_ignores_webhook_notifications_without_messages() -> None:
     assert response.json() == {"status": "no message"}
 
 
-def test_unmigrated_direct_route_still_uses_compatibility_bridge() -> None:
-    # /ai/stream has not yet been ported. An empty message should be rejected
-    # by the original handler before any provider or model is invoked.
+def test_native_stream_route_rejects_empty_message_before_provider_calls() -> None:
     response = client.post("/ai/stream", json={})
     assert response.status_code == 400
+    assert response.json()["error"]["code"] == "EMPTY_MESSAGE"
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
