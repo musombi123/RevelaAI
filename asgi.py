@@ -24,6 +24,7 @@ from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.vision import router as vision_router
 from fastapi_routes.system import router as system_router
+from fastapi_routes.whatsapp import router as whatsapp_router
 
 legacy_flask_app = legacy_app_module.app
 logger = logging.getLogger("revelaai.asgi")
@@ -149,6 +150,7 @@ app.include_router(explain_router)
 app.include_router(fastapi_hub_router)
 app.include_router(living_brain_router)
 app.include_router(vision_router)
+app.include_router(whatsapp_router)
 
 # Temporary bridge: remaining Flask endpoints retain their established contract.
 app.mount("/", WSGIMiddleware(legacy_flask_app), name="legacy-flask")
