@@ -34,6 +34,15 @@ except (TypeError, ValueError):
     VERIFY_TIMEOUT_SECONDS = 4.0
 
 
+def _header_value(headers: Mapping[str, str], name: str) -> str:
+    """Read headers case-insensitively, including after a Starlette Headers -> dict conversion."""
+    wanted = name.casefold()
+    for key, value in headers.items():
+        if str(key).casefold() == wanted:
+            return str(value or "")
+    return ""
+
+
 def authenticate_identity(
     authorization: str,
     headers: Mapping[str, str],
@@ -45,7 +54,7 @@ def authenticate_identity(
         return None, None, JSONResponse(
             {"status": "error", "code": "auth_not_configured"}, status_code=503
         )
-    header = (authorization or "").strip()
+    header = (authorization or _header_value(headers, "authorization")).strip()
     if not header.startswith("Bearer ") or not header[7:].strip():
         return None, None, JSONResponse(
             {"status": "error", "code": "authentication_required"}, status_code=401
@@ -78,8 +87,8 @@ def authenticate_identity(
     hints = [
         str(value).strip()
         for value in (
-            headers.get("userid", ""),
-            headers.get("x-user-id", ""),
+            _header_value(headers, "userId"),
+            _header_value(headers, "X-User-ID"),
             path_user_id,
             (payload or {}).get("userId", ""),
         )
