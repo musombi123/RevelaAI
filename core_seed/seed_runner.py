@@ -16,6 +16,7 @@ from typing import Any
 
 from core_billing.licensing import LicenseError, verify_license_token
 from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
+from core_foundry.attestation import AttestationError, verify_approval_attestation
 
 
 class SeedError(RuntimeError):
@@ -58,6 +59,10 @@ class SeedRunner:
             raise SeedError("Only the owner or a verified marketplace buyer may seed this factory.")
         if source.get("status") != "approved":
             raise SeedError("Factory must pass human review before seeding.")
+        try:
+            source = verify_approval_attestation(source)
+        except AttestationError as exc:
+            raise SeedError("Factory review attestation is missing or invalid.") from exc
         seed_id = "seed_" + hashlib.sha256(
             f"{build_id}:{user_id}:{child_name.strip()}".encode()
         ).hexdigest()[:24]
