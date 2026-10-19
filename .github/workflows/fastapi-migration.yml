@@ -14,10 +14,11 @@ on:
       - "tests/test_fastapi_entrypoint.py"
       - ".github/workflows/fastapi-migration.yml"
   push:
-    branches: [migration/flask-to-fastapi]
+    branches: [migration/flask-to-fastapi, migration/fastapi-shared-routes]
     paths:
       - "asgi.py"
       - "app.py"
+      - "legacy_flask_app.py"
       - "requirements.txt"
       - "render.yaml"
       - "routes/**"
