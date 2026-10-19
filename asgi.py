@@ -28,6 +28,7 @@ from fastapi_routes.memory import router as memory_router
 from fastapi_routes.meta_engineer import router as meta_engineer_router
 from fastapi_routes.vision import router as vision_router
 from fastapi_routes.system import router as system_router
+from fastapi_routes.usect_zero import router as usect_zero_router
 from fastapi_routes.whatsapp import router as whatsapp_router
 
 legacy_flask_app = legacy_app_module.app
@@ -96,6 +97,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/api/sci/shield/dashboard",
     }
     native_prefixes = (
+        "/api/usect-zero/",
         "/api/core-mesh/",
         "/v1/learn/",
         "/api/memory/",
@@ -182,6 +184,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 app.include_router(system_router)
 app.include_router(agi_router)
 app.include_router(sci_core_router)
+app.include_router(usect_zero_router)
 app.include_router(core_mesh_router)
 app.include_router(memory_router)
 app.include_router(meta_engineer_router)
