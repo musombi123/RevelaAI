@@ -34,7 +34,6 @@ async def create_stripe_checkout(*, intent_id: str, user_id: str, purpose: str,
         "success_url": success + "?session_id={CHECKOUT_SESSION_ID}",
         "cancel_url": cancel,
         "client_reference_id": user_id,
-        "customer_creation": "always" if not subscription else "if_required",
         "line_items[0][price_data][currency]": "usd",
         "line_items[0][price_data][unit_amount]": str(amount_cents),
         "line_items[0][price_data][product_data][name]": name[:120],
@@ -43,6 +42,8 @@ async def create_stripe_checkout(*, intent_id: str, user_id: str, purpose: str,
         "metadata[user_id]": user_id,
         "metadata[country]": country,
     }
+    if not subscription:
+        form["customer_creation"] = "always"
     if subscription:
         form["line_items[0][price_data][recurring][interval]"] = "month"
         form["subscription_data[metadata][intent_id]"] = intent_id
