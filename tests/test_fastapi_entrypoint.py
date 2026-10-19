@@ -46,6 +46,10 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/meta-engineer/approve/{idea_id}" in schema["paths"]
     assert "/api/meta-engineer/pruner/audit" in schema["paths"]
     assert "/api/usect-zero/health" in schema["paths"]
+    assert "/api/usect-zero/keys/requests" in schema["paths"]
+    assert "/api/usect-zero/keys/issued" in schema["paths"]
+    assert "/api/usect-zero/assemble" in schema["paths"]
+    assert "/api/usect-zero/radar/compare" in schema["paths"]
     assert "/api/automation-fabric/health" in schema["paths"]
     assert "/api/automation-fabric/consent" in schema["paths"]
     assert "/api/automation-fabric/execute" in schema["paths"]
@@ -209,6 +213,20 @@ def test_automation_fabric_health_and_privileged_routes() -> None:
     )
     assert consent.status_code in (401, 503)
     assert consent.json().get("status") == "error"
+
+
+def test_usect_zero_admin_operations_remain_admin_only() -> None:
+    activity = client.get("/api/usect-zero/activity")
+    assert activity.status_code == 401
+    assert activity.json()["code"] == "authentication_required"
+
+    requests = client.get("/api/usect-zero/keys/requests")
+    assert requests.status_code == 401
+    assert requests.json()["code"] == "authentication_required"
+
+    invalid_filter = client.get("/api/usect-zero/keys/requests?status=unknown")
+    assert invalid_filter.status_code == 400
+    assert invalid_filter.json()["code"] == "invalid_status_filter"
 
 
 def test_usect_zero_health_is_explicitly_disabled_without_opt_in(monkeypatch) -> None:
