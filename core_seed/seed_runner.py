@@ -69,6 +69,7 @@ class SeedRunner:
             "child_name": child_name.strip(),
             "owner_user_id": user_id,
             "license_id": claims.get("jti"),
+            "license_token": license_key,
             "plan": claims.get("plan"),
             "seeded_at": created.isoformat(),
             "offline_until": offline_until,
@@ -82,14 +83,58 @@ class SeedRunner:
                 "human_activation_required": True,
             },
         }
-        target_dir.mkdir(parents=True, exist_ok=False)
+        canonical_child = json.dumps(child, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        child["child_sha256"] = hashlib.sha256(canonical_child).hexdigest()
+        target_dir.mkdir(parents=True, exist_ok=False, mode=0o700)
         temp = target_dir / ".child.tmp"
         final = target_dir / "child.json"
         try:
             temp.write_text(json.dumps(child, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+            try:
+                temp.chmod(0o600)
+            except OSError:
+                pass
             os.replace(temp, final)
         except Exception:
             temp.unlink(missing_ok=True)
             raise
         return {"seed_id": seed_id, "status": child["status"], "offline_until": offline_until,
                 "path": str(final), "note": "Declarative child seeded; code execution and activation remain disabled."}
+
+    def verify_child_offline(self, seed_id: str, *, now: datetime | None = None) -> dict[str, Any]:
+        """Locally verify a child manifest and its signed offline entitlement."""
+        if not re.fullmatch(r"seed_[a-f0-9]{24}", seed_id):
+            raise SeedError("Invalid child seed identifier.")
+        path = (self.output_root / seed_id / "child.json").resolve()
+        if self.output_root.resolve() not in path.parents:
+            raise SeedError("Child manifest path is outside the seed root.")
+        try:
+            child = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SeedError("Child bundle could not be read.") from exc
+        claimed_hash = child.pop("child_sha256", None)
+        actual_hash = hashlib.sha256(
+            json.dumps(child, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        if not isinstance(claimed_hash, str) or not __import__("hmac").compare_digest(claimed_hash, actual_hash):
+            raise SeedError("Child manifest integrity check failed.")
+        token = child.get("license_token")
+        try:
+            claims = verify_license_token(token, now=now)
+        except LicenseError as exc:
+            raise SeedError(str(exc)) from exc
+        if claims.get("sub") != child.get("owner_user_id"):
+            raise SeedError("Child owner does not match signed license.")
+        if claims.get("jti") != child.get("license_id"):
+            raise SeedError("Child license ID does not match signed license.")
+        if int(claims.get("offline_until", 0)) != int(child.get("offline_until", -1)):
+            raise SeedError("Child offline lease differs from signed license.")
+        if child.get("status") != "seeded_review_required":
+            raise SeedError("Child is not in an authorized seed state.")
+        return {
+            "ok": True, "seed_id": seed_id, "owner_user_id": child["owner_user_id"],
+            "license_id": child["license_id"], "plan": child.get("plan"),
+            "offline_until": child["offline_until"],
+            "offline_authorized": int((now or datetime.now(timezone.utc)).timestamp()) <= child["offline_until"],
+            "execution_enabled": False,
+        }
