@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 import app as legacy
+from services.conversation_store import MAX_HISTORY, MAX_SESSIONS, SESSION_MEMORY, SESSION_TTL_SECONDS
 from ai.ai_client import hf_configured
 from ai.json_utils import error_response
 
@@ -168,9 +169,9 @@ def health():
         },
         "features_loaded": len(legacy.FEATURES),
         "session_memory": {
-            "active_sessions": len(legacy.SESSION_MEMORY),
-            "max_sessions": legacy.MAX_SESSIONS,
-            "ttl_seconds": legacy.SESSION_TTL_SECONDS,
+            "active_sessions": len(SESSION_MEMORY),
+            "max_sessions": MAX_SESSIONS,
+            "ttl_seconds": SESSION_TTL_SECONDS,
             "max_history_messages": legacy.MAX_HISTORY,
             "server_storage": "in_memory",
             "browser_context_supported": True,
