@@ -1,8 +1,8 @@
-"""FastAPI ASGI entry point for the staged RevelaAI gateway migration.
+"""Native FastAPI application and ASGI entry point for RevelaAI.
 
-Routes ported to FastAPI are registered natively. The root-mounted WSGI
-compatibility adapter remains temporary for legacy routes not yet migrated;
-remove it only after complete route and security-contract parity is proven.
+All active HTTP routes are implemented by FastAPI routers. This module does not
+mount a WSGI application or import Flask. Keep sector-specific business logic
+inside its existing services; expose HTTP handlers through fastapi_routes/.
 """
 from __future__ import annotations
 
@@ -11,16 +11,14 @@ import logging
 import time
 import uuid
 
-import legacy_flask_app as legacy_app_module
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
-from a2wsgi import WSGIMiddleware
 
 from fastapi_routes.agi import router as agi_router
 from fastapi_routes.ai import router as ai_router
 from fastapi_routes.automation_fabric import router as automation_fabric_router
-from fastapi_routes.sci_core import router as sci_core_router
 from fastapi_routes.chat import router as chat_router
 from fastapi_routes.core_mesh import router as core_mesh_router
 from fastapi_routes.explain import router as explain_router
@@ -28,35 +26,37 @@ from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
 from fastapi_routes.meta_engineer import router as meta_engineer_router
-from fastapi_routes.vision import router as vision_router
 from fastapi_routes.research import router as research_router
-from fastapi_routes.users import router as users_router
-from fastapi_routes.voice import router as voice_router
-from fastapi_routes.system import router as system_router
+from fastapi_routes.sci_core import router as sci_core_router
 from fastapi_routes.stream import router as stream_router
+from fastapi_routes.system import router as system_router
 from fastapi_routes.usect_zero import router as usect_zero_router
+from fastapi_routes.users import router as users_router
+from fastapi_routes.vision import router as vision_router
+from fastapi_routes.voice import router as voice_router
 from fastapi_routes.whatsapp import router as whatsapp_router
 
-legacy_flask_app = legacy_app_module.app
+from services.http_config import CORS_ORIGINS
+from services.runtime_config import APP_NAME, ENVIRONMENT, MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID
+from services.security_state import SCI_RATE_LOCK, SCI_REQUEST_TIMES, SCI_THROTTLE
+
 logger = logging.getLogger("revelaai.asgi")
 
 app = FastAPI(
     title="RevelaAI API",
     description=(
-        "RevelaAI API gateway. The migration is staged; routes not yet ported "
-        "are served by the temporary WSGI compatibility adapter."
+        "RevelaAI native FastAPI gateway. All active HTTP endpoints run through "
+        "the ASGI application; no Flask/WSGI compatibility mount is used."
     ),
-    version="2.2.0",
+    version="2.3.0",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
 
-# Native FastAPI endpoints must enforce the same trusted-origin CORS policy as
-# the legacy Flask gateway. Keep credentials enabled only for explicit origins.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(legacy_app_module.CORS_ORIGINS),
+    allow_origins=list(CORS_ORIGINS),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[
@@ -71,117 +71,122 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def asgi_security_and_legacy_throttle(request: Request, call_next):
-    """Maintain baseline response headers and SCI throttle for native routes."""
+async def asgi_security_and_throttle(request: Request, call_next):
+    """Apply request IDs, size guards, baseline headers and the reversible SCI cooldown."""
     path = request.url.path
     request_id = request.headers.get("X-Request-ID", "").strip()[:100] or uuid.uuid4().hex
     request.state.request_id = request_id
 
-    # The WSGI app runs its original before_request throttle itself. Count only
-    # native ASGI requests here to avoid double-counting bridge traffic.
-    native_exact_paths = {
-        "/",
-        "/capabilities",
-        "/health",
-        "/ready",
-        "/chat",
-        "/_fastapi/health",
-        "/docs",
-        "/openapi.json",
-        "/redoc",
-        "/api/core-mesh/dashboard",
-        "/api/core-mesh/genesis/invent",
-        "/api/core-mesh/mind/evolve",
-        "/v1/learn/unknown",
-        "/v1/learn/known",
-        "/api/chat",
-        "/api/chat/",
-        "/api/research",
-        "/api/users",
-        "/api/memory/chat",
-        "/api/memory/ideas",
-        "/webhook/whatsapp",
-        "/voice",
-        "/ai",
-        "/ai/stream",
-        "/api/vision/analyze",
-        "/api/sci/shield/dashboard",
-        "/api/automation-fabric/health",
-    }
-    native_prefixes = (
-        "/api/usect-zero/",
-        "/api/sci/",
-        "/api/automation-fabric/",
-        "/api/core-mesh/",
-        "/v1/learn/",
-        "/api/memory/",
-        "/api/chat/",
-        "/api/research/",
-        "/api/users/",
-        "/api/vision/",
-        "/api/revelaai/hubs",
-        "/api/revelaai/v2/",
-        "/ai/images/",
-        "/voice/audio/",
-    )
-    is_native_asgi = path in native_exact_paths or path.startswith(native_prefixes)
-
-    if is_native_asgi:
-        now = time.time()
-        request_times = legacy_app_module._SCI_REQUEST_TIMES
-        rate_lock = legacy_app_module._SCI_RATE_LOCK
-        throttle = legacy_app_module.SCI_THROTTLE
-
-        with rate_lock:
-            while request_times and now - request_times[0] > 1:
-                request_times.popleft()
-            request_times.append(now)
-            measured_rps = len(request_times)
-
-        if measured_rps > 200 and not throttle.get("enabled"):
-            throttle.update({
-                "enabled": True,
-                "reason": "observed_rps_over_200",
-                "since": datetime.now(timezone.utc).isoformat(),
-            })
-
-        if throttle.get("enabled"):
-            since = throttle.get("since")
-            try:
-                started = datetime.fromisoformat(str(since)).timestamp()
-            except Exception:
-                started = now
-
-            if now - started > 60:
-                throttle.update({"enabled": False, "reason": None, "since": None})
-            elif path not in {
-                "/health",
-                "/ready",
-                "/api/sci/shield/status",
-                "/api/sci/shield/dashboard",
-                "/api/sci/disaster/simulate",
-            }:
-                response = JSONResponse(
-                    {
-                        "status": "error",
-                        "code": "SCI_SHIELD_COOLDOWN",
-                        "message": "RevelaAI Shield Active - Cooling Down",
-                        "retry_after_seconds": max(1, int(60 - (now - started))),
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            request_size = int(content_length)
+            if request_size < 0:
+                raise ValueError("negative content length")
+        except ValueError:
+            response = JSONResponse(
+                {
+                    "status": "error",
+                    "error": {
+                        "code": "INVALID_CONTENT_LENGTH",
+                        "message": "Invalid Content-Length header.",
                     },
-                    status_code=429,
-                )
-                response.headers["X-Request-ID"] = request_id
-                response.headers["X-Content-Type-Options"] = "nosniff"
-                response.headers["X-Frame-Options"] = "DENY"
-                response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-                return response
+                    "request_id": request_id,
+                },
+                status_code=400,
+            )
+            return _secure_response(response, request_id)
+        if request_size > MAX_CONTENT_LENGTH:
+            response = JSONResponse(
+                {
+                    "status": "error",
+                    "error": {
+                        "code": "REQUEST_TOO_LARGE",
+                        "message": "The request exceeds the allowed size.",
+                    },
+                    "request_id": request_id,
+                },
+                status_code=413,
+            )
+            return _secure_response(response, request_id)
+
+    now = time.time()
+    with SCI_RATE_LOCK:
+        while SCI_REQUEST_TIMES and now - SCI_REQUEST_TIMES[0] > 1:
+            SCI_REQUEST_TIMES.popleft()
+        SCI_REQUEST_TIMES.append(now)
+        measured_rps = len(SCI_REQUEST_TIMES)
+
+    if measured_rps > 200 and not SCI_THROTTLE.get("enabled"):
+        SCI_THROTTLE.update({
+            "enabled": True,
+            "reason": "observed_rps_over_200",
+            "since": datetime.now(timezone.utc).isoformat(),
+        })
+
+    if SCI_THROTTLE.get("enabled"):
+        since = SCI_THROTTLE.get("since")
+        try:
+            started = datetime.fromisoformat(str(since)).timestamp()
+        except (TypeError, ValueError):
+            started = now
+
+        if now - started > 60:
+            SCI_THROTTLE.update({"enabled": False, "reason": None, "since": None})
+        elif path not in {
+            "/health",
+            "/ready",
+            "/api/sci/shield/status",
+            "/api/sci/shield/dashboard",
+            "/api/sci/disaster/simulate",
+            "/_fastapi/health",
+        }:
+            response = JSONResponse(
+                {
+                    "status": "error",
+                    "code": "SCI_SHIELD_COOLDOWN",
+                    "message": "RevelaAI Shield Active - Cooling Down",
+                    "retry_after_seconds": max(1, int(60 - (now - started))),
+                },
+                status_code=429,
+            )
+            return _secure_response(response, request_id)
 
     response = await call_next(request)
+    return _secure_response(response, request_id)
+
+
+def _secure_response(response, request_id: str):
     response.headers.setdefault("X-Request-ID", request_id)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    request_id = getattr(request.state, "request_id", None)
+    if exc.status_code == 404:
+        body = {
+            "status": "error",
+            "error": {"code": "NOT_FOUND", "message": "Resource not found."},
+            "request_id": request_id,
+        }
+    elif exc.status_code == 405:
+        body = {
+            "status": "error",
+            "error": {"code": "METHOD_NOT_ALLOWED", "message": "HTTP method is not allowed."},
+            "request_id": request_id,
+        }
+    else:
+        detail = exc.detail if isinstance(exc.detail, str) else "Request could not be completed."
+        body = {
+            "status": "error",
+            "error": {"code": f"HTTP_{exc.status_code}", "message": detail},
+            "request_id": request_id,
+        }
+    return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
 @app.get("/_fastapi/health", tags=["Operations"])
@@ -191,12 +196,15 @@ async def fastapi_gateway_health() -> dict[str, str]:
         "status": "ok",
         "service": "revelaai",
         "runtime": "fastapi",
-        "migration": "compatibility-phase",
+        "migration": "native-fastapi-only",
+        "application": APP_NAME,
+        "environment": ENVIRONMENT,
+        "build_id": REVELAAI_BUILD_ID,
     }
 
 
-# Native FastAPI routes precede the catch-all WSGI mount so these endpoints no
-# longer execute through Flask.
+# All active endpoint families are mounted natively. Keep sector/business logic in
+# the existing service modules; do not mount Flask blueprints or WSGI applications.
 app.include_router(system_router)
 app.include_router(ai_router)
 app.include_router(stream_router)
@@ -216,6 +224,3 @@ app.include_router(living_brain_router)
 app.include_router(vision_router)
 app.include_router(whatsapp_router)
 app.include_router(voice_router)
-
-# Temporary bridge: remaining Flask endpoints retain their established contract.
-app.mount("/", WSGIMiddleware(legacy_flask_app), name="legacy-flask")
