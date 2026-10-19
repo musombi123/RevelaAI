@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import secrets
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 ROOT_KEY_BYTES = 512  # 4096 bits of random root-key material.
 _BLOB_AAD = b"REVELA-RVX-BLOB-V1"
 _PACKET_PREFIX = "RVXP1."
+_REPLAY_LOCK = threading.Lock()
+_REPLAY_WINDOW: str | None = None
+_REPLAY_IDS: set[str] = set()
 
 
 class RecipeError(RuntimeError):
@@ -144,7 +148,8 @@ def seal_packet(payload: Any, *, route: str, secret: bytes | None = None,
     # one hour, while daily labels still evolve once every UTC day.
     key = _derive_key(root, salt=window.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
     nonce = secrets.token_bytes(12)
-    aad = ("REVELA-RVXP1|" + route + "|" + window).encode()
+    message_id = secrets.token_urlsafe(18)
+    aad = ("REVELA-RVXP1|" + route + "|" + window + "|" + message_id).encode()
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     ciphertext = AESGCM(key).encrypt(nonce, raw, aad)
     return {
@@ -153,6 +158,7 @@ def seal_packet(payload: Any, *, route: str, secret: bytes | None = None,
         "day": day,
         "window": window,
         "route": route,
+        "message_id": message_id,
         "nonce": _b64e(nonce),
         "body": _b64e(ciphertext),
     }
@@ -179,9 +185,25 @@ def open_packet(envelope: dict[str, Any], *, route: str, secret: bytes | None = 
     root = secret if secret is not None else _mesh_secret()
     try:
         key = _derive_key(root, salt=current_window.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
-        aad = ("REVELA-RVXP1|" + route + "|" + current_window).encode()
+        message_id = envelope.get("message_id")
+        if not isinstance(message_id, str) or len(message_id) < 16 or len(message_id) > 100:
+            raise RecipeError("RVX packet is missing a valid unique message identifier.")
+        aad = ("REVELA-RVXP1|" + route + "|" + current_window + "|" + message_id).encode()
         plaintext = AESGCM(key).decrypt(_b64d(envelope["nonce"]), _b64d(envelope["body"]), aad)
-        return json.loads(plaintext)
+        decoded = json.loads(plaintext)
+        # Authenticated duplicate prevention for all callers sharing this process.
+        # Distributed peers should additionally enforce a durable/shared replay store.
+        global _REPLAY_WINDOW, _REPLAY_IDS
+        with _REPLAY_LOCK:
+            if _REPLAY_WINDOW != current_window:
+                _REPLAY_WINDOW = current_window
+                _REPLAY_IDS = set()
+            if message_id in _REPLAY_IDS:
+                raise StalePacketError("Replayed RVX packet identifier rejected.")
+            if len(_REPLAY_IDS) >= 100_000:
+                raise RecipeError("RVX replay window capacity reached; refusing new packets.")
+            _REPLAY_IDS.add(message_id)
+        return decoded
     except StalePacketError:
         raise
     except Exception as exc:
