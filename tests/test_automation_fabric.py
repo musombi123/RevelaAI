@@ -126,3 +126,57 @@ def test_consent_can_be_revoked(tmp_path):
     assert store.has_scope("test-user", "workspace:read", db_path=db)
     assert store.revoke_scopes("test-user", ["workspace:read"], db_path=db) == ["workspace:read"]
     assert not store.has_scope("test-user", "workspace:read", db_path=db)
+
+def test_local_agent_is_fastapi_loopback_only_and_requires_its_bearer_token(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("REVELAAI_AUTOMATION_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("REVELAAI_AUTOMATION_DB", str(tmp_path / "fabric.sqlite3"))
+    monkeypatch.setenv(
+        "REVELAAI_AUTOMATION_ALLOWED_ORIGINS",
+        "https://revelacode.co.ke",
+    )
+
+    from automation_fabric.local_agent import create_local_app
+
+    app = create_local_app("local-agent-test-token")
+    local_client = TestClient(app, client=("127.0.0.1", 50123))
+
+    health = local_client.get("/api/v1/health")
+    assert health.status_code == 200
+    assert health.json()["mode"] == "local-device"
+
+    unauthorized = local_client.get("/api/v1/tools")
+    assert unauthorized.status_code == 401
+    assert unauthorized.json()["code"] == "local_token_required"
+
+    authorized = local_client.get(
+        "/api/v1/tools",
+        headers={"Authorization": "Bearer local-agent-test-token"},
+    )
+    assert authorized.status_code == 200
+    assert authorized.json()["runtime"] == "local-device"
+
+    preflight = local_client.options(
+        "/api/v1/tools",
+        headers={
+            "Origin": "https://revelacode.co.ke",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert preflight.status_code == 204
+    assert preflight.headers["Access-Control-Allow-Origin"] == "https://revelacode.co.ke"
+
+    blocked_origin = local_client.get(
+        "/api/v1/health",
+        headers={"Origin": "https://untrusted.example"},
+    )
+    assert blocked_origin.status_code == 403
+    assert blocked_origin.json()["code"] == "origin_not_allowed"
+
+    remote_client = TestClient(app, client=("198.51.100.20", 50123))
+    blocked_peer = remote_client.get("/api/v1/health")
+    assert blocked_peer.status_code == 403
+    assert blocked_peer.json()["code"] == "loopback_only"
+
