@@ -893,42 +893,88 @@ def list_audit_events(limit: int = Query(default=50, ge=1, le=250),
     }
 
 
-# Tool licensing guard for future and already-registered single-segment tool endpoints.
-# Unregistered paths continue into the original Flask gateway unchanged.
+# Tool licensing guard for registered tool routes and unknown single-segment /v1 paths.
+# Known static legacy Flask routes are preserved. Tool-like dynamic routes fail closed.
+def _legacy_static_route_exists(path: str, method: str) -> bool:
+    from werkzeug.exceptions import HTTPException as WerkzeugHTTPException
+
+    try:
+        rule, _values = flask_app.url_map.bind("localhost").match(
+            path, method=method, return_rule=True
+        )
+    except WerkzeugHTTPException:
+        return False
+    return "<" not in rule.rule
+
+
+def _record_usage_safely(*, user_id: str, tool_id: str, country: str,
+                         latency_ms: float, success: bool, cost_saved_usd: float = 0.0) -> None:
+    import logging
+    try:
+        with SessionLocal() as meter_session:
+            record_usage(
+                meter_session, user_id=user_id, tool_id=tool_id, country=country,
+                latency_ms=latency_ms, success=success,
+                cost_saved_usd=cost_saved_usd,
+            )
+    except Exception:
+        logging.getLogger(__name__).exception("usage event could not be persisted")
+
+
 @app.middleware("http")
 async def licensed_tool_guard(request: Request, call_next):
     path = request.url.path
     parts = path.strip("/").split("/")
     tool_id = parts[1] if len(parts) == 2 and parts[0] == "v1" else None
     method = request.method.upper()
-    tracked_tool: ToolRecord | None = None
-    if tool_id and method in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
-        try:
-            with SessionLocal() as lookup:
-                candidate = lookup.get(ToolRecord, tool_id)
-                if candidate is not None and candidate.status == "published":
-                    tracked_tool = candidate
-        except Exception:
-            return JSONResponse(status_code=503, content={"error": "License registry unavailable; tool calls fail closed."})
-    if tracked_tool is None:
+    if not tool_id or method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
         return await call_next(request)
 
-    identity = None
     try:
-        identity = _claims_from_bearer(request.headers.get("Authorization")).get("sub")
+        with SessionLocal() as lookup:
+            candidate = lookup.get(ToolRecord, tool_id)
+            if candidate is not None and candidate.status != "published":
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "Tool is not published or available."},
+                )
+            tracked_tool = candidate if candidate is not None else None
+    except Exception:
+        # Registry uncertainty is not permission to execute tool-like endpoints.
+        return JSONResponse(status_code=503, content={"error": "License registry unavailable; tool calls fail closed."})
+
+    if tracked_tool is None:
+        if _legacy_static_route_exists(path, method):
+            return await call_next(request)
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Tool route is not registered or published in RevelaCode."},
+        )
+
+    try:
+        identity = str(_claims_from_bearer(request.headers.get("Authorization"))["sub"])
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
 
-    license_key = request.headers.get("X-Revela-License", "")
     try:
         country = _country(request.headers.get("X-Country") or request.query_params.get("country", "KE"))
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
+
     started = time.perf_counter()
+    denial: JSONResponse | None = None
     try:
         with SessionLocal() as guard_session:
-            _active_license(guard_session, license_key, str(identity), country=country, tool_id=tool_id)
-            if tracked_tool.creator_user_id != identity:
+            try:
+                _active_license(
+                    guard_session, request.headers.get("X-Revela-License", ""),
+                    identity, country=country, tool_id=tool_id,
+                )
+            except HTTPException as exc:
+                denial = JSONResponse(
+                    status_code=exc.status_code, content={"error": str(exc.detail)}
+                )
+            if denial is None and tracked_tool.creator_user_id != identity:
                 paid = guard_session.execute(
                     select(CheckoutIntent.id).where(
                         CheckoutIntent.user_id == identity,
@@ -938,29 +984,30 @@ async def licensed_tool_guard(request: Request, call_next):
                     ).limit(1)
                 ).first()
                 if not paid:
-                    return JSONResponse(
+                    denial = JSONResponse(
                         status_code=402,
-                        content={"error": "A paid marketplace purchase is required for this tool.",
-                                 "endpoint": "/v1/marketplace/buy"},
+                        content={
+                            "error": "A paid marketplace purchase is required for this tool.",
+                            "endpoint": "/v1/marketplace/buy",
+                        },
                     )
-    except HTTPException as exc:
-        return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
-    response = await call_next(request)
-    latency_ms = (time.perf_counter() - started) * 1000
-    try:
-        with SessionLocal() as meter_session:
-            current_tool = meter_session.get(ToolRecord, tool_id)
-            cost = current_tool.verified_cost_saved_usd if current_tool is not None else 0.0
-            record_usage(
-                meter_session, user_id=str(identity), tool_id=tool_id, country=country,
-                latency_ms=latency_ms, success=response.status_code < 400,
-                cost_saved_usd=cost,
-            )
     except Exception:
-        # Meter failure should be observable in logs but must not turn a completed
-        # tool action into a retry that could duplicate physical actions.
-        import logging
-        logging.getLogger(__name__).exception("usage event could not be persisted")
+        return JSONResponse(status_code=503, content={"error": "License registry unavailable; tool calls fail closed."})
+
+    if denial is not None:
+        _record_usage_safely(
+            user_id=identity, tool_id=tool_id, country=country,
+            latency_ms=(time.perf_counter() - started) * 1000, success=False,
+        )
+        return denial
+
+    response = await call_next(request)
+    _record_usage_safely(
+        user_id=identity, tool_id=tool_id, country=country,
+        latency_ms=(time.perf_counter() - started) * 1000,
+        success=response.status_code < 400,
+        cost_saved_usd=tracked_tool.verified_cost_saved_usd,
+    )
     return response
 
 
