@@ -8,6 +8,7 @@ production.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -17,6 +18,12 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/users", tags=["Prototype Users"])
 USERS: dict[str, dict[str, Any]] = {}
+
+
+def _enabled() -> bool:
+    return os.getenv("REVELAAI_ENABLE_PROTOTYPE_USERS_API", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
 
 
 async def _read_json_object(request: Request) -> dict[str, Any]:
@@ -29,6 +36,11 @@ async def _read_json_object(request: Request) -> dict[str, Any]:
 
 @router.post("")
 async def create_user(request: Request):
+    if not _enabled():
+        return JSONResponse(
+            {"status": "disabled", "message": "Prototype users API is disabled."},
+            status_code=503,
+        )
     payload = await _read_json_object(request)
     name = str(payload.get("name") or "").strip()
     email = str(payload.get("email") or "").strip()
@@ -55,6 +67,11 @@ async def create_user(request: Request):
 
 @router.get("/{user_id}")
 async def get_user(user_id: str):
+    if not _enabled():
+        return JSONResponse(
+            {"status": "disabled", "message": "Prototype users API is disabled."},
+            status_code=503,
+        )
     user = USERS.get(user_id)
     if user is None:
         return JSONResponse(
