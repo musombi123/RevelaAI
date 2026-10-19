@@ -19,7 +19,7 @@ import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.wsgi import WSGIMiddleware
@@ -34,9 +34,14 @@ from core_billing.payments import (
 from core_billing.plans import get_plan
 from core_billing.service import enforce_tool_creation_quota, require_active_license
 from core_meter.meter import record_usage, usage_summary
+from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
+from core_seed.seed_runner import SeedError, SeedRunner
+from core_auditor.ledger import AuditLedger, AuditLedgerError
 from marketplace.service import country_bundle, creator_earnings, safety_screen
 from revela_platform.database import (
     AuditRecord,
+    FactoryRecord,
+    SeedRecord,
     CheckoutIntent,
     CreatorEarning,
     LicenseRecord,
@@ -629,6 +634,233 @@ def meter_usage(user_id: str | None = None, country: str | None = None,
 @app.get("/v1/meter/health", tags=["meter"])
 def meter_health() -> dict[str, Any]:
     return {"ok": True, "storage": "sqlalchemy", "privacy": "no request bodies or client IPs are stored"}
+
+
+
+# =========================================================
+# FACTORY FOUNDRY, OFFLINE SEED, AND AUDITOR
+# =========================================================
+
+class FactoryBuildInput(BaseModel):
+    name: str = Field(min_length=2, max_length=140)
+    description: str = Field(min_length=10, max_length=3000)
+    requirements: list[str] = Field(min_length=1, max_length=50)
+    country: str = Field(default="KE", min_length=2, max_length=2)
+    language: str = Field(default="en", min_length=2, max_length=5)
+    industry: str = Field(default="general", min_length=2, max_length=80)
+    adapters: list[str] = Field(default_factory=list, max_length=25)
+
+
+@app.post("/v1/foundry/build", status_code=202, tags=["foundry"])
+def build_factory(body: FactoryBuildInput,
+                  license_key: str | None = Header(default=None, alias="X-Revela-License"),
+                  user_id: str = Depends(authenticated_user),
+                  session: Session = Depends(get_db)) -> dict[str, Any]:
+    country = _country(body.country)
+    claims, license_record = _active_license(session, license_key or "", user_id, country=country)
+    try:
+        enforce_tool_creation_quota(session, license_record)
+        proposal = FoundryBuilder().build_plan(
+            owner_user_id=user_id, name=body.name, description=body.description,
+            requirements=body.requirements, country=country, language=body.language,
+            industry=body.industry, adapters=body.adapters,
+        )
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    except FactoryBuildError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    record = FactoryRecord(
+        id=proposal["build_id"], owner_user_id=user_id, name=body.name.strip(),
+        status="await_merge", country=country, manifest_sha256=proposal["manifest_sha256"],
+    )
+    session.add(record)
+    _audit(session, user_id, "foundry.factory.built", record.id,
+           {"manifest_sha256": proposal["manifest_sha256"], "license_id": claims["jti"]})
+    session.commit()
+    chain_logged = True
+    try:
+        AuditLedger().append(
+            actor_user_id=user_id, action="foundry.factory.built", object_id=record.id,
+            detail={"manifest_sha256": proposal["manifest_sha256"], "license_id": claims["jti"]},
+        )
+    except AuditLedgerError:
+        chain_logged = False
+    return {
+        "build_id": proposal["build_id"],
+        "status": proposal["status"],
+        "manifest_sha256": proposal["manifest_sha256"],
+        "manifest": proposal["manifest"],
+        "audit_chain_recorded": chain_logged,
+        "execution": "disabled_until_review",
+    }
+
+
+@app.get("/v1/foundry/builds/{build_id}", tags=["foundry"])
+def get_factory_build(build_id: str, user_id: str = Depends(authenticated_user),
+                      session: Session = Depends(get_db)) -> dict[str, Any]:
+    record = session.get(FactoryRecord, build_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Factory build not found")
+    if record.owner_user_id != user_id and not _reviewer(user_id):
+        raise HTTPException(status_code=403, detail="Factory belongs to another user")
+    try:
+        manifest = FoundryBuilder().get_manifest(build_id)
+    except FactoryBuildError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"build_id": build_id, "database_status": record.status, "manifest": manifest}
+
+
+class FactoryReviewInput(BaseModel):
+    approved: bool
+    review_note: str = Field(min_length=3, max_length=1200)
+
+
+@app.post("/v1/foundry/builds/{build_id}/review", tags=["foundry"])
+def review_factory_build(build_id: str, body: FactoryReviewInput,
+                         user_id: str = Depends(authenticated_user),
+                         session: Session = Depends(get_db)) -> dict[str, Any]:
+    if not _reviewer(user_id):
+        raise HTTPException(status_code=403, detail="Foundry reviewer permission required")
+    record = session.get(FactoryRecord, build_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Factory build not found")
+    target_status = "approved" if body.approved else "rejected"
+    try:
+        manifest = FoundryBuilder().set_status(build_id, target_status)
+    except FactoryBuildError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    record.status = target_status
+    record.manifest_sha256 = manifest["manifest_sha256"]
+    _audit(session, user_id, "foundry.factory.reviewed", build_id,
+           {"approved": body.approved, "review_note": body.review_note,
+            "manifest_sha256": record.manifest_sha256})
+    session.commit()
+    chain_logged = True
+    try:
+        AuditLedger().append(
+            actor_user_id=user_id, action="foundry.factory.reviewed", object_id=build_id,
+            detail={"approved": body.approved, "manifest_sha256": record.manifest_sha256},
+        )
+    except AuditLedgerError:
+        chain_logged = False
+    return {"build_id": build_id, "status": target_status,
+            "manifest_sha256": record.manifest_sha256, "audit_chain_recorded": chain_logged}
+
+
+class SeedFactoryInput(BaseModel):
+    child_name: str = Field(min_length=2, max_length=100)
+    buyer_country: str = Field(default="KE", min_length=2, max_length=2)
+    purchase_id: str | None = Field(default=None, max_length=64)
+
+
+@app.post("/v1/seed/{build_id}", status_code=201, tags=["seed"])
+def seed_factory(build_id: str, body: SeedFactoryInput,
+                 license_key: str | None = Header(default=None, alias="X-Revela-License"),
+                 user_id: str = Depends(authenticated_user),
+                 session: Session = Depends(get_db)) -> dict[str, Any]:
+    country = _country(body.buyer_country)
+    claims, license_record = _active_license(
+        session, license_key or "", user_id, country=country
+    )
+    record = session.get(FactoryRecord, build_id)
+    if record is None or record.status != "approved":
+        raise HTTPException(status_code=409, detail="Factory must be approved by a human reviewer before seeding")
+    purchased = False
+    if record.owner_user_id != user_id:
+        if not body.purchase_id:
+            raise HTTPException(status_code=403, detail="Factory owner or paid marketplace purchase required")
+        intent = session.get(CheckoutIntent, body.purchase_id)
+        if (intent is None or intent.user_id != user_id or intent.purpose != "marketplace"
+                or intent.status != "paid"):
+            raise HTTPException(status_code=403, detail="Marketplace purchase is not verified")
+        purchased_tool = session.get(ToolRecord, intent.tool_id or "")
+        if (purchased_tool is None or purchased_tool.status != "published"
+                or purchased_tool.factory_build_id != build_id):
+            raise HTTPException(status_code=403, detail="Purchase is not linked to this factory build")
+        purchased = True
+    try:
+        enforce_tool_creation_quota(session, license_record)
+        result = SeedRunner().seed_child(
+            build_id=build_id, license_key=license_key or "", user_id=user_id,
+            child_name=body.child_name, purchase_verified=purchased,
+        )
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    except SeedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    seed_row = SeedRecord(
+        id=result["seed_id"], parent_build_id=build_id, owner_user_id=user_id,
+        license_id=str(claims["jti"]), status=result["status"],
+        offline_until=int(result["offline_until"]),
+    )
+    session.add(seed_row)
+    _audit(session, user_id, "seed.child.created", result["seed_id"],
+           {"parent_build_id": build_id, "license_id": claims["jti"],
+            "offline_until": result["offline_until"], "marketplace_purchase_verified": purchased})
+    session.commit()
+    try:
+        AuditLedger().append(
+            actor_user_id=user_id, action="seed.child.created", object_id=result["seed_id"],
+            detail={"parent_build_id": build_id, "license_id": claims["jti"],
+                    "marketplace_purchase_verified": purchased},
+        )
+        result["audit_chain_recorded"] = True
+    except AuditLedgerError:
+        result["audit_chain_recorded"] = False
+    return result
+
+
+@app.get("/v1/seed/{seed_id}/verify", tags=["seed"])
+def verify_seed(seed_id: str, user_id: str = Depends(authenticated_user),
+                session: Session = Depends(get_db)) -> dict[str, Any]:
+    record = session.get(SeedRecord, seed_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Seeded child not found")
+    if record.owner_user_id != user_id and not _reviewer(user_id):
+        raise HTTPException(status_code=403, detail="Seeded child belongs to another user")
+    now = int(datetime.now(timezone.utc).timestamp())
+    return {
+        "seed_id": record.id, "status": record.status, "license_id": record.license_id,
+        "offline_until": record.offline_until,
+        "offline_authorized": now <= record.offline_until and record.status == "seeded_review_required",
+        "note": "This endpoint verifies the registered lease status; local child runtime must also verify the signed token offline.",
+    }
+
+
+@app.get("/v1/auditor/verify", tags=["auditor"])
+def verify_audit_ledger(user_id: str = Depends(authenticated_user)) -> dict[str, Any]:
+    if not _reviewer(user_id):
+        raise HTTPException(status_code=403, detail="Auditor verification requires reviewer permission")
+    try:
+        return AuditLedger().verify()
+    except AuditLedgerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/v1/auditor/events", tags=["auditor"])
+def list_audit_events(limit: int = Query(default=50, ge=1, le=250),
+                      offset: int = Query(default=0, ge=0, le=100000),
+                      actor_user_id: str | None = None,
+                      user_id: str = Depends(authenticated_user),
+                      session: Session = Depends(get_db)) -> dict[str, Any]:
+    requested_actor = actor_user_id or user_id
+    if requested_actor != user_id and not _reviewer(user_id):
+        raise HTTPException(status_code=403, detail="You may only read your own audit events")
+    query = select(AuditRecord).where(AuditRecord.actor_user_id == requested_actor)
+    total = session.scalar(select(func.count()).select_from(AuditRecord).where(
+        AuditRecord.actor_user_id == requested_actor
+    )) or 0
+    rows = session.execute(
+        query.order_by(AuditRecord.id.desc()).offset(offset).limit(limit)
+    ).scalars().all()
+    return {
+        "actor_user_id": requested_actor,
+        "total": int(total),
+        "events": [{
+            "id": item.id, "action": item.action, "object_id": item.object_id,
+            "detail": item.detail, "created_at": _to_iso(item.created_at),
+        } for item in rows],
+    }
 
 
 # Tool licensing guard for future and already-registered single-segment tool endpoints.
