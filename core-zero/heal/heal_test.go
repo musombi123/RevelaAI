@@ -4,175 +4,418 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"usect-zero.local/core-zero/internal/kernel"
 )
 
+const (
+	restoreConfirmation = "RESTORE_TO_REPOSITORY"
+	knownGoodContent   = "VALUE = 7\n"
+)
+
+// git executes Git commands against the test repository.
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	c := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	if b, e := c.CombinedOutput(); e != nil {
-		t.Fatalf("git %v: %v %s", args, e, b)
+
+	cmdArgs := append([]string{"-C", dir}, args...)
+	cmd := exec.Command("git", cmdArgs...)
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
 	}
 }
 
+// newGitRepoWithFile creates a committed repository with a recorded baseline.
+// The repository and its managed state are isolated to the test's temp directory.
 func newGitRepoWithFile(t *testing.T) (string, *kernel.Kernel, string) {
 	t.Helper()
+
 	root := t.TempDir()
+
 	git(t, root, "init", "-b", "main")
 	git(t, root, "config", "user.email", "test@example.invalid")
 	git(t, root, "config", "user.name", "USECT test")
-	path := filepath.Join(root, "sample.py")
-	if err := os.WriteFile(path, []byte("VALUE = 7\n"), 0644); err != nil {
-		t.Fatal(err)
+
+	filePath := filepath.Join(root, "sample.py")
+	if err := os.WriteFile(filePath, []byte(knownGoodContent), 0644); err != nil {
+		t.Fatalf("create tracked file: %v", err)
 	}
+
 	git(t, root, "add", "sample.py")
 	git(t, root, "commit", "-m", "known good")
+
 	k, err := kernel.New(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create kernel: %v", err)
 	}
-	if _, err = k.RecordBaseline(); err != nil {
-		t.Fatal(err)
+
+	if _, err := k.RecordBaseline(); err != nil {
+		t.Fatalf("record baseline: %v", err)
 	}
-	return root, k, path
+
+	return root, k, filePath
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %q: %v", path, err)
+	}
+
+	return content
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+
+	got := readFile(t, path)
+	if string(got) != want {
+		t.Fatalf("unexpected content in %q:\n got: %q\nwant: %q", path, got, want)
+	}
+}
+
+func assertFileMissing(t *testing.T, path string) {
+	t.Helper()
+
+	_, err := os.Lstat(path)
+	if err == nil {
+		t.Fatalf("expected %q to be absent", path)
+	}
+	if !os.IsNotExist(err) {
+		t.Fatalf("expected %q to be absent, got stat error: %v", path, err)
+	}
 }
 
 func TestDeletedTrackedFileWaitsForApproval(t *testing.T) {
-	root, k, path := newGitRepoWithFile(t)
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
+	root, k, filePath := newGitRepoWithFile(t)
+
+	if err := os.Remove(filePath); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
 	}
-	prop, err := ProposeMissing(k)
+
+	proposal, err := ProposeMissing(k)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("propose missing-file recovery: %v", err)
 	}
-	if prop.Status != "awaiting_human_approval" || len(prop.Items) != 1 {
-		t.Fatalf("unexpected proposal: %#v", prop)
+
+	if proposal.Status != "awaiting_human_approval" {
+		t.Fatalf("unexpected proposal status: %q", proposal.Status)
 	}
-	if prop.Items[0].TargetState != "missing" {
-		t.Fatalf("expected missing target state: %+v", prop.Items[0])
+	if len(proposal.Items) != 1 {
+		t.Fatalf("expected one recovery item, got %d: %#v", len(proposal.Items), proposal.Items)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("proposal unexpectedly restored source before approval")
+	if proposal.Items[0].TargetState != "missing" {
+		t.Fatalf("expected missing target state, got: %+v", proposal.Items[0])
 	}
-	if _, err = ApproveRestore(k, prop.ID, "wrong"); err == nil {
-		t.Fatal("invalid confirmation must fail")
+
+	// Proposal creation must not restore the missing source automatically.
+	assertFileMissing(t, filePath)
+
+	// Incorrect approval must not restore the source.
+	if _, err := ApproveRestore(k, proposal.ID, "wrong"); err == nil {
+		t.Fatal("expected invalid confirmation to be rejected")
 	}
-	if _, err = os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("invalid confirmation wrote source")
-	}
-	finished, err := ApproveRestore(k, prop.ID, "RESTORE_TO_REPOSITORY")
+	assertFileMissing(t, filePath)
+
+	// A valid confirmation authorizes the restore.
+	finished, err := ApproveRestore(k, proposal.ID, restoreConfirmation)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("approve missing-file restore: %v", err)
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) != "VALUE = 7\n" {
-		t.Fatalf("wrong restored bytes: %q", b)
-	}
+
+	assertFileContent(t, filePath, knownGoodContent)
+
 	if finished.Status != "completed_after_approval" {
-		t.Fatalf("wrong final status: %s", finished.Status)
+		t.Fatalf("unexpected final proposal status: %q", finished.Status)
 	}
 	if _, err := os.Stat(root); err != nil {
-		t.Fatal(err)
+		t.Fatalf("repository root disappeared: %v", err)
 	}
 }
 
 func TestModifiedTrackedFileGetsBackupAndRequiresApproval(t *testing.T) {
-	root, k, path := newGitRepoWithFile(t)
-	modified := "VALUE = 999\n"
-	if err := os.WriteFile(path, []byte(modified), 0644); err != nil {
-		t.Fatal(err)
-	}
-	prop, err := ProposeRecovery(k)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if prop.Status != "awaiting_human_approval" || len(prop.Items) != 1 {
-		t.Fatalf("unexpected proposal: %#v", prop)
-	}
-	item := prop.Items[0]
-	if item.TargetState != "modified" || item.ObservedSHA256 == "" || item.Status != "candidate_staged" {
-		t.Fatalf("modified file was not staged safely: %+v", item)
-	}
-	if content, err := os.ReadFile(path); err != nil || string(content) != modified {
-		t.Fatalf("proposal changed the target before approval: %q %v", content, err)
-	}
-	if _, err := ApproveRestore(k, prop.ID, "wrong"); err == nil {
-		t.Fatal("invalid confirmation must fail")
-	}
-	if content, err := os.ReadFile(path); err != nil || string(content) != modified {
-		t.Fatalf("invalid approval changed the target: %q %v", content, err)
+	root, k, filePath := newGitRepoWithFile(t)
+
+	modifiedContent := "VALUE = 999\n"
+	if err := os.WriteFile(filePath, []byte(modifiedContent), 0644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
 	}
 
-	finished, err := ApproveRestore(k, prop.ID, "RESTORE_TO_REPOSITORY")
+	proposal, err := ProposeRecovery(k)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("propose recovery: %v", err)
 	}
-	if content, err := os.ReadFile(path); err != nil || string(content) != "VALUE = 7\n" {
-		t.Fatalf("baseline bytes not restored: %q %v", content, err)
+
+	if proposal.Status != "awaiting_human_approval" {
+		t.Fatalf("unexpected proposal status: %q", proposal.Status)
 	}
-	restored := finished.Items[0]
-	if restored.Status != "restored_after_approval" || restored.BackupPath == "" {
-		t.Fatalf("backup evidence missing after modified restore: %+v", restored)
+	if len(proposal.Items) != 1 {
+		t.Fatalf("expected one recovery item, got %d: %#v", len(proposal.Items), proposal.Items)
 	}
-	backup, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(restored.BackupPath)))
-	if err != nil || string(backup) != modified {
-		t.Fatalf("modified bytes were not backed up: %q %v", backup, err)
+
+	proposedItem := proposal.Items[0]
+	if proposedItem.TargetState != "modified" {
+		t.Fatalf("expected modified target state, got: %+v", proposedItem)
 	}
-	if hash(backup) != restored.BackupSHA256 || restored.BackupSHA256 != item.ObservedSHA256 {
-		t.Fatalf("backup hash mismatch: item=%+v got=%s", restored, hash(backup))
+	if proposedItem.ObservedSHA256 == "" {
+		t.Fatal("proposal did not record the observed target hash")
+	}
+	if proposedItem.Status != "candidate_staged" {
+		t.Fatalf("expected candidate_staged status, got %q", proposedItem.Status)
+	}
+
+	// The current version must remain intact until approval.
+	assertFileContent(t, filePath, modifiedContent)
+
+	// Incorrect approval must leave the user's content unchanged.
+	if _, err := ApproveRestore(k, proposal.ID, "wrong"); err == nil {
+		t.Fatal("expected invalid confirmation to be rejected")
+	}
+	assertFileContent(t, filePath, modifiedContent)
+
+	finished, err := ApproveRestore(k, proposal.ID, restoreConfirmation)
+	if err != nil {
+		t.Fatalf("approve modified-file restore: %v", err)
+	}
+
+	assertFileContent(t, filePath, knownGoodContent)
+
+	if finished.Status != "completed_after_approval" {
+		t.Fatalf("unexpected final status: %q", finished.Status)
+	}
+	if len(finished.Items) != 1 {
+		t.Fatalf("expected one completed item, got %d", len(finished.Items))
+	}
+
+	restoredItem := finished.Items[0]
+	if restoredItem.Status != "restored_after_approval" {
+		t.Fatalf("unexpected restored item status: %+v", restoredItem)
+	}
+	if restoredItem.BackupPath == "" {
+		t.Fatal("backup evidence path was not recorded")
+	}
+	if restoredItem.BackupSHA256 == "" {
+		t.Fatal("backup evidence hash was not recorded")
+	}
+
+	backupPath := filepath.Join(root, filepath.FromSlash(restoredItem.BackupPath))
+	backupContent := readFile(t, backupPath)
+
+	if string(backupContent) != modifiedContent {
+		t.Fatalf("backup does not preserve modified bytes:\n got: %q\nwant: %q",
+			string(backupContent), modifiedContent)
+	}
+
+	backupHash := hash(backupContent)
+	if backupHash != restoredItem.BackupSHA256 {
+		t.Fatalf("backup hash mismatch: recorded=%s actual=%s",
+			restoredItem.BackupSHA256, backupHash)
+	}
+	if restoredItem.BackupSHA256 != proposedItem.ObservedSHA256 {
+		t.Fatalf("backup hash differs from the original observed hash: backup=%s observed=%s",
+			restoredItem.BackupSHA256, proposedItem.ObservedSHA256)
 	}
 }
 
 func TestModifiedTargetChangedAfterProposalIsRejected(t *testing.T) {
-	_, k, path := newGitRepoWithFile(t)
-	if err := os.WriteFile(path, []byte("VALUE = 8\n"), 0644); err != nil {
-		t.Fatal(err)
+	_, k, filePath := newGitRepoWithFile(t)
+
+	if err := os.WriteFile(filePath, []byte("VALUE = 8\n"), 0644); err != nil {
+		t.Fatalf("modify target: %v", err)
 	}
-	prop, err := ProposeRecovery(k)
+
+	proposal, err := ProposeRecovery(k)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("propose recovery: %v", err)
 	}
-	latest := "VALUE = 9\n"
-	if err := os.WriteFile(path, []byte(latest), 0644); err != nil {
-		t.Fatal(err)
+
+	latestContent := "VALUE = 9\n"
+	if err := os.WriteFile(filePath, []byte(latestContent), 0644); err != nil {
+		t.Fatalf("write newer target version: %v", err)
 	}
-	if _, err := ApproveRestore(k, prop.ID, "RESTORE_TO_REPOSITORY"); err == nil {
-		t.Fatal("stale proposal must not overwrite a newer edit")
+
+	// Approval must revalidate the target instead of overwriting a newer edit.
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err == nil {
+		t.Fatal("expected stale proposal to be rejected")
 	}
-	if content, err := os.ReadFile(path); err != nil || string(content) != latest {
-		t.Fatalf("stale approval overwrote newer work: %q %v", content, err)
+
+	assertFileContent(t, filePath, latestContent)
+}
+
+func TestMissingTargetCreatedAfterProposalIsNotOverwritten(t *testing.T) {
+	_, k, filePath := newGitRepoWithFile(t)
+
+	if err := os.Remove(filePath); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
+	}
+
+	proposal, err := ProposeMissing(k)
+	if err != nil {
+		t.Fatalf("propose missing-file recovery: %v", err)
+	}
+
+	// Simulate another process creating the target after proposal generation.
+	newContent := "VALUE = 12345\n"
+	if err := os.WriteFile(filePath, []byte(newContent), 0644); err != nil {
+		t.Fatalf("create new target version: %v", err)
+	}
+
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err == nil {
+		t.Fatal("expected approval to reject a target that appeared after proposal creation")
+	}
+
+	assertFileContent(t, filePath, newContent)
+}
+
+func TestSymlinkTargetIsNotFollowed(t *testing.T) {
+	_, k, filePath := newGitRepoWithFile(t)
+
+	outsidePath := filepath.Join(t.TempDir(), "outside.py")
+	outsideContent := "DO NOT CHANGE\n"
+	if err := os.WriteFile(outsidePath, []byte(outsideContent), 0600); err != nil {
+		t.Fatalf("create outside file: %v", err)
+	}
+
+	if err := os.Remove(filePath); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
+	}
+	if err := os.Symlink(outsidePath, filePath); err != nil {
+		t.Skipf("symlinks unavailable on this host: %v", err)
+	}
+
+	proposal, err := ProposeRecovery(k)
+	if err != nil {
+		t.Fatalf("propose recovery for symlink target: %v", err)
+	}
+	if proposal.Status != "awaiting_human_approval" {
+		t.Fatalf("unexpected proposal status: %q", proposal.Status)
+	}
+
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err == nil {
+		t.Fatal("expected restore approval to reject a symlink target")
+	}
+
+	assertFileContent(t, outsidePath, outsideContent)
+
+	info, err := os.Lstat(filePath)
+	if err != nil {
+		t.Fatalf("inspect symlink after rejected approval: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("expected the original symlink to remain in place")
 	}
 }
 
-func TestModifiedSymlinkTargetIsNotFollowed(t *testing.T) {
-	_, k, path := newGitRepoWithFile(t)
-	outside := filepath.Join(t.TempDir(), "outside.py")
-	if err := os.WriteFile(outside, []byte("DO NOT CHANGE\n"), 0600); err != nil {
-		t.Fatal(err)
+func TestSymlinkSwapAfterProposalIsRejected(t *testing.T) {
+	_, k, filePath := newGitRepoWithFile(t)
+
+	if err := os.WriteFile(filePath, []byte("VALUE = 500\n"), 0644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
+
+	proposal, err := ProposeRecovery(k)
+	if err != nil {
+		t.Fatalf("propose recovery: %v", err)
 	}
-	if err := os.Symlink(outside, path); err != nil {
+
+	outsidePath := filepath.Join(t.TempDir(), "outside.py")
+	outsideContent := "EXTERNAL DATA MUST REMAIN UNCHANGED\n"
+	if err := os.WriteFile(outsidePath, []byte(outsideContent), 0600); err != nil {
+		t.Fatalf("create outside file: %v", err)
+	}
+
+	// Replace the target with a symlink after the proposal was created.
+	if err := os.Remove(filePath); err != nil {
+		t.Fatalf("remove proposed target: %v", err)
+	}
+	if err := os.Symlink(outsidePath, filePath); err != nil {
 		t.Skipf("symlinks unavailable on this host: %v", err)
 	}
-	prop, err := ProposeRecovery(k)
+
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err == nil {
+		t.Fatal("expected approval to reject a symlink introduced after proposal creation")
+	}
+
+	assertFileContent(t, outsidePath, outsideContent)
+
+	info, err := os.Lstat(filePath)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("inspect swapped target: %v", err)
 	}
-	if prop.Status != "awaiting_human_approval" {
-		t.Fatalf("unexpected proposal: %+v", prop)
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the unexpected symlink should not have been followed or replaced")
 	}
-	if _, err := ApproveRestore(k, prop.ID, "RESTORE_TO_REPOSITORY"); err == nil {
-		t.Fatal("approval must not overwrite or follow the symlink target")
+}
+
+func TestCompletedProposalCannotBeReplayed(t *testing.T) {
+	_, k, filePath := newGitRepoWithFile(t)
+
+	if err := os.Remove(filePath); err != nil {
+		t.Fatalf("remove tracked file: %v", err)
 	}
-	if content, err := os.ReadFile(outside); err != nil || string(content) != "DO NOT CHANGE\n" {
-		t.Fatalf("external symlink target changed: %q %v", content, err)
+
+	proposal, err := ProposeMissing(k)
+	if err != nil {
+		t.Fatalf("propose missing-file recovery: %v", err)
+	}
+
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err != nil {
+		t.Fatalf("approve restore: %v", err)
+	}
+	assertFileContent(t, filePath, knownGoodContent)
+
+	// A completed proposal must not be reusable as a second write authorization.
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err == nil {
+		t.Fatal("expected replay of a completed proposal to be rejected")
+	}
+
+	assertFileContent(t, filePath, knownGoodContent)
+}
+
+func TestRestorePreservesExecutableMode(t *testing.T) {
+	// Git executable-bit semantics and filesystem permissions differ on Windows.
+	if runtime.GOOS == "windows" {
+		t.Skip("executable permission-bit assertion is not portable to Windows")
+	}
+
+	root, k, filePath := newGitRepoWithFile(t)
+
+	if err := os.Chmod(filePath, 0755); err != nil {
+		t.Fatalf("set executable permission: %v", err)
+	}
+
+	git(t, root, "add", "sample.py")
+	git(t, root, "commit", "-m", "mark sample executable")
+
+	if _, err := k.RecordBaseline(); err != nil {
+		t.Fatalf("record executable baseline: %v", err)
+	}
+
+	if err := os.WriteFile(filePath, []byte("VALUE = 200\n"), 0755); err != nil {
+		t.Fatalf("modify executable file: %v", err)
+	}
+
+	proposal, err := ProposeRecovery(k)
+	if err != nil {
+		t.Fatalf("propose executable-file recovery: %v", err)
+	}
+
+	if _, err := ApproveRestore(k, proposal.ID, restoreConfirmation); err != nil {
+		t.Fatalf("approve executable-file restore: %v", err)
+	}
+
+	assertFileContent(t, filePath, knownGoodContent)
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("stat restored executable: %v", err)
+	}
+
+	if info.Mode().Perm()&0111 == 0 {
+		t.Fatalf("restored file is not executable: mode=%#o", info.Mode().Perm())
 	}
 }
