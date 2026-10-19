@@ -23,6 +23,10 @@ import app as legacy
 from fastapi_routes.auth import authenticate_identity
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
+from services.runtime_config import (
+    REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
+    configured_image_model, get_active_text_provider,
+)
 
 router = APIRouter(tags=["AI"])
 logger = logging.getLogger("revelaai.fastapi.ai")
@@ -164,10 +168,10 @@ def _image_response(
         sources=[],
         meta={
             "provider": "huggingface" if asset["asset_type"] == "png" else "huggingface-svg",
-            "model": legacy.configured_image_model() if asset["asset_type"] == "png" else None,
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "model": configured_image_model() if asset["asset_type"] == "png" else None,
+            "build_id": REVELAAI_BUILD_ID,
             "image_engine": asset["image_plan"].get("engine"),
-            "engine_version": legacy.REVELAAI_IMAGE_ENGINE_VERSION,
+            "engine_version": REVELAAI_IMAGE_ENGINE_VERSION,
             "intent": "image_generation",
             "design": asset["image_plan"],
             "image": {
@@ -197,7 +201,7 @@ def _ai_sync(
     request_id: str,
     base_url: str,
 ):
-    legacy.cleanup_generated_files()
+    cleanup_generated_files()
     authorization = next(
         (str(v) for k, v in headers.items() if str(k).casefold() == "authorization"),
         "",
@@ -438,7 +442,7 @@ def _ai_sync(
         meta = {
             "unknown_learning": unknown_public,
             "ai_model": ai_result.get("model"),
-            "provider": ai_result.get("provider", legacy.get_active_text_provider()),
+            "provider": ai_result.get("provider", get_active_text_provider()),
             "memory": {
                 "enabled": True,
                 "type": "conversation",
@@ -466,7 +470,7 @@ def _ai_sync(
             "multimodal": attachment_metadata or orchestrator_data.get("multimodal", {}),
             "usect_zero_tool": _safe_tool_metadata(ai_result),
             "core_mesh": core_mesh,
-            "build_id": legacy.REVELAAI_BUILD_ID,
+            "build_id": REVELAAI_BUILD_ID,
         }
         response_body = legacy.enforce_base_schema(
             query=message,
