@@ -66,6 +66,15 @@ def test_mesh_packets_are_route_bound_and_expire_at_utc_day_change():
     with pytest.raises(StalePacketError):
         open_packet(packet, route="zero.heal", secret=secret,
                     now=created + timedelta(minutes=2))
+    hourly_packet = seal_packet(
+        {"action": "inspect"}, route="zero.inspect", secret=secret,
+        now=datetime(2026, 10, 18, 10, 59, tzinfo=timezone.utc),
+    )
+    with pytest.raises(StalePacketError, match="hourly"):
+        open_packet(
+            hourly_packet, route="zero.inspect", secret=secret,
+            now=datetime(2026, 10, 18, 11, 1, tzinfo=timezone.utc),
+        )
 
 
 def test_daily_dialect_changes_and_is_keyed():
