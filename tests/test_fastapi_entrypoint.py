@@ -210,9 +210,9 @@ def test_whatsapp_ignores_webhook_notifications_without_messages() -> None:
 
 
 def test_unmigrated_direct_route_still_uses_compatibility_bridge() -> None:
-    # GET /voice is not an implemented Flask method. A 405 demonstrates that
-    # requests outside the native route set still reach the legacy adapter.
-    response = client.get("/voice")
-    assert response.status_code == 405
+    # /ai/stream has not yet been ported. An empty message should be rejected
+    # by the original handler before any provider or model is invoked.
+    response = client.post("/ai/stream", json={})
+    assert response.status_code == 400
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
