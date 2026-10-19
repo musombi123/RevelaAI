@@ -1,8 +1,8 @@
-"""Import alias for the native FastAPI hub-persona router."""
-from fastapi_routes.hub import router as hub_bp
+"""Framework-neutral import path for the native hub-persona router."""
+from fastapi_routes.hub import router
 from services.hub_personas import HUBS, respond
 
 MAX_MESSAGE_CHARS = 8000
 MAX_VISION_CHARS = 8000
 
-__all__ = ["hub_bp", "HUBS", "respond", "MAX_MESSAGE_CHARS", "MAX_VISION_CHARS"]
+__all__ = ["router", "HUBS", "respond", "MAX_MESSAGE_CHARS", "MAX_VISION_CHARS"]
