@@ -32,6 +32,28 @@ class LicenseRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class FactoryRecord(Base):
+    __tablename__ = "revela_factory_builds"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    name: Mapped[str] = mapped_column(String(140))
+    status: Mapped[str] = mapped_column(String(32), default="await_merge", index=True)
+    country: Mapped[str] = mapped_column(String(2), default="KE")
+    manifest_sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SeedRecord(Base):
+    __tablename__ = "revela_seeded_children"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_build_id: Mapped[str] = mapped_column(String(64), index=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    license_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="seeded_review_required")
+    offline_until: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ToolRecord(Base):
     __tablename__ = "revela_marketplace_tools"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
