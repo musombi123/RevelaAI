@@ -19,29 +19,39 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-import legacy_flask_app as legacy
-from fastapi_routes.auth import authenticate_identity
+from ai.global_brain_adapter import build_global_context
+from ai.hub_prompts import HUB_LABELS, get_identity_answer
+from ai.intent_router import classify_intent
+from ai.json_utils import enforce_base_schema, error_response, extract_json
+from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET, authenticate_identity
+from revelai.core.agi_manifest import get_self_description_answer
+from services.ai_service import detect_capability, process_message
+from services.conversation_store import save_image_conversation
+from services.document_service import process_uploaded_document
+from services.expert_law import analyze_legal_query
+from services.expert_medicine import analyze_medical_query
+from services.image_service import generate_image_asset, parse_image_options
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 from services.runtime_config import (
-    REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
+    MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
     configured_image_model, get_active_text_provider,
 )
 
 router = APIRouter(tags=["AI"])
 logger = logging.getLogger("revelaai.fastapi.ai")
-MAX_BODY_BYTES = int(getattr(legacy, "MAX_CONTENT_LENGTH", 12 * 1024 * 1024))
+MAX_BODY_BYTES = MAX_CONTENT_LENGTH
 
 
 def _error(code: str, message: str, status_code: int, request_id: str | None = None):
-    body = legacy.error_response(code, message)
+    body = error_response(code, message)
     if isinstance(body, dict) and request_id:
         body["request_id"] = request_id
     return JSONResponse(body, status_code=status_code)
 
 
 def _subject_from_bearer(authorization: str) -> str | None:
-    secret = str(getattr(legacy, "JWT_SECRET", "") or "").strip()
+    secret = JWT_SECRET
     header = str(authorization or "").strip()
     if not secret or not header.startswith("Bearer ") or not header[7:].strip():
         return None
@@ -49,7 +59,7 @@ def _subject_from_bearer(authorization: str) -> str | None:
         claims = jwt.decode(
             header[7:].strip(),
             secret,
-            algorithms=[getattr(legacy, "JWT_ALGORITHM", "HS256")],
+            algorithms=[JWT_ALGORITHM],
             options={"require": ["sub", "iat", "exp"]},
         )
     except jwt.InvalidTokenError:
@@ -139,7 +149,7 @@ def _image_response(
     base_url: str,
 ):
     try:
-        asset = legacy.generate_image_asset(
+        asset = generate_image_asset(
             message,
             image_options=image_options,
             request_base_url=base_url,
@@ -156,8 +166,8 @@ def _image_response(
             request_id,
         )
 
-    legacy.save_image_conversation(session_id, session, message, success=True)
-    response = legacy.enforce_base_schema(
+    save_image_conversation(session_id, session, message, success=True)
+    response = enforce_base_schema(
         query=message,
         mode="image",
         data={
@@ -245,7 +255,7 @@ def _ai_sync(
         }
         raw_client_context = payload.get("context", "") or ""
         try:
-            image_options = legacy.parse_image_options({
+            image_options = parse_image_options({
                 "aspect_ratio": payload.get("aspect_ratio"),
                 "width": payload.get("width"),
                 "height": payload.get("height"),
@@ -254,7 +264,7 @@ def _ai_sync(
         except ValueError as exc:
             return _error("INVALID_IMAGE_OPTIONS", str(exc), 400, request_id)
         try:
-            message, attachment_metadata = legacy.process_uploaded_document(
+            message, attachment_metadata = process_uploaded_document(
                 file_storage,
                 prompt=str(payload.get("message") or ""),
             )
@@ -266,7 +276,7 @@ def _ai_sync(
         message = str(payload.get("message") or "").strip()
         raw_client_context = payload.get("context", [])
         try:
-            image_options = legacy.parse_image_options(payload)
+            image_options = parse_image_options(payload)
         except ValueError as exc:
             return _error("INVALID_IMAGE_OPTIONS", str(exc), 400, request_id)
 
@@ -279,7 +289,7 @@ def _ai_sync(
         previous_context, memory_source = resolve_conversation_context(
             session, raw_client_context
         )
-        brain_context, interaction = legacy.build_global_context(
+        brain_context, interaction = build_global_context(
             message=message,
             hub=brain_payload.get("hub") or "auto",
             payload=brain_payload,
@@ -290,8 +300,8 @@ def _ai_sync(
             if personalization:
                 previous_context = (previous_context + [personalization])[-MAX_HISTORY:]
 
-        intent = legacy.classify_intent(message)
-        capability = legacy.detect_capability(message, intent=intent)
+        intent = classify_intent(message)
+        capability = detect_capability(message, intent=intent)
         image_request = capability == "image_generation"
         if image_request:
             intent = "image_generation"
@@ -308,12 +318,12 @@ def _ai_sync(
         lowered = message.lower()
         expert_payload = None
         if "law" in intent or "legal" in lowered:
-            expert_payload = legacy.analyze_legal_query(message)
+            expert_payload = analyze_legal_query(message)
         elif "medical" in intent or "medicine" in lowered:
-            expert_payload = legacy.analyze_medical_query(message)
+            expert_payload = analyze_medical_query(message)
 
-        identity_reply = legacy.get_identity_answer(message, interaction.get("hub", "auto"))
-        self_description_reply = legacy.get_self_description_answer(message)
+        identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
+        self_description_reply = get_self_description_answer(message)
         if identity_reply or self_description_reply:
             direct_reply = identity_reply or self_description_reply
             ai_result = {
@@ -325,7 +335,7 @@ def _ai_sync(
                 "model": "agi-manifest-policy" if self_description_reply else "hub-identity-policy",
             }
         else:
-            ai_result = legacy.process_message(
+            ai_result = process_message(
                 message=message,
                 context=previous_context,
                 intent=intent,
@@ -363,7 +373,7 @@ def _ai_sync(
         requested_hub = interaction.get("hubRequested", "auto")
         selected_hub = interaction.get("hub", "general")
         if requested_hub == "auto" and selected_hub != "auto":
-            route_tag = f"[Auto → {legacy.HUB_LABELS.get(selected_hub, selected_hub.title())}]"
+            route_tag = f"[Auto → {HUB_LABELS.get(selected_hub, selected_hub.title())}]"
             if not assistant_text.startswith("[Auto →"):
                 assistant_text = route_tag + "\n\n" + assistant_text
 
@@ -381,7 +391,7 @@ def _ai_sync(
         wants_json = any(
             keyword in lowered for keyword in ("respond in json", "return json", "output json")
         )
-        data = legacy.extract_json(assistant_text) if wants_json else {"content": assistant_text}
+        data = extract_json(assistant_text) if wants_json else {"content": assistant_text}
         if not isinstance(data, dict):
             data = {"content": assistant_text}
         if expert_payload:
@@ -472,7 +482,7 @@ def _ai_sync(
             "core_mesh": core_mesh,
             "build_id": REVELAAI_BUILD_ID,
         }
-        response_body = legacy.enforce_base_schema(
+        response_body = enforce_base_schema(
             query=message,
             mode=intent,
             data=data,
