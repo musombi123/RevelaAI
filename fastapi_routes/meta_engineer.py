@@ -24,7 +24,11 @@ logger = logging.getLogger("revelaai.fastapi.meta_engineer")
 
 
 def _authorized(headers):
-    return require_platform_admin(headers.get("authorization", ""))
+    authorization = next(
+        (str(value) for key, value in headers.items() if str(key).casefold() == "authorization"),
+        "",
+    )
+    return require_platform_admin(authorization)
 
 
 def _health():
