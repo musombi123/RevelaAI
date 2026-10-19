@@ -5,7 +5,10 @@ import pytest
 from ai.unknown_learning import (
     assess_unknown,
     attach_genesis_proposal,
+    clear_pending_unknown_ask,
+    get_pending_unknown_ask,
     list_known,
+    register_unknown_ask,
     publish_known,
     save_teaching,
     topic_slug,
@@ -66,3 +69,21 @@ def test_photo_bytes_are_not_accepted_and_hash_is_validated(tmp_path):
 def test_topic_slug_is_stable_and_bounded():
     assert topic_slug("Posho mill / auto-weigher") == "posho-mill-auto-weigher"
     assert len(topic_slug("a" * 500)) <= 72
+
+
+def test_unknown_prompt_is_bound_to_user_and_session(tmp_path):
+    registered = register_unknown_ask(
+        "posho mill auto weigher",
+        "user-1",
+        "session-1",
+        country="KE",
+        language="sw",
+        source_request="How do I retrofit a posho mill?",
+        root=tmp_path,
+    )
+    assert registered["registered"] is True
+    assert get_pending_unknown_ask("user-1", "session-1", root=tmp_path)["topic_key"] == "posho-mill-auto-weigher"
+    assert get_pending_unknown_ask("other-user", "session-1", root=tmp_path) is None
+    assert get_pending_unknown_ask("user-1", "other-session", root=tmp_path) is None
+    clear_pending_unknown_ask("user-1", "session-1", root=tmp_path)
+    assert get_pending_unknown_ask("user-1", "session-1", root=tmp_path) is None
