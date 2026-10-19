@@ -61,6 +61,8 @@ def test_mesh_packets_are_route_bound_and_expire_at_utc_day_change():
                          secret=secret, now=created)
     assert "action" not in str(packet)
     assert open_packet(packet, route="zero.heal", secret=secret, now=created)["action"] == "heal"
+    with pytest.raises(StalePacketError, match="Replayed"):
+        open_packet(packet, route="zero.heal", secret=secret, now=created)
     with pytest.raises(RecipeError):
         open_packet(packet, route="one.genesis", secret=secret, now=created)
     with pytest.raises(StalePacketError):
