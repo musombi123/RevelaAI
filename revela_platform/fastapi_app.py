@@ -374,6 +374,21 @@ async def stripe_webhook(request: Request, session: Session = Depends(get_db)) -
         for intent in intents:
             intent.status = "paid"
             intent.paid_at = now
+            # Restore entitlements after a successful renewal. A fresh signed license
+            # token can be retrieved using /v1/billing/license/{intent_id}; previous
+            # tokens still retain their originally signed expiry.
+            period_end = None
+            lines = (obj.get("lines") or {}).get("data") or []
+            if lines:
+                end_ts = (lines[0].get("period") or {}).get("end")
+                if isinstance(end_ts, (int, float)):
+                    period_end = datetime.fromtimestamp(end_ts, timezone.utc)
+            expiry = period_end or (now + timedelta(days=30))
+            for license_record in session.execute(
+                select(LicenseRecord).where(LicenseRecord.checkout_intent_id == intent.id)
+            ).scalars().all():
+                license_record.status = "active"
+                license_record.expires_at = expiry
         session.add(ProcessedWebhook(event_id=event_id, event_type=event_type))
     elif event_type == "customer.subscription.deleted":
         subscription_id = str(obj.get("id", ""))
