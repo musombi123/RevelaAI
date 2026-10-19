@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 from a2wsgi import WSGIMiddleware
 
 from fastapi_routes.agi import router as agi_router
+from fastapi_routes.sci_core import router as sci_core_router
 from fastapi_routes.chat import router as chat_router
 from fastapi_routes.core_mesh import router as core_mesh_router
 from fastapi_routes.explain import router as explain_router
@@ -91,6 +92,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/api/memory/ideas",
         "/webhook/whatsapp",
         "/api/vision/analyze",
+        "/api/sci/shield/dashboard",
     }
     native_prefixes = (
         "/api/core-mesh/",
@@ -178,6 +180,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 # longer execute through Flask.
 app.include_router(system_router)
 app.include_router(agi_router)
+app.include_router(sci_core_router)
 app.include_router(core_mesh_router)
 app.include_router(memory_router)
 app.include_router(chat_router)
