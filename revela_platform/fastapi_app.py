@@ -84,7 +84,7 @@ def _claims_from_bearer(authorization: str | None) -> dict[str, Any]:
             token[7:].strip(),
             secret,
             algorithms=["HS256"],
-            options={"require": ["sub", "iat", "exp"]},
+            options={"require": ["exp"]},
         )
     except jwt.ExpiredSignatureError as exc:
         raise HTTPException(status_code=401, detail="Authentication token expired") from exc
