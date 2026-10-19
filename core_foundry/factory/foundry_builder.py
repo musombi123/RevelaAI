@@ -163,12 +163,17 @@ class FoundryBuilder:
         if not isinstance(build_id, str) or not re.fullmatch(r"fab_[a-f0-9]{24}", build_id):
             raise FactoryBuildError("Invalid factory build identifier.")
         claimed_hash = payload.pop("manifest_sha256", None)
+        # The reviewer signature is a separate trust assertion over the stable
+        # manifest digest; it is excluded from the digest to avoid circularity.
+        attestation = payload.pop("review_attestation", None)
         actual_hash = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         if not isinstance(claimed_hash, str) or not hmac_compare(claimed_hash, actual_hash):
             raise FactoryBuildError("Factory manifest integrity check failed.")
         payload["manifest_sha256"] = claimed_hash
+        if attestation is not None:
+            payload["review_attestation"] = attestation
         return payload
 
     @classmethod
@@ -184,6 +189,7 @@ class FoundryBuilder:
             raise FactoryBuildError("Approved factory proposals cannot be demoted to draft.")
         payload = dict(verified)
         payload.pop("manifest_sha256", None)
+        payload.pop("review_attestation", None)
         payload["status"] = status
         payload["manifest_sha256"] = hashlib.sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
