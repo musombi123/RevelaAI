@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from core_billing.licensing import LicenseError, verify_license_token
-from core_foundry.factory.foundry_builder import FoundryBuilder, factory_root
+from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
 
 
 class SeedError(RuntimeError):
@@ -35,7 +35,7 @@ class SeedRunner:
 
     def seed_child(self, *, build_id: str, license_key: str, user_id: str,
                    child_name: str, now: datetime | None = None,
-                   purchase_verified: bool = False) -> dict[str, Any]:
+                   purchase_verified: bool = False,\n                   source_manifest: dict[str, Any] | None = None) -> dict[str, Any]:
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,99}", child_name.strip()):
             raise SeedError("Child name contains unsupported characters or length.")
         try:
@@ -45,8 +45,13 @@ class SeedRunner:
         if claims.get("sub") != user_id:
             raise SeedError("License owner does not match authenticated user.")
         try:
-            source = self.foundry.get_manifest(build_id)
-        except (ValueError, OSError) as exc:
+            if source_manifest is None:
+                source = self.foundry.get_manifest(build_id)
+            else:
+                source = FoundryBuilder.validate_manifest(source_manifest)
+                if source.get("build_id") != build_id:
+                    raise SeedError("Factory manifest ID does not match requested build.")
+        except (FactoryBuildError, ValueError, OSError) as exc:
             raise SeedError("Source factory manifest is invalid or unavailable.") from exc
         if source.get("owner_user_id") != user_id and not purchase_verified:
             raise SeedError("Only the owner or a verified marketplace buyer may seed this factory.")
