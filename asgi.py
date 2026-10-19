@@ -31,6 +31,7 @@ from fastapi_routes.meta_engineer import router as meta_engineer_router
 from fastapi_routes.vision import router as vision_router
 from fastapi_routes.voice import router as voice_router
 from fastapi_routes.system import router as system_router
+from fastapi_routes.stream import router as stream_router
 from fastapi_routes.usect_zero import router as usect_zero_router
 from fastapi_routes.whatsapp import router as whatsapp_router
 
@@ -98,6 +99,7 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
         "/webhook/whatsapp",
         "/voice",
         "/ai",
+        "/ai/stream",
         "/api/vision/analyze",
         "/api/sci/shield/dashboard",
         "/api/automation-fabric/health",
@@ -191,6 +193,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 # longer execute through Flask.
 app.include_router(system_router)
 app.include_router(ai_router)
+app.include_router(stream_router)
 app.include_router(agi_router)
 app.include_router(sci_core_router)
 app.include_router(usect_zero_router)
