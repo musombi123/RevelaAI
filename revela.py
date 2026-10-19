@@ -19,6 +19,7 @@ def main() -> int:
     parser.add_argument("--master-key", default=None)
     parser.add_argument("--license-key", default=None, help="Signed plan license required for licensed tool compilation")
     parser.add_argument("--file", default=None, help="Seal one source file into a licensed .rvx artifact")
+    parser.add_argument("--factory-build-id", default=None, help="Compile an approved Foundry proposal into a licensed RVX artifact")
     parser.add_argument("--root", default=".", help="Root to scan for .rvx files")
     parser.add_argument("--output-dir", default=".revela-build", help="Destination for decrypted local workspace")
     args = parser.parse_args()
@@ -26,12 +27,34 @@ def main() -> int:
     if not args.recipe:
         parser.error("--recipe is required")
     compiler = RvxCompiler(args.master_key or default_master_key_path())
+    if args.file and args.factory_build_id:
+        parser.error("Use either --file or --factory-build-id, not both")
     if args.file:
         if not args.compile:
             parser.error("--file requires --compile")
         if not args.license_key:
             raise RecipeError("Need valid license to birth tool; pass --license-key.")
         output = compiler.compile_file(args.file, license_key=args.license_key)
+        print(output)
+        return 0
+    if args.factory_build_id:
+        if not args.compile:
+            parser.error("--factory-build-id requires --compile")
+        if not args.license_key:
+            raise RecipeError("Need valid license to birth tool; pass --license-key.")
+        from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
+        builder = FoundryBuilder()
+        try:
+            manifest = builder.get_manifest(args.factory_build_id)
+        except FactoryBuildError as exc:
+            raise RecipeError(str(exc)) from exc
+        if manifest.get("status") != "approved":
+            raise RecipeError("Factory must be approved by a reviewer before compilation.")
+        source_path = builder.output_root / args.factory_build_id / "manifest.json"
+        output_path = Path(args.output).expanduser() if args.output else source_path.parent / "factory.rvx"
+        output = compiler.compile_file(
+            source_path, output_path, license_key=args.license_key, tool_id=args.factory_build_id
+        )
         print(output)
         return 0
     if not args.compile:
