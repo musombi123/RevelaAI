@@ -15,9 +15,9 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile backend modules
-        run: python -m py_compile app.py config/db.py routes/chat_routes.py routes/memory_routes.py ai/living_brain.py ai/global_brain_adapter.py ai/hub_prompts.py
+        run: python -m py_compile app.py asgi.py fastapi_routes/chat.py fastapi_routes/memory.py services/memory_store.py ai/living_brain.py ai/global_brain_adapter.py ai/hub_prompts.py
       - name: Install memory-route test dependencies
-        run: python -m pip install Flask PyJWT pymongo requests python-dotenv
+        run: python -m pip install -r requirements.txt
       - name: Verify userId header is bound to signed identity
         env:
           JWT_SECRET: "test-only-secret"
@@ -46,7 +46,7 @@ jobs:
           JWT_SECRET: "test-only-secret"
         run: |
           python - <<'PY'
-          from routes.memory_routes import isBestThing
+          from services.memory_store import isBestThing
 
           assert not isBestThing("hi")
           assert not isBestThing("thanks")
