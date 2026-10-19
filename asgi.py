@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from a2wsgi import WSGIMiddleware
 
+from fastapi_routes.agi import router as agi_router
 from fastapi_routes.chat import router as chat_router
 from fastapi_routes.core_mesh import router as core_mesh_router
 from fastapi_routes.explain import router as explain_router
@@ -176,6 +177,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 # Native FastAPI routes precede the catch-all WSGI mount so these endpoints no
 # longer execute through Flask.
 app.include_router(system_router)
+app.include_router(agi_router)
 app.include_router(core_mesh_router)
 app.include_router(memory_router)
 app.include_router(chat_router)
