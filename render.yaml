@@ -1,11 +1,12 @@
 services:
-  # Public Flask gateway. Core credentials are imported server-to-server;
-  # no core token is placed in browser-facing configuration.
+  # Public FastAPI ASGI gateway. The WSGI bridge is temporary while existing
+  # Flask blueprints and direct routes are migrated without breaking clients.
+  # Core credentials are imported server-to-server; no core token is browser-facing.
   - type: web
     name: RevelaAI
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 app:app
+    startCommand: uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: GROQ_API_KEY
         sync: false
@@ -72,7 +73,7 @@ services:
         generateValue: true
 
   # Core-One: standalone Genesis service. Build from the repository root so
-  # sibling module replacements (core-zero/core-one/lib/worldwide) remain visible.
+  # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
   - type: pserv
     name: genesis-core-one
     runtime: go
