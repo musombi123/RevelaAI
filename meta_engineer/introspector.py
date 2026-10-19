@@ -1,14 +1,14 @@
-"""Read-only architecture scanner for the current RevelaAI Flask repository."""
+"""Read-only architecture scanner for the native RevelaAI FastAPI repository."""
 from __future__ import annotations
 import ast, json, re
 from pathlib import Path
 from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
-PROTECTED = ["revelai/routers/auth.py", "revelai/middleware/security.py", "revelai/core/config.py"]
+PROTECTED = ["fastapi_routes/auth.py", "fastapi_routes/admin_auth.py", "revelai/core/config.py", "revelai/core/brain_os.py"]
 
 def scan_architecture() -> dict[str, Any]:
     """Walk source roots and map Python imports without writing files."""
-    roots = [ROOT / "revelai", ROOT / "routes", ROOT / "services", ROOT / "ai", ROOT / "models"]
+    roots = [ROOT / "fastapi_routes", ROOT / "revelai", ROOT / "services", ROOT / "ai", ROOT / "models", ROOT / "automation_fabric", ROOT / "meta_engineer"]
     structure, dependencies, schemas, files = {}, {}, {}, []
     for root in roots:
         if not root.is_dir(): continue
@@ -33,16 +33,15 @@ def scan_architecture() -> dict[str, Any]:
                     fields = [{"name": n.target.id, "annotation": ast.unparse(n.annotation)} for n in node.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)]
                     classes[node.name] = {"fields": fields, "docstring": ast.get_docstring(node)}
             schemas[rel] = classes
-    for rel in ("config/db.py", "routes/memory_routes.py"):
+    for rel in ("config/db.py", "services/memory_store.py"):
         path = ROOT / rel
         if path.is_file():
             try: source = path.read_text(encoding="utf-8")
             except OSError: continue
             names = sorted(set(re.findall(r"""["'](conversations|memories|ideas|bestThings|learnings)["']""", source)))
             if names: schemas["collections:" + rel] = {"database": "revelai", "collections": names}
-    route_root = ROOT / "routes"
-    if not route_root.is_dir(): route_root = ROOT / "revelai" / "routers"
-    free_slots = [str((route_root / n).relative_to(ROOT)) for n in ("meta_engineer_routes.py", "feature_routes.py", "health_routes.py") if not (route_root / n).exists()] if route_root.is_dir() else ["routes/meta_engineer_routes.py"]
-    return {"structure": structure, "dependencies": dependencies, "schemas": schemas, "free_slots": free_slots or ["No obvious free route slot; review an existing blueprint"], "protected_paths": PROTECTED, "read_only": True, "framework": "Flask; no FastAPI assumption"}
+    route_root = ROOT / "fastapi_routes"
+    free_slots = [str((route_root / n).relative_to(ROOT)) for n in ("meta_engineer.py", "feature_routes.py", "health_routes.py") if not (route_root / n).exists()] if route_root.is_dir() else ["routes/meta_engineer_routes.py"]
+    return {"structure": structure, "dependencies": dependencies, "schemas": schemas, "free_slots": free_slots or ["No obvious free route slot; review an existing blueprint"], "protected_paths": PROTECTED, "read_only": True, "framework": "FastAPI/ASGI (native routers; no Flask runtime)"}
 
 if __name__ == "__main__": print(json.dumps(scan_architecture(), indent=2, default=str))
