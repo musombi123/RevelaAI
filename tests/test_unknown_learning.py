@@ -54,6 +54,11 @@ def test_only_human_reviewed_shared_knowledge_becomes_available(tmp_path):
     attach_genesis_proposal(submission["topic_key"], {"status": "await_merge", "name": "posho_weigher"}, root=tmp_path)
     published = publish_known(submission["topic_key"], "operator-1", "posho_weigher", "/v1/posho_weigher", "b" * 40, root=tmp_path)
     assert published["status"] == "known"
+    assert published["graph_recorded"] is True
+    graph_rows = (tmp_path / "graph" / "worldwide_graph.jsonl").read_text(encoding="utf-8").splitlines()
+    graph = __import__("json").loads(graph_rows[0])
+    assert graph["country"] == "KE"
+    assert graph["evidence_status"] == "human_reviewed_release_not_performance_benchmark"
     results = list_known(tmp_path)
     assert len(results) == 1
     assert results[0]["topic"] == "posho mill auto weigher"
