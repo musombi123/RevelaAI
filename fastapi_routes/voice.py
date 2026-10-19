@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 import app as legacy
+from services.conversation_store import MAX_HISTORY, build_server_context, get_session, save_session
 
 router = APIRouter(tags=["Voice"])
 logger = logging.getLogger("revelaai.fastapi.voice")
@@ -92,8 +93,8 @@ def _voice_sync(
     if not heard:
         return _error("EMPTY_TRANSCRIPTION", "No speech could be transcribed.", 400)
 
-    session = legacy.get_session(session_id)
-    previous_context = legacy.build_server_context(session)
+    session = get_session(session_id)
+    previous_context = build_server_context(session)
     intent = legacy.classify_intent(heard)
     capability = legacy.detect_capability(heard, intent=intent)
     if capability == "image_generation":
@@ -105,7 +106,7 @@ def _voice_sync(
                 "role": "assistant",
                 "content": f"Generated a design based on the request: {heard}",
             })
-            legacy.save_session(session_id, session)
+            save_session(session_id, session)
             asset_type = str(asset.get("asset_type") or "png")
             return {
                 "status": "success",
@@ -140,7 +141,7 @@ def _voice_sync(
 
     session["topic"] = intent
     session["messages"].append({"role": "user", "content": heard})
-    session["messages"] = session["messages"][-legacy.MAX_HISTORY:]
+    session["messages"] = session["messages"][-MAX_HISTORY:]
 
     try:
         ai_result = legacy.process_message(
@@ -194,7 +195,7 @@ def _voice_sync(
         return _error("EMPTY_AI_RESPONSE", "RevelaAI returned an empty response.", 502)
 
     session["messages"].append({"role": "assistant", "content": response_text})
-    legacy.save_session(session_id, session)
+    save_session(session_id, session)
 
     provider = ai_result.get("provider", legacy.get_active_text_provider())
     model = ai_result.get("model", legacy.get_active_text_model())
