@@ -379,7 +379,32 @@ def publish_known(topic_key: str, operator_id: str, tool_name: str, endpoint: st
         record["human_review"] = published["human_review"]
         record["updated_at"] = _utc_now()
         _atomic_json(source, record)
-        return {"topic": published["topic"], "topic_key": topic_key, "status": "known", "tool_name": tool_name, "endpoint": endpoint, "published": True}
+
+        # Country-tagged graph edges are written only after consent and human publication.
+        # These attest publication/provenance; they are not performance benchmark data.
+        graph_path = base / "graph" / "worldwide_graph.jsonl"
+        graph_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            os.chmod(graph_path.parent, 0o700)
+        except OSError:
+            pass
+        graph_record = {
+            "schema_version": "revelaai.worldwide-learning-graph.v1",
+            "topic_key": topic_key,
+            "topic": published["topic"],
+            "country": published["country"],
+            "language": published["language"],
+            "tool_name": tool_name,
+            "endpoint": endpoint,
+            "merge_commit": merge_commit.lower(),
+            "consent_to_share": True,
+            "evidence_status": "human_reviewed_release_not_performance_benchmark",
+            "published_at": published["published_at"],
+        }
+        with graph_path.open("a", encoding="utf-8") as graph_file:
+            os.chmod(graph_path, 0o600)
+            graph_file.write(json.dumps(graph_record, ensure_ascii=False) + "\n")
+        return {"topic": published["topic"], "topic_key": topic_key, "status": "known", "tool_name": tool_name, "endpoint": endpoint, "published": True, "graph_recorded": True}
 
 
 def list_known(root: Path | None = None) -> list[dict[str, Any]]:
