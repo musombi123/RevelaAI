@@ -38,7 +38,7 @@ Status: awaiting owner review. Draft PR #69; not merged. Do not merge until the 
 - PayPal, M-Pesa Global payouts, automatic FX conversion, and end-to-end tool invocation in Go cores: not implemented.
 - Full Go source encryption/migration: not implemented; existing source remains readable in Git.
 - Foundry/Seed/Auditor: initial Python APIs and declarative workflow code exist. This is not a production autonomous factory engine: no arbitrary source execution, hardware actuation or silent production rollout.
-- The passing CI run at commit `34324953539c62911e7671bf99422726f54b9e13` passed 9 targeted tests; the workflow now also smoke-tests FastAPI imports/routes, and subsequent commits need their own green runs before merge.
+- The latest push and pull-request CI checks passed at commit `d95b3d2b94fa880576d65bcb388181c259d8c67d`: Python modules compile, FastAPI imports and required routes register, and 16 security/revenue/mesh tests pass (3 warnings). Re-run CI after any further code changes.
 
 No production-readiness, legal-compliance, or uncopyability guarantee is made by this proposal.
 
