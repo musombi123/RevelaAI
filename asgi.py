@@ -20,6 +20,7 @@ from fastapi_routes.chat import router as chat_router
 from fastapi_routes.explain import router as explain_router
 from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
+from fastapi_routes.vision import router as vision_router
 
 legacy_flask_app = legacy_app_module.app
 logger = logging.getLogger("revelaai.asgi")
@@ -42,63 +43,61 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
     """Maintain baseline response headers and SCI throttle for native routes."""
     path = request.url.path
 
-    # The Flask before_request guard still covers fallback routes. Apply the
-    # same reversible guard to native routes without double-counting bridge calls.
-    if path.startswith(("/api/revelaai/hubs", "/api/revelaai/v2")):
-        now = time.time()
-        request_times = legacy_app_module._SCI_REQUEST_TIMES
-        rate_lock = legacy_app_module._SCI_RATE_LOCK
-        throttle = legacy_app_module.SCI_THROTTLE
+    # Count native ASGI requests in the same reversible SCI throttle as the
+    # legacy application. The mounted WSGI app retains its own before_request
+    # hook, so only ASGI-native requests pass through this middleware logic.
+    now = time.time()
+    request_times = legacy_app_module._SCI_REQUEST_TIMES
+    rate_lock = legacy_app_module._SCI_RATE_LOCK
+    throttle = legacy_app_module.SCI_THROTTLE
 
-        with rate_lock:
-            while request_times and now - request_times[0] > 1:
-                request_times.popleft()
-            request_times.append(now)
-            measured_rps = len(request_times)
+    with rate_lock:
+        while request_times and now - request_times[0] > 1:
+            request_times.popleft()
+        request_times.append(now)
+        measured_rps = len(request_times)
 
-        if measured_rps > 200 and not throttle.get("enabled"):
-            throttle.update({
-                "enabled": True,
-                "reason": "observed_rps_over_200",
-                "since": datetime.now(timezone.utc).isoformat(),
-            })
+    if measured_rps > 200 and not throttle.get("enabled"):
+        throttle.update({
+            "enabled": True,
+            "reason": "observed_rps_over_200",
+            "since": datetime.now(timezone.utc).isoformat(),
+        })
 
-        if throttle.get("enabled"):
-            since = throttle.get("since")
-            try:
-                started = datetime.fromisoformat(str(since)).timestamp()
-            except Exception:
-                started = now
+    if throttle.get("enabled"):
+        since = throttle.get("since")
+        try:
+            started = datetime.fromisoformat(str(since)).timestamp()
+        except Exception:
+            started = now
 
-            if now - started > 60:
-                throttle.update({"enabled": False, "reason": None, "since": None})
-            else:
-                # Preserve the exact documented recovery allow-list.
-                if path not in {
-                    "/health",
-                    "/ready",
-                    "/api/sci/shield/status",
-                    "/api/sci/shield/dashboard",
-                    "/api/sci/disaster/simulate",
-                }:
-                    response = JSONResponse(
-                        {
-                            "status": "error",
-                            "code": "SCI_SHIELD_COOLDOWN",
-                            "message": "RevelaAI Shield Active - Cooling Down",
-                            "retry_after_seconds": max(1, int(60 - (now - started))),
-                        },
-                        status_code=429,
-                    )
-                    request_id = (
-                        request.headers.get("X-Request-ID", "").strip()[:100]
-                        or uuid.uuid4().hex
-                    )
-                    response.headers["X-Request-ID"] = request_id
-                    response.headers["X-Content-Type-Options"] = "nosniff"
-                    response.headers["X-Frame-Options"] = "DENY"
-                    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-                    return response
+        if now - started > 60:
+            throttle.update({"enabled": False, "reason": None, "since": None})
+        elif path not in {
+            "/health",
+            "/ready",
+            "/api/sci/shield/status",
+            "/api/sci/shield/dashboard",
+            "/api/sci/disaster/simulate",
+        }:
+            response = JSONResponse(
+                {
+                    "status": "error",
+                    "code": "SCI_SHIELD_COOLDOWN",
+                    "message": "RevelaAI Shield Active - Cooling Down",
+                    "retry_after_seconds": max(1, int(60 - (now - started))),
+                },
+                status_code=429,
+            )
+            request_id = (
+                request.headers.get("X-Request-ID", "").strip()[:100]
+                or uuid.uuid4().hex
+            )
+            response.headers["X-Request-ID"] = request_id
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            return response
 
     response = await call_next(request)
     response.headers.setdefault(
@@ -128,6 +127,7 @@ app.include_router(chat_router)
 app.include_router(explain_router)
 app.include_router(fastapi_hub_router)
 app.include_router(living_brain_router)
+app.include_router(vision_router)
 
 # Temporary bridge: remaining Flask endpoints retain their established contract.
 app.mount("/", WSGIMiddleware(legacy_flask_app), name="legacy-flask")
