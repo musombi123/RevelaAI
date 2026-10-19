@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import app as legacy
+from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 
 router = APIRouter(tags=["AI Streaming"])
 logger = logging.getLogger("revelaai.fastapi.stream")
@@ -136,9 +137,9 @@ async def ai_stream(request: Request):
     cookies = dict(request.cookies)
     subject = _subject(headers)
     session_id = _session_id(headers, cookies, subject)
-    session = legacy.get_session(session_id)
+    session = get_session(session_id)
     raw_client_context = payload.get("context", [])
-    previous_context, memory_source = legacy.resolve_conversation_context(
+    previous_context, memory_source = resolve_conversation_context(
         session, raw_client_context
     )
     intent = legacy.classify_intent(message)
@@ -163,7 +164,7 @@ async def ai_stream(request: Request):
                     "role": "assistant",
                     "content": f"Generated a design based on the request: {message}",
                 })
-                legacy.save_session(session_id, session)
+                save_session(session_id, session)
                 yield _sse("image", _image_payload(message, asset, session_id, memory_source, previous_context))
                 yield _sse("done", "[DONE]")
             except ValueError as exc:
@@ -188,8 +189,8 @@ async def ai_stream(request: Request):
         return response
 
     session["messages"].append({"role": "user", "content": message})
-    session["messages"] = session["messages"][-legacy.MAX_HISTORY:]
-    legacy.save_session(session_id, session)
+    session["messages"] = session["messages"][-MAX_HISTORY:]
+    save_session(session_id, session)
 
     def generate() -> Iterator[str]:
         try:
@@ -216,7 +217,7 @@ async def ai_stream(request: Request):
                         "role": "assistant",
                         "content": f"Generated a design based on the request: {message}",
                     })
-                    legacy.save_session(session_id, session)
+                    save_session(session_id, session)
                     yield _sse("image", _image_payload(message, asset, session_id, memory_source, previous_context))
                     yield _sse("done", "[DONE]")
                     return
@@ -229,7 +230,7 @@ async def ai_stream(request: Request):
 
             response_text = str(ai_result.get("response") or "").strip() or "No response generated."
             session["messages"].append({"role": "assistant", "content": response_text})
-            legacy.save_session(session_id, session)
+            save_session(session_id, session)
             yield _sse("message", response_text)
             metadata = {
                 "intent": ai_result.get("intent", intent),
