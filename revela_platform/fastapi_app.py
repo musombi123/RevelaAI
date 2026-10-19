@@ -706,6 +706,7 @@ def build_factory(body: FactoryBuildInput,
     record = FactoryRecord(
         id=proposal["build_id"], owner_user_id=user_id, name=body.name.strip(),
         status="await_merge", country=country, manifest_sha256=proposal["manifest_sha256"],
+        manifest_json=proposal["manifest"],
     )
     session.add(record)
     _audit(session, user_id, "foundry.factory.built", record.id,
@@ -738,7 +739,9 @@ def get_factory_build(build_id: str, user_id: str = Depends(authenticated_user),
     if record.owner_user_id != user_id and not _reviewer(user_id):
         raise HTTPException(status_code=403, detail="Factory belongs to another user")
     try:
-        manifest = FoundryBuilder().get_manifest(build_id)
+        manifest = FoundryBuilder.validate_manifest(record.manifest_json)
+        if manifest["manifest_sha256"] != record.manifest_sha256:
+            raise FactoryBuildError("Database manifest digest does not match factory record.")
     except FactoryBuildError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"build_id": build_id, "database_status": record.status, "manifest": manifest}
@@ -760,11 +763,15 @@ def review_factory_build(build_id: str, body: FactoryReviewInput,
         raise HTTPException(status_code=404, detail="Factory build not found")
     target_status = "approved" if body.approved else "rejected"
     try:
-        manifest = FoundryBuilder().set_status(build_id, target_status)
+        manifest = FoundryBuilder.transition_manifest(record.manifest_json, target_status)
+        # Filesystem copy is useful to the owner-local CLI, while SQL remains the
+        # hosted source of truth and survives stateless service restarts.
+        FoundryBuilder().store_manifest(manifest)
     except FactoryBuildError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     record.status = target_status
     record.manifest_sha256 = manifest["manifest_sha256"]
+    record.manifest_json = manifest
     _audit(session, user_id, "foundry.factory.reviewed", build_id,
            {"approved": body.approved, "review_note": body.review_note,
             "manifest_sha256": record.manifest_sha256})
@@ -817,6 +824,7 @@ def seed_factory(build_id: str, body: SeedFactoryInput,
         result = SeedRunner().seed_child(
             build_id=build_id, license_key=license_key or "", user_id=user_id,
             child_name=body.child_name, purchase_verified=purchased,
+            source_manifest=record.manifest_json,
         )
     except LicenseError as exc:
         raise _license_http_error(exc) from exc
