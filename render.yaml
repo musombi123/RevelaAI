@@ -1,6 +1,6 @@
 services:
-  # Existing public Flask gateway. Keep this name aligned with the live
-  # Render service so a Blueprint can manage the intended service.
+  # Public Flask gateway. Core credentials are imported server-to-server;
+  # no core token is placed in browser-facing configuration.
   - type: web
     name: RevelaAI
     runtime: python
@@ -16,14 +16,38 @@ services:
           type: pserv
           name: usect-zero-core
           property: hostport
+      - key: USECT_ZERO_BASE_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
       - key: USECT_ZERO_ADMIN_TOKEN
         fromService:
           type: pserv
           name: usect-zero-core
           envVarKey: USECT_ZERO_ADMIN_TOKEN
+      - key: GENESIS_BASE_URL
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          property: hostport
+      - key: GENESIS_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          envVarKey: GENESIS_ADMIN_TOKEN
+      - key: MIND_BASE_URL
+        fromService:
+          type: pserv
+          name: infinite-mind-core
+          property: hostport
+      - key: MIND_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: infinite-mind-core
+          envVarKey: MIND_ADMIN_TOKEN
 
-  # Private Go core. The persistent disk keeps API key records, approval state,
-  # audit events and generated evidence across deploys/restarts.
+  # Core-Zero: model-free diagnostics, bounded tools, and human-gated recovery.
   - type: pserv
     name: usect-zero-core
     runtime: go
@@ -40,3 +64,47 @@ services:
         value: /var/data/usect-zero
       - key: USECT_ZERO_ADMIN_TOKEN
         generateValue: true
+
+  # Core-One: standalone Genesis service. Build from the repository root so
+  # sibling module replacements (core-zero/core-one/lib/worldwide) remain visible.
+  - type: pserv
+    name: genesis-core-one
+    runtime: go
+    plan: starter
+    buildCommand: go -C core-one build -o ./genesis ./cmd/genesis
+    startCommand: ./core-one/genesis -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
+    envVars:
+      - key: GENESIS_ADMIN_TOKEN
+        generateValue: true
+
+  # Core-Two: standalone Infinite Mind service. Its sibling-module imports
+  # require the full repository checkout to remain the build/runtime root.
+  - type: pserv
+    name: infinite-mind-core
+    runtime: go
+    plan: starter
+    buildCommand: go -C core-two build -o ./revela-mind ./cmd/revela-mind
+    startCommand: ./core-two/revela-mind -daemon -repo-root . -listen 0.0.0.0:$PORT -interval 24h
+    envVars:
+      - key: MIND_ADMIN_TOKEN
+        generateValue: true
+      - key: USECT_ZERO_BASE_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
+      - key: USECT_ZERO_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          envVarKey: USECT_ZERO_ADMIN_TOKEN
+      - key: GENESIS_BASE_URL
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          property: hostport
+      - key: GENESIS_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          envVarKey: GENESIS_ADMIN_TOKEN

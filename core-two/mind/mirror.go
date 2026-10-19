@@ -159,11 +159,10 @@ func (s *Service) observeMirror(ctx context.Context) (map[string]any, error) {
 
 func probeHealth(ctx context.Context,name,base,path string) healthProbe {
   result:=healthProbe{Service:name}
-  parsed,err:=url.Parse(strings.TrimRight(strings.TrimSpace(base),"/"))
+  normalized,normalizeErr:=normalizeCoreBase(base)
+  if normalizeErr!=nil { result.Error="invalid upstream URL or private-network policy";return result }
+  parsed,err:=url.Parse(normalized)
   if err!=nil || parsed.Host=="" || parsed.User!=nil || parsed.RawQuery!="" || parsed.Fragment!="" { result.Error="invalid upstream URL";return result }
-  host:=strings.ToLower(parsed.Hostname())
-  loopback:=host=="localhost" || host=="127.0.0.1" || host=="::1"
-  if parsed.Scheme!="https" && !(parsed.Scheme=="http" && loopback) { result.Error="non-loopback health probes require HTTPS";return result }
   parsed.Path=strings.TrimRight(parsed.Path,"/")+path
   result.URL=parsed.Scheme+"://"+parsed.Host+parsed.EscapedPath()
   request,err:=http.NewRequestWithContext(ctx,http.MethodGet,parsed.String(),nil)

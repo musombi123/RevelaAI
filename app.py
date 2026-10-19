@@ -105,16 +105,6 @@ JWT_SECRET = (
 
 JWT_ALGORITHM = "HS256"
 
-# PyJWT emits an InsecureKeyLengthWarning during token verification for weak
-# HS256 secrets. Log an actionable startup warning without abruptly rejecting
-# existing sessions; rotate the same secret on both issuer and verifier together.
-if JWT_SECRET and len(JWT_SECRET.encode("utf-8")) < 32:
-    logging.getLogger(__name__).warning(
-        "JWT_SECRET is shorter than 32 bytes. Coordinate a 32+ byte random-secret "
-        "rotation on RevelaCode Backend and RevelaAI together; changing only one "
-        "service will invalidate cross-service JWT verification."
-    )
-
 
 def resolve_revelacode_user_id() -> str | None:
     """
