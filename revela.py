@@ -50,6 +50,11 @@ def main() -> int:
             raise RecipeError(str(exc)) from exc
         if manifest.get("status") != "approved":
             raise RecipeError("Factory must be approved by a reviewer before compilation.")
+        from core_foundry.attestation import AttestationError, verify_approval_attestation
+        try:
+            manifest = verify_approval_attestation(manifest)
+        except AttestationError as exc:
+            raise RecipeError("Need a valid signed factory-review attestation before compiling.") from exc
         source_path = builder.output_root / args.factory_build_id / "manifest.json"
         output_path = Path(args.output).expanduser() if args.output else source_path.parent / "factory.rvx"
         output = compiler.compile_file(
