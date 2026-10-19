@@ -1,4 +1,4 @@
-"""Compatibility import for the native bounded RSS research router."""
-from fastapi_routes.research import router as rss_bp
+"""Framework-neutral import path for the native RSS research router."""
+from fastapi_routes.research import router
 
-__all__ = ["rss_bp"]
+__all__ = ["router"]
