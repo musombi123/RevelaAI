@@ -1,19 +1,426 @@
+# USECT-ZERO Worldwide Safety, Privacy and Compliance Policy
+# Purpose: policy index for deterministic guardian screening and engineering workflows.
+# Enforcement: must be implemented by the runtime, API, authorization, and approval layers.
+
 version: 1
+policy_id: usect-zero-worldwide-safety
+policy_name: USECT-ZERO Worldwide Safety and Compliance Index
+policy_status: active
 mode: fail_closed
-core_law: "Protect, not destroy. Apply the strictest relevant safety and privacy controls; require human review for meaningful system changes."
+
+core_law: >-
+  Protect, not destroy. Apply the strictest relevant safety and privacy
+  controls that are lawful and appropriate to the deployment. Do not permit
+  harmful engineering or unauthorized actions. Require human review for
+  meaningful system changes and qualified professional review for hazardous
+  engineering.
+
 coverage:
   status: "awareness index, not a complete legal compliance engine"
+
+  jurisdiction_selection:
+    required: true
+    consider:
+      - operator_location
+      - deployment_location
+      - affected_persons_location
+      - data_subject_location
+      - product_market
+      - hosting_location
+      - cross_border_data_transfers
+      - regulated_industry
+      - intended_use
+    unknown_jurisdiction: "legal_review_required"
+    conflicting_legal_obligations: "qualified_legal_review_required"
+    assume_universal_compliance: false
+    automatically_infer_legal_compliance: false
+
   jurisdictions:
-    - "Kenya: Data Protection Act, 2019 and applicable KEBS/product requirements"
-    - "European Union: GDPR, applicable national law and product-safety requirements"
-    - "United States: applicable federal, state, sector-specific and local requirements"
-    - "United Kingdom: UK GDPR and applicable product-safety requirements"
-    - "China: applicable personal-information, cybersecurity and product rules"
-    - "Japan: applicable privacy, electrical and product-safety rules"
-    - "Other countries: local law must be independently researched and verified"
-block_categories: [weapons, warfare, explosives, malware_and_credential_theft, covert_surveillance, non_consensual_tracking, privacy_violations, unauthorized_safety_control_bypass, illegal_operation]
-required_gates: [deterministic_guardian_screening, candidate_validation, provenance_and_integrity_checks, professional_review_for_hazardous_hardware, human_approval, explicit_merge]
+    KE:
+      name: Kenya
+      scope:
+        - "Data Protection Act, 2019"
+        - "Applicable data protection regulations and ODPC guidance"
+        - "Applicable KEBS, electrical, consumer and product-safety requirements"
+      official_references:
+        - "https://www.odpc.go.ke/data-protection-laws-kenya/"
+        - "https://www.odpc.go.ke/"
+      verification_required:
+        - current_law_and_amendments
+        - controller_and_processor_obligations
+        - registration_and_notification_requirements
+        - cross_border_data_transfers
+        - product_specific_standards
+
+    EU:
+      name: European Union
+      scope:
+        - "GDPR and applicable national law"
+        - "Applicable product-specific and general product-safety requirements"
+        - "Applicable AI, cybersecurity, consumer and sector-specific rules"
+      official_references:
+        - "https://commission.europa.eu/law/law-topic/data-protection_en"
+        - "https://commission.europa.eu/topics/business-and-industry/product-safety_en"
+      verification_required:
+        - territorial_scope
+        - member_state_requirements
+        - lawful_basis_and_data_subject_rights
+        - international_data_transfers
+        - product_conformity_and_market_access
+        - sector_specific_requirements
+
+    US:
+      name: United States
+      scope:
+        - "Applicable federal, state, territorial and local law"
+        - "Applicable sector-specific privacy and security requirements"
+        - "Applicable consumer product-safety and electrical requirements"
+      official_references:
+        - "https://www.cpsc.gov/Regulations-Laws--Standards/Statutes"
+        - "https://www.ftc.gov/"
+      verification_required:
+        - state_of_operation_and_market
+        - regulated_data_categories
+        - applicable_sector_specific_law
+        - consumer_product_safety
+        - reporting_and_notification_requirements
+
+    UK:
+      name: United Kingdom
+      scope:
+        - "UK GDPR and Data Protection Act 2018, as applicable and amended"
+        - "Applicable product-safety and sector-specific requirements"
+        - "Applicable cybersecurity and consumer-protection requirements"
+      official_references:
+        - "https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/"
+        - "https://www.gov.uk/guidance/product-safety-law-compliance-advice-for-manufacturers-and-importers"
+      verification_required:
+        - current_statutory_amendments
+        - lawful_basis_and_data_subject_rights
+        - international_data_transfers
+        - product_conformity
+        - sector_specific_requirements
+
+    CN:
+      name: China
+      scope:
+        - "Personal Information Protection Law and applicable implementing rules"
+        - "Data Security Law and applicable cybersecurity requirements"
+        - "Applicable product, electrical and industry-specific requirements"
+      official_references:
+        - "https://en.npc.gov.cn.cdurl.cn/2021-12/29/c_694559.htm"
+        - "https://en.npc.gov.cn.cdurl.cn/2021-06/10/c_689311.htm"
+      verification_required:
+        - current_law_and_implementing_rules
+        - data_localization_and_transfer_requirements
+        - cybersecurity_review_obligations
+        - product_certification_and_standards
+        - sector_specific_restrictions
+
+    JP:
+      name: Japan
+      scope:
+        - "Act on the Protection of Personal Information and applicable rules"
+        - "Applicable electrical appliance and consumer product-safety laws"
+        - "Applicable cybersecurity and sector-specific requirements"
+      official_references:
+        - "https://www.ppc.go.jp/en/legal/"
+        - "https://www.meti.go.jp/english/policy/economy/consumer/"
+      verification_required:
+        - current_law_and_reform_status
+        - personal_information_processing
+        - international_data_transfers
+        - applicable_electrical_safety_requirements
+        - product_specific_conformity
+
+    OTHER:
+      name: Other jurisdictions
+      scope:
+        - "Applicable national, regional, state, provincial and local laws"
+        - "Applicable privacy, cybersecurity, engineering and product-safety rules"
+      official_references: []
+      verification_required:
+        - identify_authoritative_regulators
+        - identify_current_legislation
+        - verify_effective_dates_and_amendments
+        - obtain_qualified_legal_review_when_required
+      unverified_requirements: "do_not_claim_compliance"
+
+  reference_maintenance:
+    store_source_title: true
+    store_source_url: true
+    store_last_checked_at: true
+    store_reviewer: true
+    store_applicability_decision: true
+    recheck_before_regulated_deployment: true
+    recheck_after_material_law_or_product_changes: true
+    stale_reference_status: "verification_required"
+    reference_url_alone_proves_compliance: false
+
+decision_policy:
+  allowed_decisions:
+    - allow
+    - deny
+    - escalate
+
+  defaults:
+    missing_evidence: deny
+    invalid_provenance: deny
+    failed_integrity_check: deny
+    failed_required_test: deny
+    unavailable_guardian: deny
+    unavailable_authorization_service: deny
+    unavailable_required_policy_data: deny
+    ambiguous_high_risk_request: escalate
+    missing_human_approval: deny
+    missing_explicit_merge_approval: deny
+    unresolved_legal_applicability: escalate
+
+  allow_conditions:
+    - request_is_within_authorized_scope
+    - input_validation_passed
+    - applicable_safety_screening_passed
+    - required_provenance_checks_passed
+    - required_candidate_tests_passed
+    - required_professional_review_completed
+    - required_human_approval_verified
+    - applicable_legal_review_completed
+    - execution_boundary_revalidation_passed
+
+block_categories:
+  - weapons
+  - warfare
+  - explosives
+  - malware_and_credential_theft
+  - covert_surveillance
+  - non_consensual_tracking
+  - privacy_violations
+  - unauthorized_safety_control_bypass
+  - illegal_operation
+
+restricted_actions:
+  - credential_theft
+  - unauthorized_access
+  - unauthorized_privilege_escalation
+  - covert_collection_of_private_data
+  - non_consensual_location_tracking
+  - unauthorized_surveillance
+  - disabling_required_safety_controls
+  - unauthorized_firmware_flashing
+  - unauthorized_hardware_actuation
+  - unauthorized_destructive_changes
+  - audit_log_tampering
+  - integrity_check_bypass
+  - provenance_forgery
+  - concealment_of_failed_safety_checks
+
+required_gates:
+  - validate_inputs
+  - deterministic_guardian_screening
+  - candidate_validation
+  - provenance_and_integrity_checks
+  - privacy_and_data_protection_review
+  - jurisdiction_and_legal_applicability_review
+  - professional_review_for_hazardous_hardware
+  - human_approval
+  - explicit_merge
+
+gate_policy:
+  validate_inputs:
+    required: true
+    reject_malformed_inputs: true
+    reject_unbounded_inputs: true
+    reject_path_traversal: true
+    reject_unexpected_actions: true
+    reject_invalid_identifiers: true
+
+  deterministic_guardian_screening:
+    required: true
+    check_block_categories: true
+    check_restricted_actions: true
+    normalize_text_before_screening: true
+    phrase_match_proves_intent: false
+    screening_alone_authorizes_execution: false
+    ambiguous_high_risk_request: escalate
+    unavailable_screening: deny
+
+  candidate_validation:
+    required: true
+    candidate_tests_must_pass: true
+    required_test_results_missing: deny
+    integrity_test_failure: deny
+    validation_result_must_be_traceable: true
+    tests_replace_human_approval: false
+
+  provenance_and_integrity_checks:
+    required: true
+    verify_source_identity: true
+    verify_artifact_hashes_when_available: true
+    verify_template_and_version: true
+    verify_change_scope: true
+    reject_mismatched_artifacts: true
+    hash_proves_safety: false
+    provenance_failure: deny
+
+  privacy_and_data_protection_review:
+    required_for_personal_data: true
+    purpose_must_be_documented: true
+    lawful_basis_or_applicable_authority_required: true
+    data_minimization_required: true
+    retention_period_must_be_defined: true
+    access_controls_required: true
+    sensitive_data_requires_additional_review: true
+    cross_border_transfer_review_when_applicable: true
+    privacy_risk_assessment_when_required: true
+    privacy_controls_must_be_revalidated_after_material_changes: true
+
+  jurisdiction_and_legal_applicability_review:
+    required_for_regulated_deployment: true
+    determine_applicable_jurisdictions: true
+    verify_authoritative_sources: true
+    verify_current_effective_requirements: true
+    unresolved_conflict_requires_legal_review: true
+    policy_index_is_legal_advice: false
+    unknown_is_compliant: false
+
+  professional_review_for_hazardous_hardware:
+    required_when_applicable: true
+    require_relevant_qualified_reviewer: true
+    verify_manufacturer_documentation: true
+    review_electrical_and_physical_limits: true
+    review_fail_safe_behavior: true
+    verify_protective_interlocks: true
+    professional_review_implies_automatic_actuation: false
+
+  human_approval:
+    required_for_meaningful_system_changes: true
+    must_be_explicit: true
+    bind_to_specific_action: true
+    bind_to_specific_target: true
+    bind_to_reviewed_artifact_and_version: true
+    reject_expired_approval: true
+    reject_replayed_approval: true
+    reject_scope_mismatch: true
+    approval_inferred_from_login: false
+    approval_inferred_from_policy_file: false
+
+  explicit_merge:
+    required_for_repository_merge: true
+    require_reviewed_diff: true
+    require_required_checks_to_pass: true
+    require_explicit_merge_authorization: true
+    reject_unreviewed_changes: true
+    automatic_merge: false
+
+execution_policy:
+  mode: proposal_first
+  automatic_execution_of_unreviewed_commands: false
+  automatic_repository_changes_without_approval: false
+  automatic_deployment: false
+  automatic_merge: false
+  automatic_firmware_flashing: false
+  automatic_hardware_actuation: false
+  automatic_safety_interlock_bypass: false
+  execute_generated_code_during_validation: false
+  network_access_requires_separate_authorization: true
+  device_access_requires_explicit_local_permission: true
+  privileged_operations_require_server_side_authorization: true
+  revalidate_permissions_before_execution: true
+  revalidate_target_before_execution: true
+  failed_revalidation: deny
+
+  recovery:
+    proposal_required_before_change: true
+    preserve_original_state_before_overwrite: true
+    compare_target_against_reviewed_snapshot: true
+    reject_stale_proposals: true
+    preserve_backup_evidence: true
+    report_partial_recovery: true
+    rollback_failure_requires_manual_review: true
+
+  generated_artifacts:
+    use_curated_templates_when_available: true
+    reject_unknown_templates: true
+    preserve_template_provenance: true
+    review_only_by_default: true
+    generated_code_is_authorized_to_execute: false
+    physical_compatibility_is_assumed: false
+    cost_or_supplier_data_may_be_fabricated: false
+
+api_security:
+  verify_administrator_identity_server_side: true
+  verify_authorization_on_every_privileged_request: true
+  distinguish_invalid_credentials_from_verification_unavailability: true
+  verification_unavailable_means_authorized: false
+  fail_closed_when_required_verification_is_unavailable: true
+  enforce_api_key_scope_and_expiry: true
+  separate_administrator_credentials_from_ordinary_scoped_keys: true
+  protect_key_material: true
+  never_log_plaintext_credentials: true
+  audit_key_creation_approval_and_revocation: true
+  issue_keys_only_after_authorized_approval: true
+
+audit_policy:
+  enabled: true
+  record_security_decisions: true
+  record_blocked_operations: true
+  record_approval_decisions: true
+  record_integrity_failures: true
+  record_recovery_outcomes: true
+  protect_logs_from_unapproved_modification: true
+  never_store_plaintext_secrets: true
+  privileged_operation_on_audit_failure: deny
+  destructive_operation_on_audit_failure: deny
+  disclose_partial_operation_if_audit_fails_after_change: true
+
+phrase_screening:
+  enabled: true
+  case_insensitive: true
+  normalize_whitespace: true
+  method: advisory_phrase_matching
+  phrase_match_proves_intent: false
+  phrase_match_is_the_only_safety_gate: false
+  ambiguous_match_requires_contextual_review: true
+  screening_failure: deny
+  guarantee_all_harm_is_blocked: false
+
+extra_terms:
+  - "credential theft"
+  - "covert surveillance"
+  - "non-consensual tracking"
+  - "delete audit logs"
+  - "disable safety controls"
+  - "bypass authorization"
+  - "unauthorized firmware flashing"
+  - "exfiltrate private data"
+  - "conceal unauthorized access"
+
+evidence_policy:
+  distinguish_observed_facts_from_inferences: true
+  identify_missing_evidence: true
+  prohibit_fabricated_test_results: true
+  prohibit_fabricated_legal_reviews: true
+  prohibit_fabricated_hardware_verification: true
+  prohibit_claiming_execution_when_only_a_plan_was_generated: true
+  report_unavailable_services_truthfully: true
+  retain_relevant_failure_details_without_secrets: true
+
 notes:
-  - "This policy index is not legal advice or proof of universal compliance."
-  - "Pattern screening is layered defense, not perfect semantic understanding."
-  - "No automatic hardware actuation, deployment, or merge."
+  - >-
+    This policy index is not legal advice and is not proof of universal
+    compliance. A qualified reviewer must establish which laws and technical
+    requirements apply to each deployment.
+  - >-
+    Pattern screening is layered defense, not perfect semantic understanding.
+    It cannot guarantee that all harmful activity will be identified or blocked.
+  - >-
+    A legal reference URL, a successful test, a checksum, or a human approval
+    on its own does not prove overall product safety or legal compliance.
+  - >-
+    No automatic hardware actuation, deployment, or merge is permitted.
+  - >-
+    Policy is effective only when the running application enforces it at the
+    relevant authorization and execution boundaries.
+  - >-
+    If a required safety, authorization, or legal-verification check is
+    unavailable, the affected operation must remain blocked until resolved.
