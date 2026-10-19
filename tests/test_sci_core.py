@@ -85,7 +85,7 @@ class SciCoreSafetyTests(unittest.TestCase):
         admin_check.assert_called_once()
 
     def test_native_sci_core_routes_are_registered(self):
-        paths = {route.path for route in app.routes}
+        paths = set(app.openapi()["paths"])
         self.assertIn("/api/sci/shield/status", paths)
         self.assertIn("/api/sci/shield/scan", paths)
         self.assertIn("/api/sci/research", paths)
