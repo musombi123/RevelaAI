@@ -96,9 +96,14 @@ def _authenticated_admin():
         return None, (jsonify({"status": "error", "code": code}), 401)
 
     if response.status_code == 403:
-        code = (
+        upstream_code = (
             body.get("code")
-            if isinstance(body, dict) and body.get("code") in {"admin_required", "user_identity_mismatch"}
+            if isinstance(body, dict) and isinstance(body.get("code"), str)
+            else ""
+        )
+        code = (
+            upstream_code
+            if upstream_code in {"admin_required", "user_identity_mismatch"}
             else "admin_required"
         )
         return None, (jsonify({"status": "error", "code": code}), 403)
@@ -136,15 +141,24 @@ def _authenticated_admin():
         )
         return _verification_unavailable()
 
-    canonical_id = str(body.get("userId") or body.get("user_id") or body.get("id") or "").strip()
-    role = str(body.get("role") or "").strip().lower()
+    raw_id = body.get("userId") or body.get("user_id") or body.get("id")
+    raw_role = body.get("role")
     authorized = body.get("authorized")
 
-    if not canonical_id or not isinstance(authorized, bool) or not role:
+    if (
+        not isinstance(raw_id, str)
+        or not raw_id.strip()
+        or not isinstance(raw_role, str)
+        or not raw_role.strip()
+        or not isinstance(authorized, bool)
+    ):
         current_app.logger.warning(
             "RevelaCode administrator verification returned an incomplete success payload."
         )
         return _verification_unavailable()
+
+    canonical_id = raw_id.strip()
+    role = raw_role.strip().lower()
 
     if canonical_id != str(user_id):
         return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
