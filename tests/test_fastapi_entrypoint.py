@@ -8,6 +8,16 @@ from fastapi_routes.auth import _header_value
 client = TestClient(app)
 
 
+
+def test_app_compatibility_facade_preserves_legacy_imports() -> None:
+    import app as compatibility
+    import legacy_flask_app
+
+    assert compatibility.app is legacy_flask_app.app
+    assert compatibility.process_message is legacy_flask_app.process_message
+    assert compatibility._SCI_REQUEST_TIMES is legacy_flask_app._SCI_REQUEST_TIMES
+
+
 def test_fastapi_health_endpoint_and_security_headers() -> None:
     response = client.get("/_fastapi/health")
     assert response.status_code == 200
