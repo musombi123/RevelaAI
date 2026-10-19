@@ -69,7 +69,7 @@ def _iso(value: Any) -> str | None:
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"\\s+", " ", re.sub(r"[^\\w\\s]", "", str(text or "").lower())).strip()
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", "", str(text or "").lower())).strip()
 
 
 NOISE_ONLY = re.compile(
