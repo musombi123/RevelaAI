@@ -9,13 +9,31 @@ client = TestClient(app)
 
 
 
-def test_app_compatibility_facade_preserves_legacy_imports() -> None:
-    import app as compatibility
-    import legacy_flask_app
+def test_app_module_exports_the_native_fastapi_instance() -> None:
+    import app as app_module
+    from fastapi import FastAPI
 
-    assert compatibility.app is legacy_flask_app.app
-    assert compatibility.process_message is legacy_flask_app.process_message
-    assert compatibility._SCI_REQUEST_TIMES is legacy_flask_app._SCI_REQUEST_TIMES
+    assert isinstance(app_module.app, FastAPI)
+    assert app_module.app is app
+
+
+def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
+    from pathlib import Path
+    import re
+    import asgi
+
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    asgi_source = Path("asgi.__file__").read_text(encoding="utf-8") if False else Path(asgi.__file__).read_text(encoding="utf-8")
+    requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
+
+    assert "WSGIMiddleware" not in asgi_source
+    assert "legacy_flask_app" not in asgi_source
+    assert "WSGIMiddleware" not in app_source
+    assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", asgi_source, re.M)
+    assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", app_source, re.M)
+    for dependency in ("flask", "flask-cors", "a2wsgi"):
+        assert not re.search(rf"^\\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\\s|$)", requirements, re.M), dependency
+    assert not Path("legacy_flask_app.py").exists()
 
 
 
@@ -35,6 +53,7 @@ def test_fastapi_health_endpoint_and_security_headers() -> None:
     assert response.status_code == 200
     assert response.json()["runtime"] == "fastapi"
     assert response.json()["service"] == "revelaai"
+    assert response.json()["migration"] == "native-fastapi-only"
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("X-Frame-Options") == "DENY"
