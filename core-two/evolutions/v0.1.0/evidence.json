@@ -1,8 +1,104 @@
 {
-  "schema_version":"usect-two.evolution-evidence.v1","created_at":"2026-10-18T23:02:33Z","version":"v0.1.0","tool_name":"offline_vault_fixture","objective":"Improve offline_vault graph traversal efficiency using an indexed visited set","status":"await_merge","selected_mutation":"graph-indexed","mutation_batch":"static-example-proposal","mutation_count":10,
-  "benchmark":{"fixture_id":"offline-vault-graph-replay-v1","fixture_only":true,"replay_rounds":5,"node_count":1800,"edge_count":7200,"baseline_ns_per_round":2656694,"candidate_ns_per_round":421937,"speedup_percent":529.64,"improvement_ratio":6.3,"measurement_scope":"synthetic graph traversal phase only; machine dependent"},
-  "historical_core_one_invention_count":0,"time_to_invent_ms":null,"bom_cost_kes":null,"human_merge_time_ms":null,"fixture_only":true,
-  "safety":{"core_two_guardian":"passed in local tests","core_one_guardian":"existing Guardian dependency","core_zero_library_probe":"RV Lang and Radar imports","core_zero_dedicated_guardian_policy_file_present":false,"candidate_template_tests_executed":true,"repository_sourced_code_executed":false,"os_level_sandbox":false,"automatic_merge":false},
-  "rvx_protection":{"proposal":"AES-256-GCM with external key","tamper_detection_tested":true,"numeric_security_score":null,"uncopyable_forever_claim":false},
-  "provenance_note":"Synthetic acceptance fixture, not historical Core-One invention evidence. No production invention-time or BOM savings claim is supported."
+  "schema_version": "usect-two.evolution-evidence.v1",
+  "created_at": "2026-10-18T23:02:33Z",
+  "version": "v0.1.0",
+  "tool_name": "offline_vault_fixture",
+  "objective": "Improve offline_vault graph traversal efficiency using an indexed visited set",
+  "status": "await_merge",
+  "selected_mutation": "graph-indexed",
+  "mutation_batch": "static-example-proposal",
+  "mutation_count": 10,
+  "mutation_count_semantics": {
+    "recorded_count": 10,
+    "selected_mutation_count": 1,
+    "interpretation": "The record identifies one selected mutation within a batch with a recorded count of 10. The source does not establish whether mutation_count means generated, evaluated, selected, or applied mutations.",
+    "requires_confirmation": true
+  },
+  "benchmark": {
+    "fixture_id": "offline-vault-graph-replay-v1",
+    "fixture_only": true,
+    "replay_rounds": 5,
+    "node_count": 1800,
+    "edge_count": 7200,
+    "baseline_ns_per_round": 2656694,
+    "candidate_ns_per_round": 421937,
+    "speedup_percent": 529.64,
+    "improvement_ratio": 6.3,
+    "measurement_scope": "Synthetic graph traversal phase only; machine dependent",
+    "derived_metrics": {
+      "recomputed_improvement_ratio": 6.296423,
+      "recomputed_speedup_percent": 529.64,
+      "candidate_time_reduction_percent": 84.12,
+      "calculation_formulas": {
+        "improvement_ratio": "baseline_ns_per_round / candidate_ns_per_round",
+        "speedup_percent": "(improvement_ratio - 1) * 100",
+        "candidate_time_reduction_percent": "(1 - candidate_ns_per_round / baseline_ns_per_round) * 100"
+      },
+      "interpretation": "The recorded timings imply approximately 6.30 times the graph-phase throughput and an 84.12% reduction in graph-phase time for this local synthetic measurement. These results do not establish an end-to-end or production speedup."
+    },
+    "reproducibility": {
+      "machine_details_provided": false,
+      "go_version_provided": false,
+      "baseline_revision_provided": false,
+      "candidate_revision_provided": false,
+      "benchmark_command_provided": false,
+      "raw_independent_run_results_provided": false,
+      "statistical_stability_established": false
+    }
+  },
+  "historical_core_one_invention_count": 0,
+  "time_to_invent_ms": null,
+  "bom_cost_kes": null,
+  "human_merge_time_ms": null,
+  "fixture_only": true,
+  "safety": {
+    "core_two_guardian": "Passed in local tests, according to the recorded source",
+    "core_one_guardian": "Existing Guardian dependency",
+    "core_zero_library_probe": "RV Lang and Radar imports",
+    "core_zero_dedicated_guardian_policy_file_present": false,
+    "candidate_template_tests_executed": true,
+    "repository_sourced_code_executed": false,
+    "os_level_sandbox": false,
+    "automatic_installation": false,
+    "automatic_execution": false,
+    "automatic_merge": false,
+    "human_approval_required": true,
+    "core_zero_guardian_gap_note": "The dedicated Guardian policy file was absent in the inspected baseline. This finding requires owner review and does not establish the state of every current working copy."
+  },
+  "rvx_protection": {
+    "proposal": "AES-256-GCM with external key",
+    "tamper_detection_tested": true,
+    "tamper_detection_test_scope": null,
+    "numeric_security_score": null,
+    "uncopyable_forever_claim": false,
+    "security_boundary": "The proposal does not make software literally uncopyable. Security depends on correct cryptographic implementation, key management, nonce handling, and appropriate review."
+  },
+  "merge_gate": {
+    "status": "await_merge",
+    "review_document": "AWAIT_MERGE.md",
+    "explicit_human_approval_required": true,
+    "automatic_installation_allowed": false,
+    "automatic_execution_allowed": false,
+    "automatic_merge_allowed": false,
+    "required_review_checks": [
+      "Inspect the complete candidate diff",
+      "Verify baseline and candidate revisions",
+      "Reproduce benchmark measurements",
+      "Review relevant tests and failure cases",
+      "Resolve or explicitly assess the Core-Zero Guardian policy gap",
+      "Review RVX security assumptions independently",
+      "Record reviewer identity and explicit approval decision"
+    ]
+  },
+  "review_annotations": {
+    "implementation_consistency": "The originally supplied Reachable implementation already uses a map-backed visited-node set. Verify the exact benchmark baseline before attributing the measured improvement to replacing linear membership scans.",
+    "production_evidence": "No historical Core-One invention evidence records were present in the inspected baseline.",
+    "missing_measurements": [
+      "Production invention timing",
+      "KES bill-of-materials cost",
+      "Human merge time"
+    ],
+    "evidence_limit": "Synthetic acceptance-fixture evidence only; no production savings or end-to-end performance improvement is established."
+  },
+  "provenance_note": "Synthetic acceptance fixture, not historical Core-One invention evidence. No production invention-time or BOM savings claim is supported."
 }
