@@ -34,6 +34,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/core-mesh/genesis/invent" in schema["paths"]
     assert "/v1/learn/known" in schema["paths"]
     assert "/health" in schema["paths"]
+    assert "/ai" in schema["paths"]
     assert "/ready" in schema["paths"]
     assert "/capabilities" in schema["paths"]
     assert "/ai/images/{filename}" in schema["paths"]
@@ -151,6 +152,19 @@ def test_primary_chat_still_requires_identity() -> None:
     response = client.post("/api/chat/", json={"message": "hello"})
     assert response.status_code in (401, 503)
     assert response.json().get("status") == "error"
+
+
+def test_main_ai_route_rejects_empty_message_before_provider_calls() -> None:
+    response = client.post("/ai", json={})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "EMPTY_MESSAGE"
+    assert response.headers.get("X-Request-ID")
+
+
+def test_main_ai_route_rejects_invalid_image_options() -> None:
+    response = client.post("/ai", json={"message": "Explain gravity", "width": "not-a-number"})
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "INVALID_IMAGE_OPTIONS"
 
 
 def test_native_voice_requires_audio_upload() -> None:
