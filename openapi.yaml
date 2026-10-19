@@ -278,6 +278,273 @@ paths:
                   type: string
                 endpoint:
                   type: string
+                factory_build_id:
+                  type: string
+                  pattern: '^fab_[a-f0-9]{24}                  type: string
+                  default: KE
+                bom_by_country:
+                  type: object
+                guides_by_language:
+                  type: object
+      responses:
+        '202':
+          description: Listing saved as pending_review
+        '402':
+          description: Valid license required
+  /v1/marketplace/buy:
+    post:
+      operationId: createMarketplaceCheckout
+      summary: Create a one-time checkout for a reviewed listing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool_id, license_key, buyer_country]
+              properties:
+                tool_id:
+                  type: string
+                license_key:
+                  type: string
+                buyer_country:
+                  type: string
+                  default: KE
+      responses:
+        '202':
+          description: Checkout created; delivery follows verified payment
+        '402':
+          description: Valid platform license required
+        '503':
+          description: Payment provider not configured
+  /v1/marketplace/purchases/{purchase_id}:
+    get:
+      operationId: deliverMarketplacePurchase
+      summary: Get the localized tool bundle after payment confirmation
+      parameters:
+        - name: purchase_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tool endpoint, available country BOM and guide
+        '409':
+          description: Payment not confirmed
+  /v1/marketplace/earnings/me:
+    get:
+      operationId: getCreatorEarnings
+      summary: Read creator earnings and pending payout balance
+      responses:
+        '200':
+          description: Paid sales with creator/platform split; payouts may remain pending
+
+
+  /v1/foundry/build:
+    post:
+      operationId: buildFactoryProposal
+      summary: Build a licensed, reviewable factory manifest
+      parameters:
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description, requirements]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                requirements:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: string
+                country:
+                  type: string
+                  default: KE
+                language:
+                  type: string
+                  default: en
+                industry:
+                  type: string
+                  default: general
+                adapters:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '202':
+          description: Factory manifest staged for review; generated code is not executed
+        '402':
+          description: Valid license required
+  /v1/foundry/builds/{build_id}:
+    get:
+      operationId: getFactoryProposal
+      summary: Get an owned or reviewer-authorized factory manifest
+      parameters:
+        - name: build_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Manifest and current database review status
+        '403':
+          description: Not authorized to view this factory
+  /v1/foundry/builds/{build_id}/review:
+    post:
+      operationId: reviewFactoryProposal
+      summary: Approve or reject a factory proposal as an authorized reviewer
+      parameters:
+        - name: build_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approved, review_note]
+              properties:
+                approved:
+                  type: boolean
+                review_note:
+                  type: string
+      responses:
+        '200':
+          description: Review decision persisted to the manifest and audit trail
+        '403':
+          description: Reviewer permission required
+  /v1/seed/{build_id}:
+    post:
+      operationId: seedOfflineFactoryChild
+      summary: Seed a declarative child from an approved factory while honoring a signed offline lease
+      parameters:
+        - name: build_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [child_name]
+              properties:
+                child_name:
+                  type: string
+                buyer_country:
+                  type: string
+                  default: KE
+                purchase_id:
+                  type: string
+      responses:
+        '201':
+          description: Local declarative child bundle with signed lease; code execution remains disabled
+        '402':
+          description: Valid license required
+        '409':
+          description: Parent factory is not approved
+  /v1/seed/{seed_id}/verify:
+    get:
+      operationId: verifyOfflineSeedLease
+      summary: Check registered child lease status for the authenticated owner
+      parameters:
+        - name: seed_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Registered offline authorization information
+  /v1/auditor/verify:
+    get:
+      operationId: verifyAuditChain
+      summary: Verify hash-chain consistency of audit ledger
+      responses:
+        '200':
+          description: Ledger verification result and current head hash
+        '403':
+          description: Reviewer permission required
+        '409':
+          description: Corrupt audit ledger
+  /v1/auditor/events:
+    get:
+      operationId: listAuditEvents
+      summary: List own audit events or reviewer-authorized user events
+      parameters:
+        - name: actor_user_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 250
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Audit events with minimized details
+        '403':
+          description: Not authorized
+
+components:
+  securitySchemes:
+    RevelaCodeBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Country:
+      name: country
+      in: query
+      required: false
+      schema:
+        type: string
+        default: KE
+      description: Backward-compatible Kenya default.
+    Language:
+      name: lang
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [en, de, zh, ja, fr, es, sw]
+
+                  description: Optional owned, human-approved Foundry build ID
                 price_usd_cents:
                   type: integer
                 country_origin:
