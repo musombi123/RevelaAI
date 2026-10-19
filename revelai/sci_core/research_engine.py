@@ -5,12 +5,18 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree
 import requests
 
+
+class ResearchForbiddenError(PermissionError):
+    """Defensive research policy denial represented without a web framework."""
+
+    code = 403
+
+
 BLOCKLIST = ["how to hack", "ddos", "create virus to attack", "bypass paywall", "hack into", "make weapon", "build a weapon", "bioweapon", "ransomware", "reverse shell"]
 def is_offensive_query(q):
     value = str(q or "").lower()
     if any(term in value for term in BLOCKLIST):
-        from werkzeug.exceptions import Forbidden
-        raise Forbidden("RevelaAI Sci-Core is defensive & civilian research only")
+        raise ResearchForbiddenError("RevelaAI Sci-Core is defensive & civilian research only")
     return False
 
 def _summarize(text, limit=5):
