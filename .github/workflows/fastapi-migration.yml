@@ -5,7 +5,6 @@ on:
     paths:
       - "asgi.py"
       - "app.py"
-      - "legacy_flask_app.py"
       - "requirements.txt"
       - "render.yaml"
       - "routes/**"
@@ -18,7 +17,6 @@ on:
     paths:
       - "asgi.py"
       - "app.py"
-      - "legacy_flask_app.py"
       - "requirements.txt"
       - "render.yaml"
       - "routes/**"
@@ -32,7 +30,7 @@ permissions:
 
 jobs:
   asgi-entrypoint:
-    name: ASGI entry point and compatibility contract
+    name: Native FastAPI entry point and route contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -46,6 +44,26 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
       - name: Compile ASGI entry point and tests
-        run: python -m py_compile app.py legacy_flask_app.py asgi.py tests/test_fastapi_entrypoint.py
+        run: python -m py_compile app.py asgi.py tests/test_fastapi_entrypoint.py
+      - name: Reject Flask and WSGI runtime dependencies
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          app_source = Path("app.py").read_text(encoding="utf-8")
+          asgi_source = Path("asgi.py").read_text(encoding="utf-8")
+          requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
+
+          assert "from asgi import app" in app_source
+          assert "WSGIMiddleware" not in asgi_source
+          assert "legacy_flask_app" not in asgi_source
+          assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", asgi_source, re.M)
+          assert not re.search(r"^\\s*(?:from|import)\\s+flask(?:\\.|\\s)", app_source, re.M)
+          for dependency in ("flask", "flask-cors", "a2wsgi"):
+              assert not re.search(rf"^\\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\\s|$)", requirements, re.M), dependency
+          assert not Path("legacy_flask_app.py").exists()
+          print("FastAPI-only runtime contract verified.")
+          PY
       - name: Run FastAPI gateway regression tests
         run: python -m pytest -q tests/test_fastapi_entrypoint.py
