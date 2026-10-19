@@ -391,5 +391,25 @@ def list_known(root: Path | None = None) -> list[dict[str, Any]]:
             "endpoint": item.get("endpoint"),
             "published_at": item.get("published_at"),
             "review_status": "human_reviewed",
+            "mind_proposal": item.get("mind_proposal"),
         })
     return items
+
+
+
+def attach_improvement_proposal(topic_key: str, proposal: dict[str, Any], root: Path | None = None) -> dict[str, Any]:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,71}", str(topic_key or "")):
+        raise ValueError("topic key is invalid")
+    base = root or learning_root()
+    path = base / "known" / (topic_key + ".json")
+    with _STORE_LOCK:
+        record = _read_json(path)
+        if not record or record.get("status") != "known" or record.get("human_review", {}).get("published") is not True:
+            raise ValueError("only human-reviewed shared knowledge can receive an improvement proposal")
+        summary = {k: proposal[k] for k in ("status", "version", "tool_name", "selected_mutation", "await_merge_path", "created_at") if k in proposal}
+        summary["human_approval_required"] = True
+        summary["automatic_merge"] = False
+        record["mind_proposal"] = summary
+        record["updated_at"] = _utc_now()
+        _atomic_json(path, record)
+        return {"topic": record.get("topic"), "mind_proposal": summary}
