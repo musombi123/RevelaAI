@@ -78,7 +78,11 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _atomic_json(path: Path, data: dict[str, Any], mode: int = 0o600) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
     fd, temporary = tempfile.mkstemp(prefix=".learning-", suffix=".tmp", dir=str(path.parent))
     try:
         os.fchmod(fd, mode)
@@ -413,3 +417,61 @@ def attach_improvement_proposal(topic_key: str, proposal: dict[str, Any], root: 
         record["updated_at"] = _utc_now()
         _atomic_json(path, record)
         return {"topic": record.get("topic"), "mind_proposal": summary}
+
+
+def _pending_path(user_id: str, session_id: str, root: Path | None = None) -> Path:
+    base = root or learning_root()
+    key = hashlib.sha256((str(user_id) + "|" + str(session_id)).encode("utf-8")).hexdigest()
+    return base / "unknown" / "pending" / (key + ".json")
+
+
+def register_unknown_ask(topic: str, user_id: str, session_id: str,
+                         country: str = "KE", language: str = "",
+                         source_request: str = "", root: Path | None = None) -> dict[str, Any]:
+    if not str(user_id or "").strip() or not str(session_id or "").strip():
+        return {"registered": False, "reason": "authenticated user and session are required"}
+    from ai.worldwide_context import resolve_worldwide_context
+    profile = resolve_worldwide_context(country, language)
+    now = _utc_now()
+    record = {
+        "topic": str(topic or "unknown topic").strip()[:240],
+        "topic_key": topic_slug(str(topic or "unknown topic")),
+        "user_id": str(user_id)[:200],
+        "session_id": str(session_id)[:200],
+        "country": profile["country"],
+        "language": profile["language"],
+        "source_request": str(source_request or "")[:800],
+        "status": "awaiting_teaching",
+        "created_at": now,
+    }
+    _atomic_json(_pending_path(user_id, session_id, root), record)
+    return {"registered": True, "topic": record["topic"], "topic_key": record["topic_key"]}
+
+
+def get_pending_unknown_ask(user_id: str, session_id: str,
+                            root: Path | None = None) -> dict[str, Any] | None:
+    if not str(user_id or "").strip() or not str(session_id or "").strip():
+        return None
+    path = _pending_path(user_id, session_id, root)
+    record = _read_json(path)
+    if not record:
+        return None
+    if record.get("user_id") != user_id or record.get("session_id") != session_id:
+        return None
+    try:
+        created = datetime.fromisoformat(str(record.get("created_at")).replace("Z", "+00:00"))
+        if (datetime.now(timezone.utc) - created).total_seconds() > 7 * 24 * 60 * 60:
+            path.unlink(missing_ok=True)
+            return None
+    except (ValueError, TypeError):
+        path.unlink(missing_ok=True)
+        return None
+    return record if record.get("status") == "awaiting_teaching" else None
+
+
+def clear_pending_unknown_ask(user_id: str, session_id: str,
+                              root: Path | None = None) -> None:
+    path = _pending_path(user_id, session_id, root)
+    record = _read_json(path)
+    if record and record.get("user_id") == user_id and record.get("session_id") == session_id:
+        path.unlink(missing_ok=True)
