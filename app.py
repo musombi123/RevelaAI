@@ -3019,6 +3019,15 @@ def learn_unknown_api():
     return jsonify({"status": "accepted", "data": result}), 202
 
 
+@app.route("/v1/learn/known", methods=["GET"])
+def learn_known_api():
+    _, failure = _require_core_mesh_user()
+    if failure:
+        return failure
+    records = list_known()
+    return jsonify({"status": "success", "data": {"count": len(records), "known": records}})
+
+
 # =========================================================
 # ROOT
 # =========================================================
