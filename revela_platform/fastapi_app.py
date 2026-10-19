@@ -417,6 +417,7 @@ class PublishToolInput(BaseModel):
     industry: str = Field(default="general", min_length=2, max_length=80)
     country_origin: str = Field(default="KE", min_length=2, max_length=2)
     endpoint: str = Field(pattern="^/v1/[a-z0-9][a-z0-9_-]{0,63}$", max_length=120)
+    factory_build_id: str | None = Field(default=None, pattern="^fab_[a-f0-9]{24}$")
     price_usd_cents: int = Field(ge=100, le=100000000)
     bom_by_country: dict[str, Any] = Field(default_factory=dict)
     guides_by_language: dict[str, Any] = Field(default_factory=dict)
@@ -435,12 +436,20 @@ def publish_tool(body: PublishToolInput,
         raise _license_http_error(exc) from exc
     if session.get(ToolRecord, body.tool_id):
         raise HTTPException(status_code=409, detail="tool_id already exists")
+    factory_build = None
+    if body.factory_build_id:
+        factory_build = session.get(FactoryRecord, body.factory_build_id)
+        if factory_build is None or factory_build.owner_user_id != user_id:
+            raise HTTPException(status_code=404, detail="Owned factory build not found")
+        if factory_build.status != "approved":
+            raise HTTPException(status_code=409, detail="Factory build must be approved before marketplace listing")
     allowed, note = safety_screen(body.name, body.description, body.endpoint)
     status = "pending_review" if allowed else "rejected"
     tool = ToolRecord(
         id=body.tool_id, creator_user_id=user_id, name=body.name.strip(),
         description=body.description.strip(), industry=body.industry.strip().lower(),
         country_origin=country, endpoint=body.endpoint, price_usd_cents=body.price_usd_cents,
+        factory_build_id=body.factory_build_id,
         status=status, bom_by_country={str(k).upper(): v for k, v in body.bom_by_country.items()},
         guides_by_language={str(k).lower(): v for k, v in body.guides_by_language.items()},
         # Publisher-supplied savings are not trusted; reviewer may set a verified estimate later.
