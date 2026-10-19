@@ -251,7 +251,7 @@ async def feature_chat(request: Request):
     }
 
 
-def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str, str], not_found_code: str, not_found_message: str):
+def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str, str], not_found_code: str, not_found_message: str, allow_unknown_type: bool = False):
     legacy.cleanup_generated_files()
     safe_filename = os.path.basename(filename)
     if safe_filename != filename:
@@ -274,6 +274,8 @@ def _safe_generated_file(filename: str, directory: str, allowed_types: dict[str,
             status_code=404,
         )
     media_type = allowed_types.get(Path(safe_filename).suffix.lower())
+    if media_type is None and allow_unknown_type:
+        media_type = "application/octet-stream"
     if media_type is None:
         return JSONResponse(
             {
@@ -308,4 +310,5 @@ def serve_audio(filename: str):
         {".wav": "audio/wav", ".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/opus", ".flac": "audio/flac", ".webm": "audio/webm"},
         "AUDIO_NOT_FOUND",
         "Audio not found.",
+        allow_unknown_type=True,
     )
