@@ -22,6 +22,7 @@ from fastapi_routes.core_mesh import router as core_mesh_router
 from fastapi_routes.explain import router as explain_router
 from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
+from fastapi_routes.memory import router as memory_router
 from fastapi_routes.vision import router as vision_router
 from fastapi_routes.system import router as system_router
 from fastapi_routes.whatsapp import router as whatsapp_router
@@ -145,6 +146,7 @@ async def fastapi_gateway_health() -> dict[str, str]:
 # longer execute through Flask.
 app.include_router(system_router)
 app.include_router(core_mesh_router)
+app.include_router(memory_router)
 app.include_router(chat_router)
 app.include_router(explain_router)
 app.include_router(fastapi_hub_router)
