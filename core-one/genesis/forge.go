@@ -190,7 +190,7 @@ func (e *Engine) forge(spec ToolSpec, evidence ResearchEvidence, capabilityPlan 
 	return Invention{ID: id, Name: spec.Name, Title: spec.Title, Status: "await_merge", CreatedAt: created,
 		Directory: filepath.ToSlash(filepath.Join("core-one", "inventions", spec.Name)),
 		Library:   filepath.ToSlash(filepath.Join("core-one", "libraries", "created", libName)),
-		Model:     filepath.ToSlash(filepath.Join("core-one", "models", spec.Name+".yaml")), Category: spec.Category, Industry: spec.Industry,
+		Model:     filepath.ToSlash(filepath.Join("core-one", "models", spec.Name+".yaml")), Category: spec.Category, Industry: spec.Industry, Country:spec.Country, CountryName:spec.CountryName, Language:spec.Language, Currency:spec.Currency, SupplierDirectory:append([]string(nil),spec.SupplierDirectory...), BOM:spec.BOM,
 		Files: allFiles, Evidence: evidence, Summary: "Generated as a staged proposal. No source was executed, no external device was actuated, and no changes were merged.",
 		CapabilityPlanPath: filepath.ToSlash(filepath.Join("core-one", "inventions", spec.Name, "capability_plan.json")), CapabilityCoverage: capabilityPlan.Coverage}, nil
 }

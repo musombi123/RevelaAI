@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	worldcountry "revela-worldwide.local/libs/country"
+	worldguardian "revela-worldwide.local/libs/guardian"
 )
 
 var ErrBlocked = errors.New("guardian blocked the demand")
@@ -64,6 +67,20 @@ func (e *Engine) SetResearcher(r Researcher) { e.mu.Lock(); defer e.mu.Unlock();
 func (e *Engine) SetModel(m ModelAdapter)    { e.mu.Lock(); defer e.mu.Unlock(); e.Model = m }
 
 func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
+	return e.InventWorldwide(ctx, demand, "KE", "")
+}
+
+// InventWorldwide adds country/language context to the existing Genesis engine.
+// The tool name stays country-neutral, so one invention can carry multiple BOMs/guides.
+func (e *Engine) InventWorldwide(ctx context.Context, demand, countryCode, language string) (Invention, error) {
+	profile, profileErr := worldcountry.Resolve(countryCode, language)
+	if profileErr != nil { return Invention{}, profileErr }
+	globalDecision := worldguardian.CheckText(demand)
+	if !globalDecision.Allowed {
+		_ = e.Guardian.LogBlocked("worldwide_guardian", demand, globalDecision.Reason)
+		e.publish(Event{Type:"blocked", At:time.Now().UTC(), Message:"Worldwide Guardian screening blocked the demand before research or file generation.", Status:globalDecision.Code})
+		return Invention{}, ErrBlocked
+	}
 	if ctx == nil { ctx = context.Background() }
 	demand = limitText(demand, 4000)
 	if demand == "" {
@@ -122,6 +139,7 @@ func (e *Engine) Invent(ctx context.Context, demand string) (Invention, error) {
 	}
 
 	baseSpec := deriveSpec(demand)
+	if err := ApplyWorldwideProfile(&baseSpec, profile); err != nil { return Invention{}, err }
 	spec := baseSpec
 	if model != nil {
 		modelSpec, modelErr := model.Suggest(ctx, demand, evidence, baseSpec)
