@@ -36,7 +36,26 @@ class CoreMeshError(RuntimeError):
 
 
 def _base_url(name: str, default: str) -> str:
-    return str(os.getenv(name, default) or "").strip().rstrip("/")
+    raw = str(os.getenv(name, default) or "").strip()
+    if raw and "://" not in raw:
+        # Render's fromService.property=hostport value is "service-name:port".
+        # Convert only a plain host:port value; reject URL-like fragments.
+        candidate = urlsplit("//" + raw)
+        try:
+            port = candidate.port
+        except ValueError:
+            port = None
+        if (
+            candidate.hostname
+            and port is not None
+            and candidate.username is None
+            and candidate.password is None
+            and not candidate.path
+            and not candidate.query
+            and not candidate.fragment
+        ):
+            raw = "http://" + raw
+    return raw.rstrip("/")
 
 
 def _is_loopback(hostname: str) -> bool:
@@ -50,13 +69,39 @@ def _is_loopback(hostname: str) -> bool:
         return False
 
 
+def _is_render_private_service(hostname: str) -> bool:
+    # Render's private service hostport is a single DNS label plus a port.
+    # Do not treat public FQDNs or non-loopback IPs as private.
+    if not hostname or "." in hostname:
+        return False
+    try:
+        ipaddress.ip_address(hostname.strip("[]"))
+        return False
+    except ValueError:
+        return hostname.lower() != "localhost"
+
+
 def _validate_base(base: str) -> None:
     parsed = urlsplit(base)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    try:
+        parsed.port
+    except ValueError:
+        raise CoreMeshError("Core service URL contains an invalid port.", status_code=503, code="core_service_not_configured") from None
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
         raise CoreMeshError("Core service URL is not configured as a valid HTTP(S) origin.", status_code=503, code="core_service_not_configured")
-    # Never send service credentials to clear-text, non-loopback hosts.
-    if parsed.scheme != "https" and not _is_loopback(parsed.hostname):
-        raise CoreMeshError("Non-loopback core services must use HTTPS.", status_code=503, code="core_service_tls_required")
+    # Clear-text HTTP is permitted only for loopback and Render private DNS
+    # service labels, never for a public hostname.
+    if parsed.scheme != "https" and not (
+        _is_loopback(parsed.hostname) or _is_render_private_service(parsed.hostname)
+    ):
+        raise CoreMeshError("Non-loopback core services must use HTTPS unless they are Render private services.", status_code=503, code="core_service_tls_required")
 
 
 def _request_json(

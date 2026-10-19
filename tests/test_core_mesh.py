@@ -60,6 +60,21 @@ def test_improvement_request_routes_advisorially_to_infinite_mind(monkeypatch):
     assert result["safety"]["automatic_merge"] is False
 
 
+def test_render_private_hostport_is_normalized_and_allowed(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_BASE_URL", "usect-zero-core:10000")
+    base = core_mesh._base_url("USECT_ZERO_BASE_URL", "")
+    assert base == "http://usect-zero-core:10000"
+    core_mesh._validate_base(base)
+
+
+def test_invalid_hostport_is_not_normalized(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_BASE_URL", "usect-zero-core/path")
+    base = core_mesh._base_url("USECT_ZERO_BASE_URL", "")
+    assert base == "usect-zero-core/path"
+    with pytest.raises(core_mesh.CoreMeshError):
+        core_mesh._validate_base(base)
+
+
 def test_off_host_http_core_url_is_rejected():
     with pytest.raises(core_mesh.CoreMeshError) as error:
         core_mesh._validate_base("http://core-service.example.com")

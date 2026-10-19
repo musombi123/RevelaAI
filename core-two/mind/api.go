@@ -80,12 +80,37 @@ func (s *Service) allowMutation(w http.ResponseWriter, r *http.Request) bool {
 	writeAPIError(w, 401, "mind_auth_required", "Supply a valid X-Mind-Token or Bearer token."); return false
 }
 
+func normalizeCoreBase(raw string) (string, error) {
+    raw = strings.TrimSpace(raw)
+    if raw == "" { return "", fmt.Errorf("core URL is empty") }
+    if !strings.Contains(raw, "://") {
+        if strings.ContainsAny(raw, "/?#@") { return "", fmt.Errorf("invalid internal host:port") }
+        candidate, err := url.Parse("//" + raw)
+        if err != nil || candidate.Hostname() == "" { return "", fmt.Errorf("invalid internal host:port") }
+        raw = "http://" + raw
+    }
+    parsed, err := url.Parse(raw)
+    if err != nil || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+        return "", fmt.Errorf("invalid core URL")
+    }
+    if parsed.Scheme != "http" && parsed.Scheme != "https" { return "", fmt.Errorf("unsupported core URL scheme") }
+    host := strings.ToLower(parsed.Hostname())
+    loopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+    internalService := !strings.Contains(host, ".") && !strings.Contains(host, ":") && host != "" && host != "localhost"
+    if parsed.Scheme != "https" && !(parsed.Scheme == "http" && (loopback || internalService)) {
+        return "", fmt.Errorf("clear-text HTTP is allowed only to loopback or a private service name")
+    }
+    return strings.TrimRight(parsed.String(), "/"), nil
+}
+
 func (s *Service) proxyCore(w http.ResponseWriter, r *http.Request, which string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions { if !s.allowMutation(w, r) { return } }
 	base := strings.TrimSpace(os.Getenv("GENESIS_BASE_URL")); path := r.URL.Path
 	if which == "zero" { base = strings.TrimSpace(os.Getenv("USECT_ZERO_BASE_URL")); path = "/v1" + strings.TrimPrefix(path, "/v1/zero") }
 	if base == "" { if which == "zero" { base = "http://127.0.0.1:8780" } else { base = "http://127.0.0.1:8781" } }
-	base = strings.TrimRight(base, "/"); u, err := url.Parse(base + path); if err != nil { writeAPIError(w, 502, "invalid_upstream", "Core upstream URL is invalid."); return }; u.RawQuery = r.URL.RawQuery
+	base, err := normalizeCoreBase(base)
+    if err != nil { writeAPIError(w, 502, "invalid_upstream", "Core upstream URL is invalid or violates the private-network policy."); return }
+    u, err := url.Parse(base + path); if err != nil { writeAPIError(w, 502, "invalid_upstream", "Core upstream URL is invalid."); return }; u.RawQuery = r.URL.RawQuery
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), r.Body); if err != nil { writeAPIError(w, 502, "upstream_request_failed", "Could not construct Core upstream request."); return }
 	for _, header := range []string{"Accept", "Content-Type", "Authorization", "X-API-Key", "X-Admin-Token", "X-Genesis-Token"} { if value:=r.Header.Get(header);value!=""{upReq.Header.Set(header,value)} }
 	client := &http.Client{Transport:&http.Transport{ResponseHeaderTimeout:8*time.Second}}; resp, err := client.Do(upReq); if err != nil { writeAPIError(w, 502, "upstream_unavailable", "Core upstream is unavailable; start the corresponding existing daemon."); return }; defer resp.Body.Close()

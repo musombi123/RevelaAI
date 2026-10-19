@@ -109,11 +109,8 @@ def _proxy(
     except USECTZeroConfigurationError:
         current_app.logger.error("USECT-ZERO has invalid server-side configuration.")
         return _error("usect_zero_misconfigured", "USECT-ZERO is not configured correctly.", 503)
-    except USECTZeroUnavailable as exc:
-        current_app.logger.warning(
-            "USECT-ZERO core request failed; reason=%s.",
-            exc.reason_code,
-        )
+    except USECTZeroUnavailable:
+        current_app.logger.warning("USECT-ZERO core request failed or returned invalid data.")
         return _error("usect_zero_unavailable", "The USECT-ZERO core service is unavailable.", 503)
     except USECTZeroError:
         current_app.logger.warning("USECT-ZERO request was blocked by the integration boundary.")

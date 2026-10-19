@@ -39,12 +39,6 @@ class USECTZeroAdminTokenMissing(USECTZeroError):
 class USECTZeroUnavailable(USECTZeroError):
     """The core service could not be reached or returned invalid data."""
 
-    def __init__(self, message: str, *, reason_code: str = "upstream_unavailable"):
-        super().__init__(message)
-        # Stable diagnostic code only; never include URLs, headers or upstream
-        # response bodies because those may contain sensitive deployment data.
-        self.reason_code = reason_code
-
 
 class USECTZeroPayloadTooLarge(USECTZeroError):
     """An inbound request exceeds the adapter's size limit."""
@@ -75,14 +69,7 @@ def _timeout_seconds() -> int:
 
 
 def _base_url() -> str:
-    # Keep the operational gateway and Core Mesh dashboard pointed at the
-    # same service. USECT_ZERO_URL remains the explicit override for backward
-    # compatibility; the dashboard's USECT_ZERO_BASE_URL is the shared fallback.
-    raw = os.getenv("USECT_ZERO_URL", "").strip()
-    if not raw:
-        raw = os.getenv("USECT_ZERO_BASE_URL", "").strip()
-    if not raw:
-        raw = "http://127.0.0.1:8780"
+    raw = os.getenv("USECT_ZERO_URL", "http://127.0.0.1:8780").strip()
 
     # Render Blueprints expose a service's internal host and port through
     # fromService.property=hostport (for example, "usect-zero-core:10000").
@@ -210,37 +197,18 @@ def request_core(
             chunks.append(chunk)
     except USECTZeroResponseTooLarge:
         raise
-    except requests.Timeout:
-        raise USECTZeroUnavailable(
-            "The USECT-ZERO core request timed out.",
-            reason_code="upstream_timeout",
-        ) from None
-    except requests.ConnectionError:
-        raise USECTZeroUnavailable(
-            "The USECT-ZERO core connection failed.",
-            reason_code="upstream_connection_failed",
-        ) from None
-    except requests.RequestException:
-        raise USECTZeroUnavailable(
-            "The USECT-ZERO core request failed.",
-            reason_code="upstream_request_failed",
-        ) from None
+    except requests.RequestException as exc:
+        raise USECTZeroUnavailable("The USECT-ZERO core service is unavailable.") from exc
     finally:
         if response is not None:
             response.close()
 
     try:
         payload = json.loads(b"".join(chunks).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        raise USECTZeroUnavailable(
-            "The USECT-ZERO core returned invalid JSON.",
-            reason_code="upstream_invalid_json",
-        ) from None
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise USECTZeroUnavailable("The USECT-ZERO core returned invalid JSON.") from exc
 
     if not isinstance(payload, dict):
-        raise USECTZeroUnavailable(
-            "The USECT-ZERO core returned an unexpected response shape.",
-            reason_code="upstream_invalid_payload",
-        )
+        raise USECTZeroUnavailable("The USECT-ZERO core returned an unexpected response shape.")
 
     return CoreReply(status_code=int(response.status_code), payload=payload)

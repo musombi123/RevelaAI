@@ -139,18 +139,6 @@ def test_scoped_api_key_is_forwarded_but_bearer_token_is_not(monkeypatch, test_c
     assert "X-Admin-Token" not in observed["http_headers"]
 
 
-def test_core_mesh_base_url_is_used_when_gateway_url_is_unset(monkeypatch):
-    monkeypatch.delenv("USECT_ZERO_URL", raising=False)
-    monkeypatch.setenv("USECT_ZERO_BASE_URL", "https://zero.example.invalid")
-    assert client._base_url() == "https://zero.example.invalid"
-
-
-def test_explicit_gateway_url_takes_precedence_over_core_mesh_alias(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_URL", "https://gateway-zero.example.invalid")
-    monkeypatch.setenv("USECT_ZERO_BASE_URL", "https://dashboard-zero.example.invalid")
-    assert client._base_url() == "https://gateway-zero.example.invalid"
-
-
 def test_disabled_core_does_not_make_network_call(monkeypatch):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
 

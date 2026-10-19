@@ -101,6 +101,13 @@ Full-Stack Developer | Tech-Faith Innovator
  
 ## USECT Core Mesh: Core-Zero + Genesis (Core-One) + Infinite Mind (Core-Two)
 
+### Render deployment wiring
+
+The root `render.yaml` blueprint defines the public RevelaAI Flask gateway and three private Go services: `usect-zero-core`, `genesis-core-one`, and `infinite-mind-core`. Keep the cores private; the gateway uses Render's private `hostport` references and imports each core's server-side token with `fromService`. Both `USECT_ZERO_URL` (gateway adapter) and `USECT_ZERO_BASE_URL` (Core Mesh dashboard and Mind proxy) must refer to the same Core-Zero service. Core-One and Core-Two similarly use `GENESIS_BASE_URL` and `MIND_BASE_URL`. The Python gateway and Core-Two normalize Render's internal `service-name:port` references to HTTP and permit clear-text only to loopback/internal single-label service names; public hosts must use HTTPS.
+
+After syncing the Blueprint, verify each service's health endpoint and then refresh RevelaCode Admin → Core Mesh. A green application root or a healthy gateway does not by itself prove all three cores are connected. The dashboard must show `reachable: true` for ZERO, ONE and TWO. This blueprint must be synced/applied in Render; merging the file alone does not provision services or edit existing environment values.
+
+
 RevelaAI exposes a server-side Core Mesh integration for authenticated status, orchestrator routing metadata, and operator-triggered proposals:
 
 - `GET /api/core-mesh/dashboard` — safe, credential-free status for ZERO, Genesis, and Infinite Mind.

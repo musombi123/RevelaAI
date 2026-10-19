@@ -11,6 +11,21 @@ import (
  "testing"
 )
 
+func TestNormalizeRenderPrivateHostPort(t *testing.T) {
+    got, err := normalizeCoreBase("usect-zero-core:10000")
+    if err != nil { t.Fatal(err) }
+    if got != "http://usect-zero-core:10000" { t.Fatalf("unexpected normalized base: %q", got) }
+}
+
+func TestNormalizeCoreBaseRejectsPublicCleartextHTTP(t *testing.T) {
+    if _, err := normalizeCoreBase("http://core-service.example.com:10000"); err == nil {
+        t.Fatal("public clear-text HTTP must be rejected")
+    }
+    if got, err := normalizeCoreBase("https://core-service.example.com"); err != nil || got != "https://core-service.example.com" {
+        t.Fatalf("public HTTPS should be accepted; got=%q err=%v", got, err)
+    }
+}
+
 func TestMirrorConsumesZeroAndOneLogsIncrementallyWithoutExposingRawRecords(t *testing.T) {
  root,s:=newTestRepository(t)
  zeroLog:=filepath.Join(root,"core-zero","audit_log","events.jsonl")
