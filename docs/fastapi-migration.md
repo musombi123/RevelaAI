@@ -4,8 +4,11 @@
 
 The migration branch boots through FastAPI/Uvicorn and registers native
 `APIRouter` modules before a temporary `a2wsgi.WSGIMiddleware` compatibility
-mount. Flask remains present only as the fallback for endpoints that have not
-yet been ported, plus legacy configuration/state used by some adapters.
+mount. `app.py` is now a backwards-compatible facade; the existing Flask app
+and route map have been isolated in `legacy_flask_app.py`. Sector-specific and
+other not-yet-ported routes remain in that file unchanged for the manual pass.
+The ASGI entry point and native routers import the compatibility module explicitly
+rather than relying on `app.py` to construct the Flask app.
 
 **This is not yet a full Flask removal.** Keep the compatibility bridge and
 Flask dependencies until the main multimodal endpoints are ported, imports no
@@ -80,10 +83,11 @@ Remaining work is the legacy route inventory outside those native routers:
   the manual sector pass. The newly ported research/users APIs are native FastAPI
   routes under `/api/research` and `/api/users`; ambiguous legacy root paths are
   not treated as their public endpoints.
-- Legacy request hooks, error handlers, and duplicated after-request logic.
-- Service/configuration helpers that still import Flask globals (`request`,
-  `g`, `current_app`) even where native adapters pass explicit request
-  metadata. Move these to framework-neutral modules before deleting Flask.
+- Legacy request hooks, error handlers, and duplicated after-request logic are
+  isolated in `legacy_flask_app.py` and still apply only to WSGI fallback traffic.
+- Shared service/configuration helpers still imported from `legacy_flask_app.py`
+  must be moved to framework-neutral modules before deleting Flask. The facade
+  preserves old import access during this staged migration.
 - Resolve root-level legacy route collisions by comparing actual Flask route
   maps and preserving public endpoint contracts.
 
