@@ -1,154 +1,107 @@
-# Flask-to-FastAPI migration
+# Native FastAPI migration
 
-## Current branch status
+## Runtime contract
 
-The migration branch boots through FastAPI/Uvicorn and registers native
-`APIRouter` modules before a temporary `a2wsgi.WSGIMiddleware` compatibility
-mount. `app.py` is now a backwards-compatible facade; the existing Flask app
-and route map have been isolated in `legacy_flask_app.py`. Sector-specific and
-other not-yet-ported routes remain in that file unchanged for the manual pass.
-The ASGI entry point and native routers import the compatibility module explicitly
-rather than relying on `app.py` to construct the Flask app.
+RevelaAI now starts from a native FastAPI application. `app.py` exports the
+same FastAPI instance as `asgi.py`; Render starts it with Uvicorn.
 
-**This is not yet a full Flask removal.** Keep the compatibility bridge and
-Flask dependencies until the main multimodal endpoints are ported, imports no
-longer depend on Flask state, and the full regression suite passes.
+- No Flask application is constructed by the active runtime.
+- No WSGI compatibility application is mounted.
+- `requirements.txt` contains no `Flask`, `flask-cors`, or `a2wsgi`.
+- Request IDs, trusted-origin CORS, response security headers, request-size
+  checks, 404/405 error envelopes, and the reversible SCI cooldown run in ASGI
+  middleware and FastAPI exception handlers.
+- CORS configuration is in `services/http_config.py`; SCI shared throttle state
+  is in `services/security_state.py`.
+- Conversation/session storage, optional feature registry, image generation,
+  document ingestion, and audio utilities are framework-neutral services.
 
 ## Native FastAPI route groups
 
-- **System:** `GET /`, `GET /capabilities`, `GET /health`,
-  `GET /ready`, dynamic-feature `POST /chat`, safe generated image serving,
-  and generated audio serving.
+All of these are registered directly on the ASGI app; none is served through
+Flask or WSGI.
+
+- **System:** `GET /`, `GET /capabilities`, `GET /health`, `GET /ready`,
+  dynamic-feature `POST /chat`, safe generated image serving and generated audio serving.
 - **Main multimodal AI:** `POST /ai`, including JSON and multipart document
-  uploads, context/hub routing, image-generation requests, and the existing
-  response schema. The provider/orchestration service remains shared with the
-  legacy application while HTTP parsing and response handling are native.
-- **AI streaming:** `POST /ai/stream`, native Server-Sent Events for text and
-  image requests with explicit message/metadata/done/error events.
-- **Voice:** `POST /voice`, bounded audio uploads, transcription, conversation
-  processing, image requests and optional speech synthesis. `/voice/audio/*`
-  serves generated audio through the native system router.
-- **Primary authenticated AI chat:** `POST /api/chat` and `POST /api/chat/`.
-- **Live Vision:** `POST /api/vision/analyze`; validates MIME type, decoded size,
-  actual image format and pixel count, and does not persist frame bytes.
+  uploads, context/hub routing, image generation, and the existing response schema.
+- **AI streaming:** `POST /ai/stream`, native Server-Sent Events.
+- **Voice:** `POST /voice`; generated speech is served by `/voice/audio/{filename}`.
+- **Primary authenticated chat:** `POST /api/chat` and `POST /api/chat/`.
+- **Live Vision:** `POST /api/vision/analyze`; validates image data and avoids
+  retaining submitted camera frames.
 - **Local Living Brain:** `/api/revelaai/v2/brain/chat`,
   `/api/revelaai/v2/vision/describe`, and `/api/revelaai/v2/health`.
-- **Hub persona engine:** `/api/revelaai/hubs/` and
-  `/api/revelaai/hubs/respond`.
-- **Explainability:** `POST /`, retaining the current root handler contract.
-- **Smart Memory:** `POST /api/memory/chat`, `GET /api/memory/{user_id}`,
-  `POST /api/memory/ideas`, `POST /api/memory/ideas/{idea_id}/implementation`,
-  `GET /api/memory/ideas/{user_id}`, `DELETE /api/memory/useless/{user_id}`,
-  and `GET /api/memory/{user_id}/history`. Persistence and filtering functions
-  now live in `services/memory_store.py` with the separate `revelai` database.
+- **Hub persona engine:** `/api/revelaai/hubs/` and `/api/revelaai/hubs/respond`.
+- **Explainability:** `POST /` (root POST only; `GET /` remains the system status route).
+- **Smart Memory:** chat, ideas, implementation, per-user history and cleanup under
+  `/api/memory`; verified identity and isolated memory storage remain enforced.
 - **Core Mesh and user-taught learning:** dashboard, Genesis proposal, Mind
-  evolution proposal, unknown-topic teaching, reviewed shared knowledge list
-  and operator-only publication.
-- **AGI manifest and Brain OS:** `/api/agi/manifest`, `/api/agi/status`,
-  plus all seven administrator-protected Brain OS status/outcome/routing/
-  recovery/guardrail endpoints.
-- **Sci-Core:** dashboard, shield status and scan, defensive research, disaster
-  simulation, and safe hardware/software prototype proposal. All endpoints
-  retain current platform-admin verification and safe, non-executing behavior.
-- **USECT-ZERO:** health, activity, developer-key request/list/approval/revoke,
-  diagnostics, scan, healing baseline/proposals/approval, assembly boards and
-  templates, assembly, radar comparison, bridge plan, and Mind plan compilation.
-  A caller's bearer token is never sent to the Go core; administrator commands
-  use separate server-side credentials.
-- **Meta-Engineer:** health, scan, propose, approve, idea status, audit list and
-  pruning audit. Current platform administrator role is checked at the
-  RevelaCode backend. Proposals remain review-only; this API does not auto-deploy
-  or execute generated candidate code.
-- **Automation Fabric:** hosted health, tools, consent grant/revoke, planning,
-  plan status, explicitly approved execution and audit listing. Workspace paths
-  remain isolated by a hash of the verified account ID.
-- **WhatsApp:** webhook verification and incoming message handler.
-- **Research:** `POST /api/research` searches a bounded set of configured RSS feeds; it does not fetch arbitrary user-supplied URLs.
-- **Prototype users directory:** `POST /api/users` and `GET /api/users/{user_id}`. This remains an in-memory demo store, is disabled by default with `REVELAAI_ENABLE_PROTOTYPE_USERS_API=false`, and is not the authoritative RevelaCode account database.
+  evolution proposal, teaching, knowledge listing and operator-only publication.
+- **AGI manifest and Brain OS:** `/api/agi/manifest`, `/api/agi/status`, and
+  administrator-protected status/outcome/routing/recovery/guardrail endpoints.
+- **Sci-Core:** shield dashboard/status/scan, defensive research, disaster
+  simulation and safe prototype proposals.
+- **USECT-ZERO:** health, activity, developer-key workflow, diagnostics, scan,
+  healing, assembly, radar, bridge planning and Mind compilation.
+- **Meta-Engineer:** health, scan, proposal, approval, audit and pruning audit.
+  Proposals stay review-only; no automatic deployment or generated-code execution.
+- **Automation Fabric:** health, tools, consent, planning, explicitly approved
+  execution and audit.
+- **WhatsApp:** native webhook verification and incoming-message handlers.
+- **Research:** `POST /api/research` uses bounded configured RSS feeds and does
+  not fetch arbitrary user-supplied URLs.
+- **Prototype users:** `POST /api/users` and `GET /api/users/{user_id}`; this
+  in-memory demo API is disabled by default and is not the authoritative
+  RevelaCode account store.
 
-The ASGI middleware retains the same trusted-origin CORS allowlist, credential
-behavior, request IDs, security headers and reversible SCI throttle for native
-routes. An unauthenticated request is not promoted to a verified user or admin.
+## Deliberately untouched sector source files
 
-## Remaining Flask bridge inventory
+As requested, the remaining older blueprint files under `routes/` and some
+older `revelai/routers/` modules are not rewritten in this pass. They are not
+imported or registered by `asgi.py`, and are not part of the active request
+path. Convert or retire those source files manually when reviewing their
+sector-specific logic. Do not re-add them to the active app as Flask blueprints.
 
-The main AI, streaming, voice and system HTTP endpoints are registered natively.
-These routers now import provider, image, document, audio, feature-registry and
-conversation functions from framework-neutral modules rather than importing the
-Flask app module. The AI provider/orchestration implementation itself remains a
-shared service, and this service reuse is not evidence that Flask has been fully
-removed.
+The current FastAPI routers are the public runtime contract. If a path in one of
+the dormant source modules is not represented in `fastapi_routes/`, it is not
+automatically exposed; add a native router endpoint when bringing that sector
+online. This avoids quietly reintroducing Flask as a fallback.
 
-Remaining work is the legacy route inventory outside those native routers:
-- Sector-specific legacy route handlers and older compatibility APIs remain on
-  the Flask fallback intentionally. Their business logic is left untouched for
-  the manual sector pass. The newly ported research/users APIs are native FastAPI
-  routes under `/api/research` and `/api/users`; ambiguous legacy root paths are
-  not treated as their public endpoints.
-- Legacy request hooks, error handlers, and duplicated after-request logic are
-  isolated in `legacy_flask_app.py` and still apply only to WSGI fallback traffic.
-- Shared service/configuration helpers still imported from `legacy_flask_app.py`
-  must be moved to framework-neutral modules before deleting Flask. The facade
-  preserves old import access during this staged migration.
-- Resolve root-level legacy route collisions by comparing actual Flask route
-  maps and preserving public endpoint contracts.
+## Dependency and security notes
 
-The ASGI entry point still imports `legacy_flask_app.py` to mount the remaining
-WSGI routes and to share the current CORS allowlist and SCI throttle state.
-`app.py` remains a backwards-compatible facade over that module, but the native
-AI, streaming, voice and system routers no longer import the Flask app directly.
-Before removing the bridge, move the remaining CORS/throttle state into a small
-framework-neutral module and finish the manual sector-route pass.
+`requirements.txt` excludes Flask, `flask-cors`, and `a2wsgi`. Werkzeug
+remains an explicit dependency because existing security/service helpers use
+its HTTP exception type; it does not start a Flask application.
 
-## Migration requirements
-
-1. Preserve endpoint paths, methods, status codes, response envelopes and error
-   codes unless a known collision is intentionally fixed and documented.
-2. Keep CORS origins, request IDs, forwarded-proxy behavior, error handling,
-   body/upload limits, and security headers equivalent.
-3. Keep JWT validation fail-closed. Admin-only routes must validate the current
-   role through the authoritative RevelaCode backend rather than trusting a
-   frontend role claim.
-4. Keep Smart Memory isolated by verified user ID in the separate `revelai`
-   database. Never access `revelacode.users` directly from RevelaAI.
-5. Never forward end-user bearer tokens to private cores. Core credentials
-   remain server-side; proposals and hardware/recovery actions remain
-   human-gated.
-6. Run endpoint tests for success, malformed payloads, unauthenticated and
-   unauthorized requests, missing resources, and upstream failures.
+JWT identity checks remain fail-closed. Privileged endpoints verify current
+authority through the existing server-side verification boundary; browser role
+hints are not authority. User bearer tokens are not forwarded to private Go
+cores, and core credentials remain server-side. Proposals/recovery/hardware
+workflows remain human-gated.
 
 ## Deployment and verification
 
-Render on this branch starts the gateway with:
+Render starts the application with:
 
 ```sh
 uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
 ```
 
-A single worker is intentional while process-local conversation state remains.
-The private Core-Zero, Genesis/Core-One and Infinite-Mind/Core-Two service
-definitions and credentials have not been redesigned by this migration.
+One worker remains intentional while conversation/session state is process-local.
+The migration workflow compiles `app.py` and `asgi.py`, asserts that Flask/WSGI
+runtime dependencies and the compatibility mount are absent, and runs the
+FastAPI route regression tests.
 
-The migration CI currently checks syntax/importability, docs/OpenAPI route
-inventory, CORS, authentication boundaries, major native route contracts and
-the legacy fallback route. CI must pass on the latest branch head before the
-draft PR is marked ready. Existing project-specific tests also need to remain
-green.
+The gateway suite must pass on the latest branch head before PR #70 is marked
+ready. The separate Go Core-Zero/Core-Two CI suites currently have independent
+failures unrelated to this FastAPI gateway change.
 
-## Exit criteria for declaring the migration complete
+## Remaining work
 
-- Manually port the remaining sector-specific Flask handlers and compatibility
-  blueprints, preserving endpoint paths and methods.
-- Verify native `/ai`, `/ai/stream`, and `/voice` contracts against the
-  frontend, including multipart uploads, SSE event shapes, audio playback and
-  image URLs.
-- Resolve the root-route overlap and document the intended public endpoint.
-- Move application config, session state, feature registry and service logic
-  out of `app.py` into framework-neutral modules.
-- Convert all remaining blueprints to FastAPI routers or delete genuinely
-  unused route modules after proving they are not part of the public contract.
-- Remove the `a2wsgi` mount, Flask imports, Flask middleware, and Flask/`flask-cors`
-  dependencies only after the manual sector pass and parity tests prove the whole gateway is native.
-- Run the full Python tests, validate the OpenAPI document, then deploy and
-  smoke-test chat, voice, vision, memory, administrator functions and all three
-  private Go cores.
+- Manually verify each sector route's public endpoint path and response contract
+  against its FastAPI router.
+- Port or retire unused blueprint-only source modules after confirming they do
+  not expose a unique public endpoint.
+- Run the complete Python suite and native endpoint tests against a deployment
+  environment before declaring the migration finished.
