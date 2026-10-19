@@ -149,13 +149,13 @@ def test_seed_child_is_offline_verifiable_and_tamper_evident(tmp_path, monkeypat
         description="A safe declarative factory for an offline acceptance test.",
         requirements=["Read local file", "Validate local record"],
     )
+    token, claims = create_license_token(user_id="offline-owner", plan_id="pro", country="KE")
     with pytest.raises(SeedError, match="human review"):
         SeedRunner(tmp_path / "seeded", builder).seed_child(
-            build_id=proposal["build_id"], license_key="not-a-license",
+            build_id=proposal["build_id"], license_key=token,
             user_id="offline-owner", child_name="Child A"
         )
     builder.set_status(proposal["build_id"], "approved")
-    token, claims = create_license_token(user_id="offline-owner", plan_id="pro", country="KE")
     runner = SeedRunner(tmp_path / "seeded", builder)
     child = runner.seed_child(
         build_id=proposal["build_id"], license_key=token,
