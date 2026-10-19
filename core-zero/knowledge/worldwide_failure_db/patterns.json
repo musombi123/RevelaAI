@@ -3,13 +3,26 @@
   "status": "curated_advisory_patterns_not_exhaustive",
   "regions": [
     "North America",
+    "Central America and Caribbean",
+    "South America",
     "European Union",
+    "Europe outside the European Union",
     "United Kingdom",
+    "Middle East and North Africa",
+    "Sub-Saharan Africa",
+    "East Africa",
+    "West Africa",
+    "Central Africa",
+    "Southern Africa",
+    "South Asia",
+    "Southeast Asia",
+    "East Asia",
     "China",
     "Japan",
-    "India",
+    "South Korea",
     "Australia",
-    "East Africa",
+    "New Zealand",
+    "Pacific Islands",
     "Worldwide"
   ],
   "patterns": [
@@ -18,9 +31,15 @@
       "category": "runtime",
       "match_any": [
         "address already in use",
-        "eaddrinuse"
+        "eaddrinuse",
+        "eaddrinuse:",
+        "only one usage of each socket address",
+        "bind failed: address already in use",
+        "listen tcp: bind: address already in use",
+        "failed to bind socket",
+        "port is already allocated"
       ],
-      "recommendation": "Identify the owning process and intended listener; do not terminate unknown production processes automatically.",
+      "recommendation": "Identify the requested listener, address, port, owning process and deployment configuration. Check whether the listener is intentional before changing configuration. Do not terminate unknown production processes automatically.",
       "risk": "low"
     },
     {
@@ -29,9 +48,16 @@
       "match_any": [
         "permission denied",
         "eacces",
-        "access is denied"
+        "access is denied",
+        "operation not permitted",
+        "errno 13",
+        "errno 1",
+        "zugriff verweigert",
+        "permiso denegado",
+        "accès refusé",
+        "拒绝访问"
       ],
-      "recommendation": "Inspect ownership, ACLs and service identity; do not relax permissions recursively.",
+      "recommendation": "Inspect the affected path, ownership, ACLs, process identity, mount settings and service account. Grant only the minimum required access to the intended resource. Do not apply recursive permission changes or run the service with unrestricted privileges as a shortcut.",
       "risk": "medium"
     },
     {
@@ -40,9 +66,18 @@
       "match_any": [
         "certificate verify failed",
         "x509: certificate signed by unknown authority",
-        "certificate has expired"
+        "certificate has expired",
+        "certificate verify error",
+        "self signed certificate in certificate chain",
+        "hostname mismatch",
+        "subject alternative name does not match",
+        "unable to get local issuer certificate",
+        "unable to verify the first certificate",
+        "certificate revoked",
+        "certificado caducado",
+        "证书已过期"
       ],
-      "recommendation": "Verify hostname, trusted chain and system clock. Never disable TLS verification as a repair.",
+      "recommendation": "Check the system clock, requested hostname, certificate validity dates, trusted issuer chain, certificate revocation status and server configuration. Correct the certificate or trust configuration. Never disable certificate validation or accept an untrusted certificate as an automatic repair.",
       "risk": "high"
     },
     {
@@ -51,9 +86,15 @@
       "match_any": [
         "no space left on device",
         "disk full",
-        "enospc"
+        "enospc",
+        "not enough space on the disk",
+        "there is not enough space on the disk",
+        "no space left",
+        "disk quota exceeded",
+        "insufficient storage",
+        "磁盘空间不足"
       ],
-      "recommendation": "Measure usage and identify approved cache/log candidates; preserve audit logs and user data.",
+      "recommendation": "Measure available disk space, filesystem capacity, inode usage and applicable quotas. Identify approved disposable caches or temporary files before cleanup. Preserve user data, database files, recovery artifacts and audit logs. Expand storage or obtain human approval before destructive cleanup.",
       "risk": "medium"
     },
     {
@@ -62,9 +103,17 @@
       "match_any": [
         "name or service not known",
         "temporary failure in name resolution",
-        "getaddrinfo failed"
+        "getaddrinfo failed",
+        "no such host",
+        "nxdomain",
+        "could not resolve host",
+        "servfail",
+        "dns probe finished nxdomain",
+        "name resolution failed",
+        "unable to resolve host",
+        "无法解析域名"
       ],
-      "recommendation": "Check resolver health, DNS record and network policy; do not bypass network controls.",
+      "recommendation": "Verify the hostname, DNS record, resolver configuration, search domain, network reachability and relevant DNS response codes. Compare results from the affected environment with an approved independent resolver. Do not bypass network controls or silently substitute an untrusted address.",
       "risk": "low"
     },
     {
@@ -73,9 +122,17 @@
       "match_any": [
         "checksum mismatch",
         "invalid signature",
-        "lockfile out of date"
+        "signature verification failed",
+        "lockfile out of date",
+        "integrity check failed",
+        "hash mismatch",
+        "package integrity check failed",
+        "signature has expired",
+        "gpg: bad signature",
+        "failed to verify checksum",
+        "artifact digest mismatch"
       ],
-      "recommendation": "Stop installation and verify publisher signatures and pinned versions before retrying.",
+      "recommendation": "Stop the affected installation or deployment until provenance is checked. Verify the publisher, trusted signing key, expected digest, lockfile and pinned version using an independent trusted source. Do not disable signature checks or replace a failed integrity check with an unverified download.",
       "risk": "high"
     },
     {
@@ -84,9 +141,17 @@
       "match_any": [
         "out of memory",
         "cannot allocate memory",
-        "oomkilled"
+        "oomkilled",
+        "oom killed",
+        "memoryerror",
+        "java.lang.outofmemoryerror",
+        "fatal error: out of memory",
+        "allocation failed",
+        "memory limit exceeded",
+        "cannot reserve memory",
+        "std::bad_alloc"
       ],
-      "recommendation": "Review measured resource use and bounded workload settings.",
+      "recommendation": "Inspect measured memory use, process limits, container limits, workload size, concurrency and recent resource trends. Use bounded queues, request limits or controlled workload reduction where appropriate. Determine whether the cause is a leak, oversized input or insufficient capacity before changing memory limits.",
       "risk": "medium"
     },
     {
@@ -95,20 +160,36 @@
       "match_any": [
         "tls handshake failure",
         "remote error: tls",
-        "ssl routines"
+        "ssl routines",
+        "tls alert protocol version",
+        "unsupported protocol",
+        "no shared cipher",
+        "handshake failure",
+        "protocol version alert",
+        "wrong version number",
+        "sslv3 alert handshake failure",
+        "tls negotiation failed"
       ],
-      "recommendation": "Check TLS compatibility, clock, SNI and certificates; do not fall back to clear text off loopback.",
+      "recommendation": "Inspect protocol versions, cipher compatibility, Server Name Indication, certificate configuration, system time and peer logs. Correct incompatible settings using supported secure TLS versions and cipher suites. Do not downgrade a production connection to cleartext or weaken security checks to make the handshake succeed.",
       "risk": "high"
     },
     {
       "id": "database_unavailable",
       "category": "data",
       "match_any": [
-        "connection refused",
-        "too many connections",
-        "server selection timeout"
+        "server selection timeout",
+        "mongodb server selection timeout",
+        "could not connect to server",
+        "database server is unavailable",
+        "sqlstate 08001",
+        "sqlstate 08006",
+        "ora-12541",
+        "ora-12514",
+        "no primary available",
+        "replica set no primary",
+        "database connection establishment failed"
       ],
-      "recommendation": "Check service health, pool use and routing; do not expose database credentials.",
+      "recommendation": "Check database health, endpoint configuration, network routing, service discovery, failover state and connection-pool metrics. Distinguish a network failure from database unavailability and authentication failure. Do not disclose connection strings, credentials or database records in diagnostic output.",
       "risk": "medium"
     },
     {
@@ -118,16 +199,754 @@
         "undervoltage",
         "overvoltage",
         "brownout",
-        "overcurrent"
+        "overcurrent",
+        "power supply fault",
+        "voltage out of range",
+        "power fault",
+        "low voltage detected",
+        "voltage regulator fault",
+        "electrical overload"
       ],
-      "recommendation": "De-energize equipment and consult exact ratings and qualified electrical personnel.",
+      "recommendation": "Treat the indication as a potentially hazardous electrical condition. Stop the affected operation using the approved safe shutdown procedure when possible, isolate power only when safe and permitted, and consult the device's exact ratings and qualified electrical personnel. Do not retry energization or alter protection thresholds automatically.",
       "risk": "critical"
+    },
+    {
+      "id": "connection_refused",
+      "category": "network",
+      "match_any": [
+        "connection refused",
+        "econnrefused",
+        "actively refused",
+        "connect: connection refused",
+        "dial tcp: connect: connection refused",
+        "failed to establish a new connection: [errno 111]",
+        "target machine actively refused it"
+      ],
+      "recommendation": "Verify the destination address and port, listener status, service startup logs, container port mappings and applicable firewall rules. Confirm that the destination is the intended service before changing routing or firewall configuration. Do not expose a service on a public interface merely to bypass a connection failure.",
+      "risk": "medium"
+    },
+    {
+      "id": "connection_timeout",
+      "category": "network",
+      "match_any": [
+        "connection timed out",
+        "connect timeout",
+        "etimedout",
+        "i/o timeout",
+        "operation timed out",
+        "context deadline exceeded",
+        "upstream request timeout",
+        "read timed out",
+        "write timed out",
+        "request timed out"
+      ],
+      "recommendation": "Record the affected endpoint, operation duration and timestamp. Check latency, packet loss, routing, service load, pool wait time and timeout configuration. Use bounded retries with backoff only for operations known to be safe to retry. Verify the outcome of non-idempotent operations before repeating them.",
+      "risk": "medium"
+    },
+    {
+      "id": "connection_reset",
+      "category": "network",
+      "match_any": [
+        "connection reset by peer",
+        "econnreset",
+        "connection forcibly closed",
+        "connection was reset",
+        "socket hang up",
+        "unexpected eof",
+        "broken pipe",
+        "connection closed unexpectedly"
+      ],
+      "recommendation": "Correlate client, proxy and server logs to identify which endpoint closed the connection. Check idle timeouts, load balancer behavior, process restarts and network interruptions. Before retrying a state-changing request, verify whether the server completed it.",
+      "risk": "medium"
+    },
+    {
+      "id": "network_unreachable",
+      "category": "network",
+      "match_any": [
+        "network is unreachable",
+        "enetunreach",
+        "no route to host",
+        "ehostunreach",
+        "destination host unreachable",
+        "network unreachable",
+        "failed to connect to network",
+        "interface is down"
+      ],
+      "recommendation": "Inspect interface state, routes, gateway reachability, VPN configuration, subnet policy and firewall rules from the affected environment. Change only the required route or network setting with authorization. Do not disable firewalls globally or bypass network segmentation.",
+      "risk": "medium"
+    },
+    {
+      "id": "rate_limit_or_quota",
+      "category": "service_limits",
+      "match_any": [
+        "http 429",
+        "status code 429",
+        "too many requests",
+        "rate limit exceeded",
+        "rate limit reached",
+        "quota exceeded",
+        "resource exhausted",
+        "usage limit exceeded",
+        "request limit exceeded",
+        "daily limit exceeded"
+      ],
+      "recommendation": "Inspect response headers, service quotas, usage counters and documented reset times. Respect Retry-After where provided and use bounded exponential backoff with jitter. Reduce request volume or seek an authorized quota increase. Do not rotate identities, create unauthorized accounts or evade service limits.",
+      "risk": "medium"
+    },
+    {
+      "id": "authentication_or_authorization",
+      "category": "security",
+      "match_any": [
+        "http 401",
+        "http 403",
+        "unauthorized",
+        "forbidden",
+        "invalid credentials",
+        "invalid api key",
+        "token expired",
+        "token signature invalid",
+        "insufficient privileges",
+        "access token expired",
+        "permission scope missing",
+        "authentication required"
+      ],
+      "recommendation": "Verify the intended identity, issuer, audience, expiry, signature validation, required scopes and server-side access policy. Obtain fresh credentials only through the approved login or credential-rotation process. Never log or expose tokens, disable authentication, or grant broader permissions solely to resolve an authorization failure.",
+      "risk": "high"
+    },
+    {
+      "id": "cors_preflight",
+      "category": "web_security",
+      "match_any": [
+        "blocked by cors policy",
+        "no access-control-allow-origin",
+        "response to preflight request",
+        "cors error",
+        "cross-origin request blocked",
+        "preflight response is not successful",
+        "access-control-allow-headers",
+        "origin is not allowed by access-control-allow-origin",
+        "cors header missing"
+      ],
+      "recommendation": "Compare the browser Origin, request method, requested headers and preflight response with the server's explicit CORS allowlist. Permit only the origins and methods required by the application. Do not use a wildcard to solve credentialed requests or treat CORS as authentication. Confirm that the route is reachable and correctly configured independently of browser access.",
+      "risk": "medium"
+    },
+    {
+      "id": "missing_configuration",
+      "category": "configuration",
+      "match_any": [
+        "environment variable is not set",
+        "environment variable not set",
+        "missing required environment variable",
+        "configuration key not found",
+        "required setting missing",
+        "config file not found",
+        "configuration file missing",
+        "value is required",
+        "not configured",
+        "configuration is missing"
+      ],
+      "recommendation": "Identify the exact required setting from trusted application documentation and deployment configuration. Check whether it is absent, misspelled or unavailable to the running process. Set secrets through the approved secret manager or deployment environment; never place credentials in source code, logs or public diagnostic responses.",
+      "risk": "medium"
+    },
+    {
+      "id": "invalid_configuration",
+      "category": "configuration",
+      "match_any": [
+        "invalid configuration",
+        "failed to parse configuration",
+        "malformed config",
+        "invalid configuration value",
+        "unknown configuration option",
+        "unsupported configuration key",
+        "configuration validation failed",
+        "invalid config file",
+        "yaml parse error",
+        "toml parse error"
+      ],
+      "recommendation": "Validate the configuration against the documented schema and the version of the running application. Review recent configuration changes and use a known-good version if rollback is authorized. Preserve the original file and secrets, and validate a proposed change before applying it to production.",
+      "risk": "medium"
+    },
+    {
+      "id": "invalid_json",
+      "category": "api_input",
+      "match_any": [
+        "unexpected end of json input",
+        "unexpected end of json",
+        "invalid character looking for beginning of value",
+        "unexpected token",
+        "json parse error",
+        "invalid json",
+        "malformed json",
+        "unexpected non-whitespace character",
+        "cannot unmarshal",
+        "json: unknown field"
+      ],
+      "recommendation": "Capture the request schema, content type and parser location without retaining sensitive request values. Validate that the body contains one well-formed JSON value and uses the expected field names and data types. Do not silently drop unknown fields or disable input validation to force acceptance.",
+      "risk": "low"
+    },
+    {
+      "id": "api_contract_mismatch",
+      "category": "api_integration",
+      "match_any": [
+        "unsupported media type",
+        "http 415",
+        "method not allowed",
+        "http 405",
+        "no route matched",
+        "404 not found",
+        "schema validation failed",
+        "required field missing",
+        "response schema mismatch",
+        "unexpected response format",
+        "api version mismatch"
+      ],
+      "recommendation": "Compare the client and server API versions, route path, HTTP method, content type, schema and deployment revision. Check whether a proxy or base URL is rewriting the request. Apply a compatible contract change and add regression tests rather than disabling validation or blindly retrying a different endpoint.",
+      "risk": "medium"
+    },
+    {
+      "id": "file_not_found",
+      "category": "filesystem",
+      "match_any": [
+        "no such file or directory",
+        "enoent",
+        "file not found",
+        "cannot find the path specified",
+        "the system cannot find the file specified",
+        "path does not exist",
+        "cannot open file",
+        "no such file"
+      ],
+      "recommendation": "Check the resolved path, working directory, filename case, deployment package, mount state and service identity. Confirm that the expected file is intentionally present and comes from a trusted source. Do not create placeholder credentials, overwrite unrelated files or download executable content from an untrusted location.",
+      "risk": "low"
+    },
+    {
+      "id": "path_traversal",
+      "category": "security",
+      "match_any": [
+        "path traversal detected",
+        "directory traversal detected",
+        "path escapes repository root",
+        "path escapes allowed directory",
+        "invalid path component",
+        "outside permitted directory",
+        "path is not confined to root",
+        "parent directory traversal",
+        "zip slip detected"
+      ],
+      "recommendation": "Reject the affected operation and validate the canonical destination using safe path-resolution rules. Check traversal segments, symbolic links, archive extraction paths and the permitted root before any write. Preserve relevant security evidence. Do not normalize an unsafe path and continue with a destructive operation.",
+      "risk": "high"
+    },
+    {
+      "id": "symlink_boundary",
+      "category": "filesystem_security",
+      "match_any": [
+        "too many levels of symbolic links",
+        "eloop",
+        "symlink escape detected",
+        "refusing symlinked state file",
+        "refusing symlinked managed directory",
+        "symbolic link outside allowed directory",
+        "unsafe symbolic link",
+        "symlink target outside root"
+      ],
+      "recommendation": "Inspect the link and its resolved target without following it for an untrusted operation. Confirm that the target remains inside the approved boundary and that the file type is expected. Use safe file-opening and directory-management operations. Do not delete or overwrite the target automatically.",
+      "risk": "high"
+    },
+    {
+      "id": "filesystem_read_only",
+      "category": "storage",
+      "match_any": [
+        "read-only file system",
+        "erofs",
+        "filesystem is read only",
+        "read only filesystem",
+        "volume is write protected",
+        "the disk is write protected",
+        "read-only mount",
+        "operation not permitted on read-only filesystem"
+      ],
+      "recommendation": "Inspect the mount state, storage health, filesystem error reports and deployment mount configuration. Determine whether read-only mode is a deliberate safety control or a response to storage faults. Do not remount or force filesystem writes until the cause and data-integrity risks are understood.",
+      "risk": "high"
+    },
+    {
+      "id": "disk_io_error",
+      "category": "storage",
+      "match_any": [
+        "input/output error",
+        "eio",
+        "i/o error",
+        "medium error",
+        "device not ready",
+        "bad sector",
+        "filesystem corruption",
+        "buffer i/o error",
+        "storage device failure",
+        "failed to flush data"
+      ],
+      "recommendation": "Treat repeated I/O failures as a possible storage-health problem. Preserve available evidence, stop avoidable writes and verify backups before recovery actions. Check system and device health logs, then use the platform's approved filesystem or device diagnostic procedure. Do not repeatedly retry destructive writes or format a suspected failing device.",
+      "risk": "high"
+    },
+    {
+      "id": "state_corruption",
+      "category": "data_integrity",
+      "match_any": [
+        "unexpected end of json input",
+        "unexpected eof",
+        "checksum verification failed",
+        "manifest hash mismatch",
+        "corrupt database",
+        "database disk image is malformed",
+        "unexpected end of file",
+        "invalid state file",
+        "state file is corrupt",
+        "integrity verification failed"
+      ],
+      "recommendation": "Preserve the original artifact and its metadata before attempting recovery. Compare hashes, schema versions, backups and trusted manifests. Recover from a verified source using a documented procedure and record the recovery result. Do not silently replace corrupted state with an empty file or represent an unverified reconstruction as trusted evidence.",
+      "risk": "high"
+    },
+    {
+      "id": "database_authentication",
+      "category": "data_security",
+      "match_any": [
+        "authentication failed for user",
+        "access denied for user",
+        "database authentication failed",
+        "mongo server error unauthorized",
+        "sasl authentication failed",
+        "login failed for user",
+        "ora-01017",
+        "password authentication failed",
+        "invalid database credentials",
+        "not authorized on database"
+      ],
+      "recommendation": "Verify the expected database identity, authentication mechanism, target environment and narrowly scoped permissions. Check secret rotation and expiry through the approved credential-management system. Do not print connection strings, copy production credentials into development, or grant administrator privileges merely to restore access.",
+      "risk": "high"
+    },
+    {
+      "id": "database_pool_exhausted",
+      "category": "data",
+      "match_any": [
+        "too many connections",
+        "too many clients already",
+        "connection pool exhausted",
+        "pool is exhausted",
+        "max pool size exceeded",
+        "maximum number of connections reached",
+        "remaining connection slots are reserved",
+        "unable to acquire connection from pool",
+        "connection acquisition timeout"
+      ],
+      "recommendation": "Inspect pool occupancy, wait time, connection lifetime, transaction duration, leaked connections and database limits. Apply bounded concurrency and ensure connections are released reliably. Avoid simply increasing all pool sizes, which can overload the database or worsen a saturation incident.",
+      "risk": "medium"
+    },
+    {
+      "id": "database_migration_mismatch",
+      "category": "data_integrity",
+      "match_any": [
+        "pending database migration",
+        "migration version mismatch",
+        "database schema version mismatch",
+        "relation does not exist",
+        "column does not exist",
+        "duplicate column name",
+        "migration failed",
+        "schema is out of date",
+        "database is at version",
+        "migration history mismatch"
+      ],
+      "recommendation": "Compare application and database schema versions and inspect migration history. Back up affected data and review the migration's expected preconditions, lock behavior and rollback strategy before applying it. Run migrations through the approved deployment process, not automatically in response to a text match.",
+      "risk": "high"
+    },
+    {
+      "id": "database_deadlock",
+      "category": "data",
+      "match_any": [
+        "deadlock detected",
+        "deadlock found when trying to get lock",
+        "sqlstate 40p01",
+        "transaction deadlock",
+        "lock wait timeout exceeded",
+        "could not obtain lock",
+        "database is locked",
+        "sqlite_busy"
+      ],
+      "recommendation": "Inspect transaction boundaries, conflicting operations, lock acquisition order and transaction duration. Retry only transactions that are known to be safe and use bounded backoff. Do not terminate arbitrary database sessions or weaken transaction isolation without a reviewed consistency assessment.",
+      "risk": "medium"
+    },
+    {
+      "id": "cache_unavailable",
+      "category": "cache",
+      "match_any": [
+        "redis connection refused",
+        "cache unavailable",
+        "cache connection failed",
+        "memcached connection error",
+        "cache timeout",
+        "redis loading",
+        "cache backend unavailable",
+        "failed to connect to redis"
+      ],
+      "recommendation": "Check cache service health, endpoint, authentication, network path and memory limits. Determine whether the application can safely operate without the cache and whether fallback behavior could overload the primary data store. Do not expose cache credentials or flush production cache data without authorization.",
+      "risk": "medium"
+    },
+    {
+      "id": "queue_backlog",
+      "category": "messaging",
+      "match_any": [
+        "queue backlog",
+        "consumer lag",
+        "messages pending",
+        "unacked messages",
+        "queue depth exceeded",
+        "dead letter queue",
+        "message processing lag",
+        "backpressure active",
+        "consumer is falling behind"
+      ],
+      "recommendation": "Measure queue depth, message age, consumer throughput, retry rates and dead-letter counts. Check whether workers are unhealthy or downstream services are saturated. Apply bounded scaling and backpressure according to capacity. Preserve failed messages and avoid purging or replaying queues without duplicate-processing safeguards.",
+      "risk": "medium"
+    },
+    {
+      "id": "worker_crash_loop",
+      "category": "runtime",
+      "match_any": [
+        "crashloopbackoff",
+        "back-off restarting failed container",
+        "worker process exited unexpectedly",
+        "process keeps restarting",
+        "restart limit exceeded",
+        "worker exited with code",
+        "container has terminated repeatedly",
+        "restart loop detected"
+      ],
+      "recommendation": "Inspect the first failure in the restart sequence, application logs, exit status, resource limits and recent rollout changes. Check readiness and liveness probes for incorrect assumptions. Avoid increasing restart frequency or suppressing health checks before the underlying failure is understood.",
+      "risk": "high"
+    },
+    {
+      "id": "health_check_failure",
+      "category": "deployment",
+      "match_any": [
+        "health check failed",
+        "readiness probe failed",
+        "liveness probe failed",
+        "unhealthy container",
+        "service failed health check",
+        "health endpoint returned 503",
+        "health check timeout",
+        "application failed to become ready",
+        "startup probe failed"
+      ],
+      "recommendation": "Test the health endpoint from the same network and runtime context as the health checker. Distinguish process liveness from dependency readiness and startup time. Inspect logs, dependency checks, route configuration and timeout settings. Do not make a failing readiness check report success merely to force traffic to an unhealthy instance.",
+      "risk": "medium"
+    },
+    {
+      "id": "container_image_pull",
+      "category": "deployment",
+      "match_any": [
+        "imagepullbackoff",
+        "errimagepull",
+        "manifest unknown",
+        "pull access denied",
+        "failed to pull image",
+        "no matching manifest for",
+        "image not found",
+        "unauthorized: authentication required",
+        "failed to resolve reference"
+      ],
+      "recommendation": "Check the exact image name, immutable digest or approved tag, registry availability, image architecture and pull-secret configuration. Confirm artifact provenance before changing the image reference. Never respond by making a private image public or pulling an unverified substitute.",
+      "risk": "medium"
+    },
+    {
+      "id": "container_permission",
+      "category": "deployment_security",
+      "match_any": [
+        "operation not permitted in container",
+        "permission denied in container",
+        "read-only root filesystem",
+        "container cannot write to volume",
+        "run as non-root",
+        "seccomp denied",
+        "apparmor denied",
+        "capability denied",
+        "container security context"
+      ],
+      "recommendation": "Review the container identity, mounted volume ownership, filesystem mode and configured security profile. Grant only the required filesystem access or narrowly scoped capability. Retain least-privilege defaults; do not switch to privileged mode or run as root automatically.",
+      "risk": "high"
+    },
+    {
+      "id": "build_toolchain_missing",
+      "category": "build",
+      "match_any": [
+        "command not found",
+        "compiler not found",
+        "no such file or directory: go",
+        "no such file or directory: node",
+        "no such file or directory: python",
+        "gcc: command not found",
+        "cannot find module",
+        "toolchain not available",
+        "unsupported go version",
+        "unsupported node version",
+        "jdk not found"
+      ],
+      "recommendation": "Check the documented toolchain versions, build image, PATH, runtime installation and CI environment. Use a pinned, trusted toolchain version and reproduce the failure in an isolated environment. Do not install arbitrary executables or run privileged installation scripts simply because a command is missing.",
+      "risk": "medium"
+    },
+    {
+      "id": "dependency_resolution",
+      "category": "supply_chain",
+      "match_any": [
+        "unable to resolve dependency",
+        "dependency resolution failed",
+        "no matching distribution found",
+        "package not found",
+        "version solving failed",
+        "could not resolve dependency",
+        "npm err enoent",
+        "module not found",
+        "package not available",
+        "failed to download dependency"
+      ],
+      "recommendation": "Verify the package name, pinned version, lockfile, configured registry, supported runtime and trusted mirror availability. Check whether the failure is caused by an unavailable package or an incompatible dependency constraint. Preserve lockfile integrity and avoid substituting a similarly named or unverified package.",
+      "risk": "medium"
+    },
+    {
+      "id": "git_conflict",
+      "category": "source_control",
+      "match_any": [
+        "merge conflict",
+        "conflict markers",
+        "both modified",
+        "automatic merge failed",
+        "cannot rebase",
+        "would be overwritten by merge",
+        "unmerged paths",
+        "needs merge",
+        "index.lock already exists"
+      ],
+      "recommendation": "Inspect repository status, the affected files and the intended branch history. Preserve uncommitted changes before resolving conflicts, and verify the resulting diff and tests. Do not discard local modifications, force-push, or remove a lock file while another Git operation may still be active.",
+      "risk": "medium"
+    },
+    {
+      "id": "clock_skew",
+      "category": "time",
+      "match_any": [
+        "clock skew detected",
+        "time drift detected",
+        "not yet valid",
+        "issued in the future",
+        "timestamp outside allowed range",
+        "request timestamp expired",
+        "ntp synchronization failed",
+        "system clock unsynchronized",
+        "token used before issued"
+      ],
+      "recommendation": "Compare UTC timestamps against a trusted time source and inspect time synchronization service health. Check for large host/container time differences and timestamp assumptions. Do not weaken token expiry, certificate validity or replay-protection checks to compensate for a clock discrepancy.",
+      "risk": "medium"
+    },
+    {
+      "id": "proxy_misconfiguration",
+      "category": "network",
+      "match_any": [
+        "proxy connection failed",
+        "proxy authentication required",
+        "http proxy error",
+        "https proxy error",
+        "tunnel connection failed",
+        "bad gateway from proxy",
+        "proxyconnect tcp",
+        "no proxy configured",
+        "invalid proxy url"
+      ],
+      "recommendation": "Verify proxy address, authentication mechanism, bypass list, DNS resolution, certificate trust and expected network route. Compare direct and proxied paths only when policy permits. Do not publish proxy credentials or bypass mandatory inspection and network controls to make a request succeed.",
+      "risk": "medium"
+    },
+    {
+      "id": "encoding_locale",
+      "category": "internationalization",
+      "match_any": [
+        "invalid byte sequence",
+        "invalid utf-8",
+        "invalid character encoding",
+        "codec can't decode",
+        "malformed utf-8",
+        "unicode decode error",
+        "character conversion failed",
+        "encoding error",
+        "invalid multibyte character",
+        "locale not supported"
+      ],
+      "recommendation": "Inspect the declared encoding, actual file or stream encoding, locale, normalization and input-validation rules. Preserve the original bytes before conversion and test with representative multilingual data. Do not silently replace invalid characters in identity, financial, legal or audit records.",
+      "risk": "medium"
+    },
+    {
+      "id": "sensor_unavailable",
+      "category": "hardware",
+      "match_any": [
+        "sensor unavailable",
+        "sensor disconnected",
+        "device not detected",
+        "no such device",
+        "sensor read failed",
+        "i2c device not responding",
+        "spi transfer failed",
+        "serial port unavailable",
+        "sensor timeout",
+        "device communication lost"
+      ],
+      "recommendation": "Check the approved device inventory, electrical connections, bus configuration, device permissions and sensor diagnostics. Mark readings as unavailable or stale rather than inventing values. Do not activate dependent actuators using missing, out-of-range or unverified sensor data.",
+      "risk": "high"
+    },
+    {
+      "id": "thermal_overheating",
+      "category": "hardware",
+      "match_any": [
+        "overtemperature",
+        "thermal shutdown",
+        "temperature limit exceeded",
+        "cpu thermal throttling",
+        "device overheating",
+        "thermal protection activated",
+        "overheating detected",
+        "critical temperature reached"
+      ],
+      "recommendation": "Use the device's approved protective shutdown or throttling procedure when indicated. Inspect temperature measurements, cooling, airflow, load and environmental conditions after the device reaches a safe state. Never disable thermal protection, bypass interlocks or repeatedly restart equipment while an overheating condition persists.",
+      "risk": "critical"
+    },
+    {
+      "id": "device_driver_failure",
+      "category": "hardware",
+      "match_any": [
+        "driver failed to load",
+        "device driver error",
+        "driver initialization failed",
+        "device malfunction",
+        "kernel module loading failed",
+        "unknown device",
+        "firmware load failed",
+        "device reported an error",
+        "driver is not compatible",
+        "hardware initialization failed"
+      ],
+      "recommendation": "Identify the exact hardware revision, operating-system version, driver version and firmware provenance. Inspect system diagnostics and vendor-supported compatibility information before changing drivers. Use a verified recovery path and retain a rollback option; do not load untrusted kernel modules or firmware.",
+      "risk": "high"
+    },
+    {
+      "id": "service_unavailable",
+      "category": "runtime",
+      "match_any": [
+        "http 503",
+        "service unavailable",
+        "temporarily unavailable",
+        "upstream unavailable",
+        "no healthy upstream",
+        "all upstreams unavailable",
+        "backend unavailable",
+        "service is starting",
+        "deployment is still in progress"
+      ],
+      "recommendation": "Check the service deployment state, availability checks, upstream health and dependency status. Inspect whether the failure is temporary or persistent before retrying. Use bounded backoff, and do not report successful execution when the service has not confirmed the operation's result.",
+      "risk": "medium"
+    },
+    {
+      "id": "process_limit_exhausted",
+      "category": "runtime",
+      "match_any": [
+        "too many open files",
+        "emfile",
+        "enfile",
+        "resource temporarily unavailable",
+        "eagain",
+        "process limit exceeded",
+        "too many processes",
+        "cannot fork",
+        "thread creation failed",
+        "unable to create new native thread"
+      ],
+      "recommendation": "Measure open descriptors, process and thread counts, workload concurrency, container limits and handle-release behavior. Identify leaks and bound workload creation before changing system-wide limits. Avoid increasing limits without measuring downstream resource use and operating-system capacity.",
+      "risk": "medium"
+    },
+    {
+      "id": "stale_lock",
+      "category": "concurrency",
+      "match_any": [
+        "resource temporarily locked",
+        "lock file exists",
+        "unable to acquire lock",
+        "lock acquisition timeout",
+        "stale lock detected",
+        "another process is using this resource",
+        "database is locked",
+        "operation already in progress"
+      ],
+      "recommendation": "Identify the resource owner and verify whether the lock belongs to a live process or an incomplete operation. Use the application's supported lock-recovery procedure and preserve shared state. Do not delete lock files or forcibly release distributed locks without verifying ownership and lease state.",
+      "risk": "medium"
+    },
+    {
+      "id": "firmware_mismatch",
+      "category": "hardware_security",
+      "match_any": [
+        "firmware version mismatch",
+        "firmware signature invalid",
+        "firmware verification failed",
+        "incompatible firmware",
+        "firmware downgrade blocked",
+        "secure boot verification failed",
+        "firmware image rejected",
+        "unsupported board revision"
+      ],
+      "recommendation": "Verify the exact board revision, firmware version, cryptographic signature, trusted source and supported upgrade path. Preserve the current firmware and recovery procedure before proposing an update. Do not bypass secure boot, downgrade protections or hardware compatibility checks.",
+      "risk": "critical"
+    },
+    {
+      "id": "api_payload_too_large",
+      "category": "api_input",
+      "match_any": [
+        "request entity too large",
+        "payload too large",
+        "http 413",
+        "maxbytesreader",
+        "body too large",
+        "request body exceeds limit",
+        "file upload exceeds limit",
+        "content length exceeds limit"
+      ],
+      "recommendation": "Measure the actual request size and confirm the documented endpoint limit. Reduce unnecessary payload data or use an authorized chunked or streaming upload design. Keep server-side request limits in place and do not remove size controls without evaluating memory, storage and denial-of-service risks.",
+      "risk": "medium"
+    },
+    {
+      "id": "watchdog_reset",
+      "category": "hardware",
+      "match_any": [
+        "watchdog timeout",
+        "watchdog reset",
+        "system watchdog expired",
+        "hardware watchdog triggered",
+        "watchdog bite",
+        "watchdog reboot",
+        "watchdog starvation",
+        "watchdog timer expired"
+      ],
+      "recommendation": "Inspect reset cause, kernel or firmware logs, scheduling delays, blocking operations, thermal and power telemetry. Verify whether the system entered a safe state after the reset. Do not disable or lengthen the watchdog automatically; any modification requires a documented safety assessment.",
+      "risk": "high"
     }
   ],
   "guardrails": [
-    "Patterns are triage, not root-cause proof.",
-    "Never execute repair solely from a phrase match.",
-    "Preserve backups, signatures and audit records.",
-    "This dataset is not a complete legal code."
+    "Patterns provide preliminary triage, not proof of root cause.",
+    "A phrase match must never be the sole basis for executing a repair.",
+    "Match quality depends on language, software version, operating system, context and the ordering of detected patterns.",
+    "A single error message may match several patterns; callers should preserve multiple candidates when possible and avoid claiming certainty from the first match.",
+    "Prefer independent evidence such as exit codes, health checks, timestamps, resource metrics, trusted manifests and system logs.",
+    "Never execute commands, modify files, restart production services, change network policy or actuate hardware solely because a pattern matched.",
+    "Any proposed mutation must pass authorization, scope validation, explicit approval where required, precondition checks and post-operation verification.",
+    "For critical electrical, thermal or hardware-safety indicators, prioritize approved safe-state procedures and qualified personnel over automated troubleshooting.",
+    "Preserve backups, cryptographic signatures, original artifacts and audit records before recovery or migration operations.",
+    "Never expose credentials, access tokens, private keys, sensitive user data or database connection strings in diagnostic responses.",
+    "Never recommend disabling TLS verification, weakening authentication, bypassing security controls or granting unrestricted privileges as a routine repair.",
+    "Retries must be bounded and appropriate for the operation; verify outcomes before retrying non-idempotent operations.",
+    "Record when a recommendation is uncertain, when evidence is missing and when the diagnostic system cannot determine a safe next step.",
+    "Country and region labels provide contextual coverage only; they do not establish local compliance, certification or legal requirements.",
+    "This database is curated and non-exhaustive. Absence of a matching pattern does not mean a system is healthy or safe.",
+    "This dataset is not a complete legal code, a certified diagnostic standard, a substitute for vendor documentation or a guarantee of hardware safety."
   ]
 }
