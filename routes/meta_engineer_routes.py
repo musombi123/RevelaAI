@@ -1,6 +1,7 @@
 """Review-gated Meta-Engineer API for the existing Flask application."""
 from __future__ import annotations
 import os
+import math
 import importlib.util
 from datetime import datetime, timezone
 import requests
@@ -12,12 +13,42 @@ from meta_engineer.pruner import audit_unused
 from meta_engineer.sandbox_tester import test_feature
 
 meta_engineer_bp = Blueprint("meta_engineer_bp", __name__)
-BACKEND_URL = os.getenv("REVELACODE_BACKEND_URL", "https://revelacode-backend.onrender.com").rstrip("/")
-ADMIN_TIMEOUT = 4
+
+_DEFAULT_BACKEND_URL = "https://revelacode-backend.onrender.com"
+BACKEND_URL = (
+    os.getenv("REVELACODE_BACKEND_URL", _DEFAULT_BACKEND_URL).strip().rstrip("/")
+    or _DEFAULT_BACKEND_URL
+)
+
+
+def _configured_admin_timeout() -> float:
+    """Bound verification waits while allowing Render cold starts and slow upstreams."""
+    try:
+        value = float(os.getenv("REVELACODE_ADMIN_VERIFY_TIMEOUT_SECONDS", "15"))
+    except (TypeError, ValueError):
+        return 15.0
+    if not math.isfinite(value) or value < 5 or value > 30:
+        return 15.0
+    return value
+
+
+ADMIN_TIMEOUT = _configured_admin_timeout()
 PLATFORM_ADMIN_ROLES = frozenset({"admin", "platform_admin", "super_admin", "revelacode_admin"})
 
+
+def _verification_unavailable():
+    return None, (
+        jsonify({
+            "status": "error",
+            "code": "admin_verification_unavailable",
+            "message": "The authoritative administrator-verification service is unavailable. No privileged action was performed.",
+        }),
+        503,
+    )
+
+
 def _authenticated_admin():
-    """Require the currently stored RevelaCode administrator role; fail closed."""
+    """Require the current RevelaCode administrator role; fail closed on uncertainty."""
     authorization = (request.headers.get("Authorization") or "").strip()
     if not authorization.startswith("Bearer ") or not authorization[7:].strip():
         return None, (jsonify({"status": "error", "code": "authentication_required"}), 401)
@@ -32,37 +63,96 @@ def _authenticated_admin():
         return None, (jsonify({"status": "error", "code": "invalid_identity"}), 401)
 
     try:
-        # RevelaCode validates the JWT and reads the user's CURRENT role from its
-        # authoritative user store. Never use frontend role flags or JWT role claims.
+        # The upstream service verifies the signed token and checks the current
+        # role in its authoritative user store. Never trust frontend role claims.
         response = requests.get(
             BACKEND_URL + "/api/auth/verify-admin",
             headers={"Authorization": authorization},
-            timeout=ADMIN_TIMEOUT,
+            timeout=(3.05, ADMIN_TIMEOUT),
+            allow_redirects=False,
         )
-        try:
-            body = response.json()
-        except ValueError:
-            body = {}
-        if response.status_code == 401:
-            return None, (jsonify({"status": "error", "code": body.get("code", "authentication_required")}), 401)
-        if response.status_code == 403:
-            code = body.get("code") if body.get("code") in {"admin_required", "user_identity_mismatch"} else "admin_required"
-            return None, (jsonify({"status": "error", "code": code}), 403)
-        if response.status_code == 404:
-            return None, (jsonify({"status": "error", "code": "user_not_found"}), 403)
-        if response.status_code != 200:
-            return None, (jsonify({"status": "error", "code": "admin_verification_unavailable"}), 503)
+    except requests.RequestException as exc:
+        # Never log the bearer token or request headers. The exception class is
+        # enough to distinguish a timeout/connection failure in server logs.
+        current_app.logger.warning(
+            "RevelaCode administrator verification request failed (%s).",
+            type(exc).__name__,
+        )
+        return _verification_unavailable()
 
-        if not isinstance(body, dict):
-            return None, (jsonify({"status": "error", "code": "admin_verification_unavailable"}), 503)
-        canonical_id = str(body.get("userId") or body.get("user_id") or body.get("id") or "").strip()
-        if canonical_id != str(user_id):
-            return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
-        if body.get("authorized") is not True or str(body.get("role") or "").strip().lower() not in PLATFORM_ADMIN_ROLES:
-            return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
-        return str(user_id), None
-    except requests.RequestException:
-        return None, (jsonify({"status": "error", "code": "admin_verification_unavailable"}), 503)
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+
+    if response.status_code == 401:
+        code = (
+            body.get("code")
+            if isinstance(body, dict) and isinstance(body.get("code"), str)
+            else "authentication_required"
+        )
+        if code not in {"authentication_required", "token_expired", "invalid_token", "invalid_user_identity"}:
+            code = "authentication_required"
+        return None, (jsonify({"status": "error", "code": code}), 401)
+
+    if response.status_code == 403:
+        code = (
+            body.get("code")
+            if isinstance(body, dict) and body.get("code") in {"admin_required", "user_identity_mismatch"}
+            else "admin_required"
+        )
+        return None, (jsonify({"status": "error", "code": code}), 403)
+
+    if response.status_code == 404:
+        # A real user lookup miss is an authorization failure. An HTML or
+        # unstructured 404 can instead mean the configured endpoint is wrong.
+        if isinstance(body, dict) and body.get("code") == "user_not_found":
+            return None, (jsonify({"status": "error", "code": "user_not_found"}), 403)
+
+        current_app.logger.warning(
+            "RevelaCode administrator-verification endpoint returned an unexpected HTTP 404."
+        )
+        return _verification_unavailable()
+
+    if response.status_code != 200:
+        upstream_code = (
+            body.get("code")
+            if isinstance(body, dict) and isinstance(body.get("code"), str)
+            else "unstructured_response"
+        )
+        # Log status and safe machine code only; never log credentials or the
+        # full response body. For example, role_lookup_unavailable points to
+        # the upstream user-store/database path.
+        current_app.logger.warning(
+            "RevelaCode administrator verification returned HTTP %s (code=%s).",
+            response.status_code,
+            upstream_code[:80],
+        )
+        return _verification_unavailable()
+
+    if not isinstance(body, dict):
+        current_app.logger.warning(
+            "RevelaCode administrator verification returned HTTP 200 with non-object JSON."
+        )
+        return _verification_unavailable()
+
+    canonical_id = str(body.get("userId") or body.get("user_id") or body.get("id") or "").strip()
+    role = str(body.get("role") or "").strip().lower()
+    authorized = body.get("authorized")
+
+    if not canonical_id or not isinstance(authorized, bool) or not role:
+        current_app.logger.warning(
+            "RevelaCode administrator verification returned an incomplete success payload."
+        )
+        return _verification_unavailable()
+
+    if canonical_id != str(user_id):
+        return None, (jsonify({"status": "error", "code": "identity_mismatch"}), 403)
+
+    if authorized is not True or role not in PLATFORM_ADMIN_ROLES:
+        return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
+
+    return str(user_id), None
 
 @meta_engineer_bp.get("/health")
 def meta_health():
