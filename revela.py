@@ -36,6 +36,10 @@ def main() -> int:
         return 0
     if not args.compile:
         parser.error("Use --compile to process RVX files")
+    if not args.license_key:
+        raise RecipeError("Need valid license to compile RVX artifacts; pass --license-key.")
+    from core_billing.licensing import verify_license_token
+    verify_license_token(args.license_key)
     root = Path(args.root).resolve()
     blobs = sorted(root.rglob("*.rvx"))
     if not blobs:
