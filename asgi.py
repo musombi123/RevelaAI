@@ -1,8 +1,8 @@
 """FastAPI ASGI entry point for the staged RevelaAI gateway migration.
 
-Routes already ported to FastAPI are registered before the WSGI compatibility
-mount. The mount is temporary and must be removed only after route parity tests
-cover the remaining Flask endpoints and their security/error semantics.
+Routes ported to FastAPI are registered natively. The root-mounted WSGI
+compatibility adapter remains temporary for legacy routes not yet migrated;
+remove it only after complete route and security-contract parity is proven.
 """
 from __future__ import annotations
 
@@ -16,7 +16,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.wsgi import WSGIMiddleware
 
+from fastapi_routes.explain import router as explain_router
 from fastapi_routes.hub import router as fastapi_hub_router
+from fastapi_routes.living_brain import router as living_brain_router
 
 legacy_flask_app = legacy_app_module.app
 logger = logging.getLogger("revelaai.asgi")
@@ -24,10 +26,10 @@ logger = logging.getLogger("revelaai.asgi")
 app = FastAPI(
     title="RevelaAI API",
     description=(
-        "RevelaAI API gateway. Migration is staged; endpoints not yet ported "
-        "are served by the legacy WSGI compatibility adapter."
+        "RevelaAI API gateway. The migration is staged; routes not yet ported "
+        "are served by the temporary WSGI compatibility adapter."
     ),
-    version="2.1.0",
+    version="2.2.0",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
@@ -36,13 +38,12 @@ app = FastAPI(
 
 @app.middleware("http")
 async def asgi_security_and_legacy_throttle(request: Request, call_next):
-    """Keep baseline headers and the existing reversible SCI throttle for migrated routes."""
+    """Maintain baseline response headers and SCI throttle for native routes."""
     path = request.url.path
 
-    # Flask's before_request guard still covers requests forwarded through the
-    # compatibility adapter. Apply the same guard here only to FastAPI-native
-    # Hub routes, otherwise bridge requests would be counted twice.
-    if path.startswith("/api/revelaai/hubs"):
+    # The Flask before_request guard still covers fallback routes. Apply the
+    # same reversible guard to native routes without double-counting bridge calls.
+    if path.startswith(("/api/revelaai/hubs", "/api/revelaai/v2")):
         now = time.time()
         request_times = legacy_app_module._SCI_REQUEST_TIMES
         rate_lock = legacy_app_module._SCI_RATE_LOCK
@@ -71,24 +72,32 @@ async def asgi_security_and_legacy_throttle(request: Request, call_next):
             if now - started > 60:
                 throttle.update({"enabled": False, "reason": None, "since": None})
             else:
-                response = JSONResponse(
-                    {
-                        "status": "error",
-                        "code": "SCI_SHIELD_COOLDOWN",
-                        "message": "RevelaAI Shield Active - Cooling Down",
-                        "retry_after_seconds": max(1, int(60 - (now - started))),
-                    },
-                    status_code=429,
-                )
-                request_id = (
-                    request.headers.get("X-Request-ID", "").strip()[:100]
-                    or uuid.uuid4().hex
-                )
-                response.headers["X-Request-ID"] = request_id
-                response.headers["X-Content-Type-Options"] = "nosniff"
-                response.headers["X-Frame-Options"] = "DENY"
-                response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-                return response
+                # Preserve the exact documented recovery allow-list.
+                if path not in {
+                    "/health",
+                    "/ready",
+                    "/api/sci/shield/status",
+                    "/api/sci/shield/dashboard",
+                    "/api/sci/disaster/simulate",
+                }:
+                    response = JSONResponse(
+                        {
+                            "status": "error",
+                            "code": "SCI_SHIELD_COOLDOWN",
+                            "message": "RevelaAI Shield Active - Cooling Down",
+                            "retry_after_seconds": max(1, int(60 - (now - started))),
+                        },
+                        status_code=429,
+                    )
+                    request_id = (
+                        request.headers.get("X-Request-ID", "").strip()[:100]
+                        or uuid.uuid4().hex
+                    )
+                    response.headers["X-Request-ID"] = request_id
+                    response.headers["X-Content-Type-Options"] = "nosniff"
+                    response.headers["X-Frame-Options"] = "DENY"
+                    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+                    return response
 
     response = await call_next(request)
     response.headers.setdefault(
@@ -112,7 +121,11 @@ async def fastapi_gateway_health() -> dict[str, str]:
     }
 
 
-# Hub endpoints now use FastAPI directly. All other paths continue through the
-# temporary bridge until their APIRouter ports and parity tests are complete.
+# Native FastAPI routes precede the catch-all WSGI mount so these endpoints no
+# longer execute through Flask.
+app.include_router(explain_router)
 app.include_router(fastapi_hub_router)
+app.include_router(living_brain_router)
+
+# Temporary bridge: remaining Flask endpoints retain their established contract.
 app.mount("/", WSGIMiddleware(legacy_flask_app), name="legacy-flask")
