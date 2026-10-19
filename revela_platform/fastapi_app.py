@@ -415,7 +415,6 @@ class PublishToolInput(BaseModel):
     price_usd_cents: int = Field(ge=100, le=100000000)
     bom_by_country: dict[str, Any] = Field(default_factory=dict)
     guides_by_language: dict[str, Any] = Field(default_factory=dict)
-    verified_cost_saved_usd: float = Field(default=0.0, ge=0, le=10000000)
 
 
 @app.post("/v1/marketplace/publish", status_code=202, tags=["marketplace"])
@@ -439,8 +438,8 @@ def publish_tool(body: PublishToolInput,
         country_origin=country, endpoint=body.endpoint, price_usd_cents=body.price_usd_cents,
         status=status, bom_by_country={str(k).upper(): v for k, v in body.bom_by_country.items()},
         guides_by_language={str(k).lower(): v for k, v in body.guides_by_language.items()},
-        # This amount only counts when a verified reference has been supplied by review.
-        verified_cost_saved_usd=body.verified_cost_saved_usd,
+        # Publisher-supplied savings are not trusted; reviewer may set a verified estimate later.
+        verified_cost_saved_usd=0.0,
     )
     session.add(tool)
     _audit(session, user_id, "marketplace.tool.submitted", tool.id,
@@ -455,6 +454,7 @@ def publish_tool(body: PublishToolInput,
 class ReviewToolInput(BaseModel):
     approved: bool
     review_note: str = Field(min_length=3, max_length=1200)
+    verified_cost_saved_usd: float | None = Field(default=None, ge=0, le=10000000)
 
 
 @app.post("/v1/marketplace/{tool_id}/review", tags=["marketplace"])
@@ -473,8 +473,11 @@ def review_tool(tool_id: str, body: ReviewToolInput,
         session.commit()
         raise HTTPException(status_code=403, detail=note)
     tool.status = "published" if body.approved else "rejected"
+    if body.approved and body.verified_cost_saved_usd is not None:
+        tool.verified_cost_saved_usd = body.verified_cost_saved_usd
     _audit(session, user_id, "marketplace.tool.reviewed", tool_id,
-           {"approved": body.approved, "review_note": body.review_note})
+           {"approved": body.approved, "review_note": body.review_note,
+            "verified_cost_saved_usd": tool.verified_cost_saved_usd})
     session.commit()
     return {"tool_id": tool.id, "status": tool.status, "reviewer": user_id}
 
@@ -579,6 +582,7 @@ def rate_tool(tool_id: str, body: RatingInput, user_id: str = Depends(authentica
     rating = session.execute(
         select(ToolRating).where(ToolRating.tool_id == tool_id, ToolRating.user_id == user_id)
     ).scalar_one_or_none()
+    is_new_rating = rating is None
     if rating is None:
         rating = ToolRating(tool_id=tool_id, user_id=user_id, rating=body.rating)
         session.add(rating)
@@ -586,9 +590,7 @@ def rate_tool(tool_id: str, body: RatingInput, user_id: str = Depends(authentica
         tool.rating_total -= rating.rating
         rating.rating = body.rating
     tool.rating_total += body.rating
-    if not session.execute(
-        select(ToolRating.id).where(ToolRating.tool_id == tool_id, ToolRating.user_id == user_id)
-    ).first() or rating.id is None:
+    if is_new_rating:
         tool.rating_count += 1
     _audit(session, user_id, "marketplace.tool.rated", tool_id, {"rating": body.rating})
     try:
@@ -645,7 +647,7 @@ async def licensed_tool_guard(request: Request, call_next):
                 if candidate is not None and candidate.status == "published":
                     tracked_tool = candidate
         except Exception:
-            tracked_tool = None
+            return JSONResponse(status_code=503, content={"error": "License registry unavailable; tool calls fail closed."})
     if tracked_tool is None:
         return await call_next(request)
 
@@ -656,7 +658,10 @@ async def licensed_tool_guard(request: Request, call_next):
         return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
 
     license_key = request.headers.get("X-Revela-License", "")
-    country = _country(request.headers.get("X-Country") or request.query_params.get("country", "KE"))
+    try:
+        country = _country(request.headers.get("X-Country") or request.query_params.get("country", "KE"))
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
     started = time.perf_counter()
     try:
         with SessionLocal() as guard_session:
