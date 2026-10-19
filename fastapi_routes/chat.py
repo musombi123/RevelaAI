@@ -15,7 +15,7 @@ from ai.global_brain_adapter import build_global_context
 from ai.hub_prompts import HUB_LABELS, get_identity_answer
 from revelai.core.agi_manifest import get_self_description_answer
 from services.ai_service import process_message
-from routes.memory_routes import _record_messages, memories
+from services.memory_store import _record_messages, memories
 from fastapi_routes.auth import authenticate_identity
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
