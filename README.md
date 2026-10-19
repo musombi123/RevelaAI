@@ -111,6 +111,13 @@ Configure service origins in the RevelaAI service environment (never commit toke
 
 The RevelaAI server uses `MIND_ADMIN_TOKEN` for proposal requests and `GENESIS_ADMIN_TOKEN` (or `GENESIS_TOKEN`) for Genesis proxy authentication. These must match the server-side settings of the corresponding core services. Add comma-separated approved operator user IDs in `CORE_MESH_ADMIN_USER_IDS` to enable proposal controls; `META_ENGINEER_ADMIN_USER_IDS` is accepted as a fallback. The browser never receives these secrets. Normal chat/orchestration only produces advisory routing metadata and cannot trigger an invention/evolution. Guardians remain authoritative, and all proposed changes require human review; automatic execution and automatic merge remain disabled.
 
+### Production runtime configuration
+
+- **USECT-ZERO gateway and dashboard:** set `USECT_ZERO_ENABLED=true`. The dashboard uses `USECT_ZERO_BASE_URL`; the gateway accepts `USECT_ZERO_URL` as its explicit override and falls back to `USECT_ZERO_BASE_URL` when the override is empty. Point them at the same deployed Core-Zero origin.
+- **USECT-ZERO admin operations:** set `USECT_ZERO_ADMIN_TOKEN` on both RevelaAI and the Core-Zero service to the same strong secret. A successful health probe proves reachability only; it does not prove that the admin token matches or that the key-management store is writable.
+- **JWT:** `JWT_SECRET` must match the signing secret used by RevelaCode Backend and be at least 32 random bytes for HS256. Rotate it on both services as one coordinated change; changing only one side breaks token verification until both sides match and users obtain valid sessions.
+- **Gemini:** set `GEMINI_MODEL=gemini-3.8-flash` and `GEMINI_FALLBACK_MODEL=gemini-3.5-flash-lite` in the RevelaAI Render environment. Environment values override source defaults. If a configured model responds with 404, the code currently falls back, but keeping the primary model current avoids a failed provider call on each new chat.
+
 ## RevelaAI Smart Memory v2 — deployment configuration
 
 RevelaAI stores filtered conversation memory in the separate MongoDB database `revelai`. It does not read or write `revelacode.users`; user existence is verified through the protected RevelaCode endpoint.
