@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from core_billing.licensing import LicenseError, verify_license_token
 from core_billing.plans import get_plan
-from revela_platform.database import LicenseRecord, ToolRecord
+from revela_platform.database import FactoryRecord, LicenseRecord, ToolRecord
 
 
 def _aware(value: datetime) -> datetime:
@@ -35,11 +35,19 @@ def enforce_tool_creation_quota(session: Session, license_record: LicenseRecord)
     plan = get_plan(license_record.plan)
     if plan.tool_limit is None:
         return
-    created = session.scalar(
+    factory_count = session.scalar(
+        select(func.count()).select_from(FactoryRecord).where(
+            FactoryRecord.owner_user_id == license_record.user_id,
+            FactoryRecord.status != "rejected",
+        )
+    ) or 0
+    standalone_tool_count = session.scalar(
         select(func.count()).select_from(ToolRecord).where(
             ToolRecord.creator_user_id == license_record.user_id,
             ToolRecord.status != "rejected",
+            ToolRecord.factory_build_id.is_(None),
         )
     ) or 0
+    created = int(factory_count) + int(standalone_tool_count)
     if created >= plan.tool_limit:
         raise LicenseError(f"Plan limit reached ({plan.tool_limit} tools). Upgrade to Enterprise or a higher plan.")
