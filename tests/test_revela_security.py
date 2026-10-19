@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from core_billing.licensing import LicenseError, create_license_token, verify_license_token
+from core_foundry.attestation import sign_approved_manifest
 from recipe.cli import initialize_key
 from rvx.compiler import RvxCompiler
 from rvx.crypto import RecipeError, StalePacketError, open_blob, open_packet, seal_blob, seal_packet
@@ -28,6 +29,9 @@ def _keypair(monkeypatch):
     ).decode()
     monkeypatch.setenv("REVELA_LICENSE_PRIVATE_KEY", private_pem)
     monkeypatch.setenv("REVELA_LICENSE_PUBLIC_KEY", public_pem)
+    # Tests reuse the generated pair for review signatures; production keys must be separate.
+    monkeypatch.setenv("REVELA_REVIEW_PRIVATE_KEY", private_pem)
+    monkeypatch.setenv("REVELA_REVIEW_PUBLIC_KEY", public_pem)
     return private
 
 
@@ -166,7 +170,9 @@ def test_seed_child_is_offline_verifiable_and_tamper_evident(tmp_path, monkeypat
             build_id=proposal["build_id"], license_key=token,
             user_id="offline-owner", child_name="Child A"
         )
-    builder.set_status(proposal["build_id"], "approved")
+    approved = builder.set_status(proposal["build_id"], "approved")
+    approved = sign_approved_manifest(approved, reviewer_id="reviewer-test")
+    builder.store_manifest(approved)
     runner = SeedRunner(tmp_path / "seeded", builder)
     child = runner.seed_child(
         build_id=proposal["build_id"], license_key=token,
