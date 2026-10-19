@@ -227,7 +227,15 @@ def test_native_research_validates_query_and_returns_source_results(monkeypatch)
     assert response.json()["sources"][0]["title"] == "Result for climate"
 
 
-def test_native_users_directory_create_get_and_validation() -> None:
+def test_native_users_directory_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.setenv("REVELAAI_ENABLE_PROTOTYPE_USERS_API", "false")
+    response = client.post("/api/users", json={"name": "Blocked"})
+    assert response.status_code == 503
+    assert response.json()["status"] == "disabled"
+
+
+def test_native_users_directory_create_get_and_validation(monkeypatch) -> None:
+    monkeypatch.setenv("REVELAAI_ENABLE_PROTOTYPE_USERS_API", "true")
     from fastapi_routes.users import USERS
 
     USERS.clear()
