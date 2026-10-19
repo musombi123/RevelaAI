@@ -14,6 +14,7 @@ import uuid
 import app as legacy_app_module
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.wsgi import WSGIMiddleware
 
 from fastapi_routes.chat import router as chat_router
@@ -35,6 +36,23 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+)
+
+# Native FastAPI endpoints must enforce the same trusted-origin CORS policy as
+# the legacy Flask gateway. Keep credentials enabled only for explicit origins.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(legacy_app_module.CORS_ORIGINS),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "userId",
+        "X-User-ID",
+        "X-Session-ID",
+        "X-Request-ID",
+    ],
 )
 
 
