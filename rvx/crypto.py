@@ -136,17 +136,22 @@ def seal_packet(payload: Any, *, route: str, secret: bytes | None = None,
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    day = now.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    utc = now.astimezone(timezone.utc)
+    day = utc.strftime("%Y-%m-%d")
+    window = utc.strftime("%Y-%m-%dT%H")
     root = secret if secret is not None else _mesh_secret()
-    key = _derive_key(root, salt=day.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
+    # The daily dialect nests an hourly derived mesh key: packets expire within
+    # one hour, while daily labels still evolve once every UTC day.
+    key = _derive_key(root, salt=window.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
     nonce = secrets.token_bytes(12)
-    aad = ("REVELA-RVXP1|" + route + "|" + day).encode()
+    aad = ("REVELA-RVXP1|" + route + "|" + window).encode()
     raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     ciphertext = AESGCM(key).encrypt(nonce, raw, aad)
     return {
         "protocol": "RVXP1",
         "dialect": "v" + day.replace("-", ".") + "_α",
         "day": day,
+        "window": window,
         "route": route,
         "nonce": _b64e(nonce),
         "body": _b64e(ciphertext),
@@ -163,14 +168,18 @@ def open_packet(envelope: dict[str, Any], *, route: str, secret: bytes | None = 
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    today = now.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    utc = now.astimezone(timezone.utc)
+    today = utc.strftime("%Y-%m-%d")
+    current_window = utc.strftime("%Y-%m-%dT%H")
     day = envelope.get("day")
     if day != today:
-        raise StalePacketError("Stale RVX packet: its UTC dialect has expired.")
+        raise StalePacketError("Stale RVX packet: its daily dialect has expired.")
+    if envelope.get("window") != current_window:
+        raise StalePacketError("Stale RVX packet: its hourly mesh key window has expired.")
     root = secret if secret is not None else _mesh_secret()
     try:
-        key = _derive_key(root, salt=day.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
-        aad = ("REVELA-RVXP1|" + route + "|" + day).encode()
+        key = _derive_key(root, salt=current_window.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
+        aad = ("REVELA-RVXP1|" + route + "|" + current_window).encode()
         plaintext = AESGCM(key).decrypt(_b64d(envelope["nonce"]), _b64d(envelope["body"]), aad)
         return json.loads(plaintext)
     except StalePacketError:
