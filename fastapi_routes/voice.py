@@ -19,7 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-import app as legacy
+import legacy_flask_app as legacy
 from services.conversation_store import MAX_HISTORY, build_server_context, get_session, save_session
 from services.runtime_config import (
     AUDIO_DIR, REVELAAI_BUILD_ID, REVELAAI_ENABLE_HF_TTS,
