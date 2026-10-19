@@ -974,12 +974,12 @@ def process_message(
                 "model": "deterministic-no-model",
             }
         raw_steps = normalized_message.split(":", 1)[1].strip()
-        consent_to_share = bool(re.search(r"(?:^|\\s)SHARE\\s*:\\s*YES(?:\\s|$)", raw_steps, re.I))
+        consent_to_share = bool(re.search(r"(?:^|\s)SHARE\s*:\s*YES(?:\s|$)", raw_steps, re.I))
         raw_steps = re.sub(r"(?:^|\\s)SHARE\\s*:\\s*YES(?:\\s|$)", " ", raw_steps, flags=re.I).strip()
-        pieces = re.split(r"\\n+|;\\s*", raw_steps)
+        pieces = re.split(r"\n+|;\s*", raw_steps)
         steps = []
         for piece in pieces:
-            clean_step = re.sub(r"^(?:step\\s*\\d+\\s*[:.)-]?|\\d+[.)-])\\s*", "", piece.strip(), flags=re.I)
+            clean_step = re.sub(r"^(?:step\s*\d+\s*[:.)-]?|\d+[.)-])\s*", "", piece.strip(), flags=re.I)
             if clean_step:
                 steps.append(clean_step[:500])
         if not steps:
@@ -1358,18 +1358,18 @@ def process_message(
         }
         reply = ask_messages.get(
             locale,
-            f"I don't yet have a verified tool, library, or reviewed shared memory for “{topic}”. I won't guess. Could you share 1–3 safe steps or a photo of the setup? Remove personal and confidential details first. Notes stay private by default; sharing requires explicit consent. Any Genesis tool remains a proposal until it is reviewed and approved.",
+            f"I don't yet have a verified tool, library, or reviewed shared memory for “{topic}”. I won't guess. Could you share 1–3 safe steps ? Remove personal and confidential details first. Notes stay private by default; sharing requires explicit consent. Any Genesis tool remains a proposal until it is reviewed and approved.",
         )
         pending_registration = register_unknown_ask(
             topic=topic,
             user_id=str(user_id or ""),
             session_id=str(session_id or ""),
-            country=str(world_context.get("country") or country or "KE"),
-            language=str(world_context.get("language") or language or ""),
+            country=str((orchestrator_data.get("country_context") or {}).get("country") or country or "KE"),
+            language=str((orchestrator_data.get("country_context") or {}).get("language") or language or ""),
             source_request=normalized_message,
         )
         if pending_registration.get("registered"):
-            reply += "\\n\\nTo teach me in this chat, reply with TEACH: followed by 1–3 safe steps (one per line or separated by semicolons). Add SHARE: YES only if you explicitly consent to reuse by other users. Without that, notes stay private."
+            reply += chr(10) + chr(10) + "To teach me in this chat, reply with TEACH: followed by 1–3 safe steps (one per line or separated by semicolons). Add SHARE: YES only if you explicitly consent to reuse by other users. Without that, notes stay private."
         else:
             reply += "\\n\\nSign in to RevelaCode to submit teaching notes. No new knowledge has been stored yet."
 
