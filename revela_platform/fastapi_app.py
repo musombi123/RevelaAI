@@ -12,6 +12,7 @@ import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -830,6 +831,22 @@ def seed_factory(build_id: str, body: SeedFactoryInput,
         raise _license_http_error(exc) from exc
     except SeedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # Return the actual signed, offline-verifiable child bundle to its owner.
+    # Do not make a server-local file path the only copy of the deliverable.
+    bundle_path = Path(result.pop("path"))
+    try:
+        child_bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="Seed bundle could not be serialized for delivery") from exc
+    finally:
+        try:
+            bundle_path.unlink(missing_ok=True)
+            bundle_path.parent.rmdir()
+        except OSError:
+            pass
+    result["child_bundle"] = child_bundle
+
     seed_row = SeedRecord(
         id=result["seed_id"], parent_build_id=build_id, owner_user_id=user_id,
         license_id=str(claims["jti"]), status=result["status"],
@@ -860,18 +877,24 @@ def verify_seed(seed_id: str, user_id: str = Depends(authenticated_user),
         raise HTTPException(status_code=404, detail="Seeded child not found")
     if record.owner_user_id != user_id and not _reviewer(user_id):
         raise HTTPException(status_code=403, detail="Seeded child belongs to another user")
-    try:
-        local_lease = SeedRunner().verify_child_offline(seed_id)
-    except SeedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    license_record = session.get(LicenseRecord, record.license_id)
+    now = int(datetime.now(timezone.utc).timestamp())
+    registry_active = bool(
+        license_record is not None
+        and license_record.user_id == record.owner_user_id
+        and license_record.status == "active"
+        and (license_record.expires_at.replace(tzinfo=timezone.utc)
+             if license_record.expires_at.tzinfo is None else license_record.expires_at)
+             > datetime.now(timezone.utc)
+    )
+    offline_in_window = now <= record.offline_until
     return {
         "seed_id": record.id, "status": record.status, "license_id": record.license_id,
         "offline_until": record.offline_until,
-        "offline_authorized": bool(local_lease["offline_authorized"])
-            and record.offline_until == local_lease["offline_until"]
-            and record.status == "seeded_review_required",
-        "signed_lease_verified": True,
-        "note": "The child bundle's hash and signed token were verified. The declarative bundle still does not enable arbitrary code execution.",
+        "offline_window_open": offline_in_window,
+        "server_license_active": registry_active,
+        "offline_authorized": offline_in_window and record.status == "seeded_review_required",
+        "note": "This endpoint checks server-side lease and revocation state. The delivered child bundle must be saved locally and verified offline with python -m core_seed.cli --seed-id <seed_id>.",
     }
 
 
