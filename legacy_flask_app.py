@@ -698,81 +698,7 @@ def set_session_cookie(
     return response
 
 
-# =========================================================
-# DYNAMIC FEATURE LOADING
-# =========================================================
-
-FEATURES_DIR = (
-    BASE_DIR
-    / "features"
-)
-
-
-def load_features():
-
-    features = {}
-
-    if not FEATURES_DIR.is_dir():
-
-        return features
-
-    for path in FEATURES_DIR.iterdir():
-
-        if (
-            not path.is_file()
-            or path.suffix != ".py"
-        ):
-
-            continue
-
-        if path.name in {
-            "loader.py",
-            "__init__.py",
-        }:
-
-            continue
-
-        module_name = (
-            f"features.{path.stem}"
-        )
-
-        try:
-
-            module = (
-                importlib.import_module(
-                    module_name
-                )
-            )
-
-            for name, obj in (
-                inspect.getmembers(
-                    module,
-                    inspect.isclass,
-                )
-            ):
-
-                if (
-                    obj.__module__
-                    == module_name
-                ):
-
-                    features[
-                        name.lower()
-                    ] = obj()
-
-        except Exception as exc:
-
-            app.logger.warning(
-                "Optional feature failed to load | "
-                "feature=%s | error=%s",
-                path.name,
-                exc,
-            )
-
-    return features
-
-
-FEATURES = load_features()
+from services.feature_registry import FEATURES, FEATURES_DIR, load_features
 
 
 # =========================================================
@@ -1026,48 +952,7 @@ def generate_image_response(
     }
 
 
-# =========================================================
-# SAVE IMAGE CONVERSATION
-# =========================================================
-
-def save_image_conversation(
-    session_id: str,
-    session: dict[str, Any],
-    message: str,
-    *,
-    success: bool,
-) -> None:
-    """
-    Save the user image request and an internal assistant
-    conversation marker.
-
-    The actual image URL is returned through the response
-    contract instead of storing large data in session memory.
-    """
-
-    session[
-        "messages"
-    ].append({
-        "role": "user",
-        "content": message,
-    })
-
-    if success:
-
-        session[
-            "messages"
-        ].append({
-            "role": "assistant",
-            "content": (
-                "Generated a design based on the request: "
-                f"{message}"
-            ),
-        })
-
-    save_session(
-        session_id,
-        session,
-    )
+from services.conversation_store import save_image_conversation
 
 
 # =========================================================
