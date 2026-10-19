@@ -87,7 +87,7 @@ class AGIManifestTests(unittest.TestCase):
         self.assertEqual(status["modules_checked"], len(status["modules"]))
 
     def test_native_router_declares_routes(self):
-        paths = {route.path for route in app.routes}
+        paths = set(app.openapi()["paths"])
         self.assertIn("/api/agi/manifest", paths)
         self.assertIn("/api/agi/status", paths)
 
