@@ -1,7 +1,7 @@
 {
   "id": "canonical-spec-cache",
   "category": "spec_cache",
-  "purpose": "Fingerprint canonical immutable specification data so exact repeats can be identified",
+  "purpose": "Validate and fingerprint complete Core-One-shaped ToolSpec records with bounded canonical JSON and a concurrency-safe in-memory deduplication cache",
   "status": "candidate_for_human_review",
   "source_core": "core-one",
   "fixture_only": true,
