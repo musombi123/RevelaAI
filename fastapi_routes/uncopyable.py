@@ -16,7 +16,7 @@ from core_uncopyable.dna_vault_guard import (
 )
 from core_uncopyable.hardware_bind import hardware_status
 from core_uncopyable.recipe_lock import recipe_lock_status
-from core_uncopyable.rvx_evolver import verify_dialect
+from core_uncopyable.rvx_evolver import evolve_dialect, verify_dialect
 
 router = APIRouter(tags=["uncopyable"])
 
@@ -27,6 +27,10 @@ def _require_admin(supplied: str | None) -> None:
         raise HTTPException(status_code=503, detail="Uncopyable administration is not configured.")
     if not supplied or not hmac.compare_digest(supplied, expected):
         raise HTTPException(status_code=401, detail="Invalid organ administrator token.")
+
+
+class DialectRotationInput(BaseModel):
+    reason: str = Field(default="scheduled_rotation", min_length=3, max_length=80)
 
 
 class RestoreInput(BaseModel):
@@ -69,6 +73,20 @@ def uncopyable_status(
         },
         "destructive_self_wipe": False,
     }
+
+
+@router.post("/v1/uncopyable/rotate-dialect", tags=["uncopyable"])
+def rotate_dialect(
+    body: DialectRotationInput,
+    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+) -> dict[str, Any]:
+    """Rotate the authenticated dialect immediately after a confirmed security event."""
+    _require_admin(x_organ_admin_token)
+    try:
+        result = evolve_dialect(reason=body.reason)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="RVX dialect rotation failed; verify owner recipe configuration.") from exc
+    return {"ok": True, "dialect": result, "old_packets_rejected": True}
 
 
 @router.post("/v1/uncopyable/restore", tags=["uncopyable"])
