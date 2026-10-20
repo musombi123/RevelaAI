@@ -53,12 +53,14 @@ def test_enterprise_entitlement_is_signed_and_plan_scoped(tmp_path, monkeypatch)
     local, _ = create_license_token(user_id="user-1", plan_id="local", country="KE")
     with pytest.raises(EntitlementError, match="Enterprise plan required"):
         require_entitlement(local, "factory_build")
+    monkeypatch.setenv("REVELA_HARDWARE_ID", "license-bound-test-device")
+    fingerprint = hardware_fingerprint()
     enterprise, claims = create_license_token(
         user_id="user-1", plan_id="enterprise", country="KE",
-        hardware_fingerprint="a" * 64, factory_ids=["factory-1"],
+        hardware_fingerprint=fingerprint, factory_ids=["factory-1"],
     )
     assert require_entitlement(enterprise, "factory_build")["plan"] == "enterprise"
-    assert verify_license_token(enterprise, hardware_fingerprint="a" * 64)["sub"] == "user-1"
+    assert verify_license_token(enterprise, hardware_fingerprint=fingerprint)["sub"] == "user-1"
     with pytest.raises(Exception, match="Hardware fingerprint mismatch"):
         verify_license_token(enterprise, hardware_fingerprint="b" * 64)
     with pytest.raises(Exception, match="does not cover this factory"):
@@ -139,9 +141,10 @@ def test_dna_restore_requires_master_key_and_fresh_founder_signature(tmp_path, m
     )
     assert result["restored"] is True
     assert json.loads(destination.read_text()) == payload
+    invalid_payload = {**signature_payload, "nonce": "x" * 32}
     with pytest.raises(DnaVaultError, match="signature is invalid"):
         restore_dna_vault(
-            encrypted, signature_payload=signature_payload,
+            encrypted, signature_payload=invalid_payload,
             signature_b64=base64.urlsafe_b64encode(b"x" * 64).decode().rstrip("="),
             destination=destination,
         )
