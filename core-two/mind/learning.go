@@ -837,6 +837,7 @@ func appendJSONLine(path string, value any) error {
 		return fmt.Errorf("validate learning log directory: %w", err)
 	}
 
+	createdFile := false
 	before, err := os.Lstat(absPath)
 	switch {
 	case err == nil:
@@ -851,7 +852,8 @@ func appendJSONLine(path string, value any) error {
 		}
 
 	case os.IsNotExist(err):
-		// Create exclusively below.
+		// Remove the file on failure only if this call created it.
+		createdFile = true
 
 	default:
 		return err
@@ -867,20 +869,24 @@ func appendJSONLine(path string, value any) error {
 	}
 
 	committed := false
+	var openedInfo os.FileInfo
 	defer func() {
 		_ = file.Close()
-		if !committed {
-			// Do not remove a file that existed before this append attempt.
-			if os.IsNotExistError(nil) {
+		if !committed && createdFile && openedInfo != nil {
+			// Remove only the same newly-created file, never a replacement path.
+			if current, statErr := os.Lstat(absPath); statErr == nil &&
+				current.Mode()&os.ModeSymlink == 0 &&
+				current.Mode().IsRegular() && os.SameFile(openedInfo, current) {
 				_ = os.Remove(absPath)
 			}
 		}
 	}()
 
-	opened, err := file.Stat()
+	openedInfo, err = file.Stat()
 	if err != nil {
 		return err
 	}
+	opened := openedInfo
 
 	current, err := os.Lstat(absPath)
 	if err != nil {
