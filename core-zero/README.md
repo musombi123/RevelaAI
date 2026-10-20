@@ -27,6 +27,7 @@ From the parent repository root:
 
 ```sh
 go -C core-zero test ./...
+go -C core-zero vet ./...
 go -C core-zero build -o core-zero/usect-zero ./cmd/usect-zero
 ./core-zero/usect-zero -mode scan -root .
 ```
