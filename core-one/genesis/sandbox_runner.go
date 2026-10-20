@@ -76,7 +76,7 @@ func candidateBuildScript(language string, timeoutSeconds int, memoryBytes int64
 	if language == "python" {
 		return "set -eu; " + limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
 	}
-	return "set -eu; " + limits + "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
+	return "set -eu; " + limits + "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && if [ -f test.go ]; then mv test.go candidate_generated_test.go; fi && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
 }
 
 func dockerSandboxArgs(candidateDir string, manifest ToolManifest) []string {
@@ -162,6 +162,9 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 		return SandboxEvidence{}, err
 	}
 	defer cleanupSource()
+	if err := validateSandboxCandidate(sourceDir, manifest); err != nil {
+		return SandboxEvidence{}, err
+	}
 
 	started := time.Now().UTC()
 	log, runErr := runner(ctx, "docker", dockerSandboxArgs(sourceDir, manifest)...)
@@ -312,6 +315,56 @@ func makeTreeWritable(root string) error {
 		}
 		return os.Chmod(path, 0o600)
 	})
+}
+
+func validateSandboxCandidate(root string, manifest ToolManifest) error {
+	entry := filepath.Join(root, filepath.FromSlash(manifest.Entrypoint))
+	info, err := os.Lstat(entry)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return errors.New("manifest entrypoint must exist as a regular file in the staged candidate")
+	}
+	if manifest.Language == "go" {
+		if filepath.Ext(entry) != ".go" {
+			return errors.New("Go manifest entrypoint must be a .go file")
+		}
+		hasTest := false
+		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if strings.HasSuffix(entry.Name(), "_test.go") || entry.Name() == "test.go" {
+				hasTest = true
+			}
+			return nil
+		})
+		if err != nil || !hasTest {
+			return errors.New("Go candidate must include a test.go or *_test.go test suite")
+		}
+		return nil
+	}
+	if filepath.Ext(entry) != ".py" {
+		return errors.New("Python manifest entrypoint must be a .py file")
+	}
+	hasTest := false
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(entry.Name(), ".py") && strings.HasPrefix(entry.Name(), "test") {
+			hasTest = true
+		}
+		return nil
+	})
+	if err != nil || !hasTest {
+		return errors.New("Python candidate must include at least one test*.py suite")
+	}
+	return nil
 }
 
 func runnerNeedsFallback(output []byte, err error) bool {
