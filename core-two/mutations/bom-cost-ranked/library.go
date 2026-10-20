@@ -1,90 +1,87 @@
-
+// Package candidate implements deterministic BOM quote validation and ranking.
 package candidate
 
-import "testing"
+import (
+	"errors"
+	"math"
+	"sort"
+	"strings"
+)
 
-func TestProposalFixture(t *testing.T) {
-	if err := Validate(); err != nil {
-		t.Fatal(err)
-	}
+type Quote struct {
+	Supplier string
+	UnitCost int64
+	TransportCost int64
+	InStock bool
 }
 
-func TestBestQuoteSkipsUnavailableAndInvalidQuotes(t *testing.T) {
-	quotes := []Quote{
-		{Supplier: "", UnitCost: 1, TransportCost: 1, InStock: true},
-		{Supplier: "   ", UnitCost: 1, TransportCost: 1, InStock: true},
-		{Supplier: "out-of-stock", UnitCost: 0, TransportCost: 0, InStock: false},
-		{Supplier: "negative-unit", UnitCost: -1, TransportCost: 0, InStock: true},
-		{Supplier: "negative-transport", UnitCost: 0, TransportCost: -1, InStock: true},
-	}
-
-	if got, ok := BestQuote(quotes); ok {
-		t.Fatalf("BestQuote() = %+v, true; want no eligible quote", got)
-	}
+type RankedQuote struct {
+	Quote Quote
+	Total uint64
 }
 
-func TestBestQuoteAvoidsInt64Overflow(t *testing.T) {
-	const maxInt64 = int64(1<<63 - 1)
-
-	quotes := []Quote{
-		{
-			Supplier:      "overflowing-sum",
-			UnitCost:      maxInt64,
-			TransportCost: maxInt64,
-			InStock:       true,
-		},
-		{
-			Supplier:      "lower-total",
-			UnitCost:      maxInt64,
-			TransportCost: 0,
-			InStock:       true,
-		},
+// TotalCost returns the exact non-negative total without overflowing int64.
+func TotalCost(q Quote) (uint64, bool) {
+	if q.UnitCost < 0 || q.TransportCost < 0 {
+		return 0, false
 	}
-
-	best, ok := BestQuote(quotes)
-	if !ok || best.Supplier != "lower-total" {
-		t.Fatalf("BestQuote() = %+v, %v; want lower-total", best, ok)
-	}
+	return uint64(q.UnitCost) + uint64(q.TransportCost), true
 }
 
-func TestRankQuotesOrdersAndDoesNotMutateInput(t *testing.T) {
-	quotes := []Quote{
-		{Supplier: "Zulu", UnitCost: 4, TransportCost: 6, InStock: true},
-		{Supplier: "beta", UnitCost: 5, TransportCost: 5, InStock: true},
-		{Supplier: "Alpha", UnitCost: 3, TransportCost: 7, InStock: true},
+func eligible(q Quote) bool {
+	if strings.TrimSpace(q.Supplier) == "" || !q.InStock {
+		return false
 	}
+	_, ok := TotalCost(q)
+	return ok
+}
 
-	original := append([]Quote(nil), quotes...)
+// BestQuote selects the lowest-cost eligible supplier with deterministic ties.
+func BestQuote(quotes []Quote) (Quote, bool) {
 	ranked := RankQuotes(quotes)
-
-	if len(ranked) != 3 {
-		t.Fatalf("RankQuotes() returned %d quotes, want 3", len(ranked))
+	if len(ranked) == 0 {
+		return Quote{}, false
 	}
-
-	if ranked[0].Quote.Supplier != "Alpha" {
-		t.Fatalf(
-			"first ranked supplier = %q, want Alpha",
-			ranked[0].Quote.Supplier,
-		)
-	}
-
-	for i := range quotes {
-		if quotes[i] != original[i] {
-			t.Fatal("RankQuotes modified its input slice")
-		}
-	}
+	return ranked[0].Quote, true
 }
 
-func TestTotalCostSupportsMaximumInt64Components(t *testing.T) {
-	const maxInt64 = int64(1<<63 - 1)
-	const want = uint64(1<<64 - 2)
-
-	got, ok := TotalCost(Quote{
-		UnitCost:      maxInt64,
-		TransportCost: maxInt64,
-	})
-
-	if !ok || got != want {
-		t.Fatalf("TotalCost() = %d, %v; want %d, true", got, ok, want)
+// RankQuotes returns a new sorted slice; it never mutates the caller's input.
+func RankQuotes(quotes []Quote) []RankedQuote {
+	ranked := make([]RankedQuote, 0, len(quotes))
+	for _, q := range quotes {
+		if !eligible(q) {
+			continue
+		}
+		total, _ := TotalCost(q)
+		ranked = append(ranked, RankedQuote{Quote: q, Total: total})
 	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].Total != ranked[j].Total {
+			return ranked[i].Total < ranked[j].Total
+		}
+		left, right := strings.ToLower(strings.TrimSpace(ranked[i].Quote.Supplier)),
+			strings.ToLower(strings.TrimSpace(ranked[j].Quote.Supplier))
+		if left != right {
+			return left < right
+		}
+		return ranked[i].Quote.Supplier < ranked[j].Quote.Supplier
+	})
+	return ranked
+}
+
+// Validate checks the invariants required by this deterministic ranking library.
+func Validate() error {
+	max := int64(math.MaxInt64)
+	total, ok := TotalCost(Quote{UnitCost: max, TransportCost: max})
+	if !ok || total != uint64(math.MaxUint64-1) {
+		return errors.New("BOM cost overflow invariant failed")
+	}
+	best, found := BestQuote([]Quote{
+		{Supplier: "valid", UnitCost: 1, TransportCost: 1, InStock: true},
+		{Supplier: "unavailable", UnitCost: 0, TransportCost: 0, InStock: false},
+	})
+	if !found || best.Supplier != "valid" {
+		return errors.New("BOM quote eligibility invariant failed")
+	}
+	return nil
 }
