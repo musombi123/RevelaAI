@@ -86,7 +86,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		detail["production_verified"] = false
 		writeJSON(w, 200, detail)
 	case r.URL.Path == "/v1/mind/key" && r.Method == http.MethodGet:
-		mesh := provider.FromEnvironment(); writeJSON(w, 200, map[string]any{"status": "request_required", "provider_url_configured": mesh.BaseURL != "", "provider_key_configured": mesh.Key != "", "credential_env_names": []string{"REVELACODE_PROVIDER_URL", "REVELACODE_PROVIDER_KEY"}, "same_credentials_as_core_one": true, "secret_disclosed": false})
+		mesh := provider.FromEnvironment(); writeJSON(w, 200, map[string]any{"status": "request_required", "provider_url_configured": mesh.BaseURL != "", "provider_key_configured": mesh.Key != "", "credential_env_names": []string{"REVELACODE_PROVIDER_URL", "REVELACODE_PROVIDER_KEY"}, "credential_sharing": "not_independently_verified", "secret_disclosed": false})
 	case r.URL.Path == "/v1/mind/key" && r.Method == http.MethodPost:
 		if !s.allowMutation(w, r) { return }
 		var body struct { ClientID string `json:"client_id"`; Reason string `json:"reason"` }
