@@ -149,7 +149,9 @@ def test_genesis_documented_read_routes_use_direct_core_one_url(monkeypatch):
     monkeypatch.setattr(core_mesh, "_request_json", fake_request)
     assert core_mesh.get_genesis_status()["status"] == "ok"
     assert core_mesh.list_genesis_proposals()["path"] == "/v1/genesis/tools"
-    assert core_mesh.get_genesis_proposal("safe_tool")["path"] == "/v1/genesis/tools/safe_tool"
+    proposal = core_mesh.get_genesis_proposal("safe_tool")
+    assert proposal["status"] == "ok"
+    assert calls[2][1] == "/v1/genesis/tools/safe_tool"
     guide = core_mesh.get_genesis_hardware_guide("safe_tool", country="KE", language="sw")
     assert guide["path"].startswith("/v1/genesis/tools/safe_tool/hardware_guide?")
     assert "country=KE" in guide["path"] and "lang=sw" in guide["path"]
@@ -241,3 +243,44 @@ def test_genesis_gateway_routes_are_registered():
         if actual is not None:
             actual = actual - {"HEAD"}  # Starlette may add HEAD automatically for GET routes.
         assert actual == methods, f"route contract mismatch for {path}: got {actual}"
+
+
+def test_genesis_proposal_details_redact_raw_research_and_source(monkeypatch):
+    payload = {
+        "name": "safe_tool",
+        "status": "await_merge",
+        "hardware_guide_url": "/v1/genesis/tools/safe_tool/hardware_guide",
+        "proposal": {
+            "invention_id": "inv-1",
+            "created_at": "2026-10-20T00:00:00Z",
+            "status": "await_merge",
+            "specification": {
+                "name": "safe_tool",
+                "title": "Safe tool",
+                "purpose": "Summarize approved documents",
+                "demand": "PRIVATE USER DEMAND",
+                "capabilities": ["summarize"],
+            },
+            "research": {
+                "mode": "offline",
+                "collected_at": "2026-10-20T00:00:00Z",
+                "sources": [{"url": "https://example.invalid", "snippet": "PRIVATE RAW SOURCE"}],
+                "findings": ["PRIVATE RAW FINDING"],
+            },
+            "source_code": "PRIVATE SOURCE CODE",
+        },
+        "admin_token": "PRIVATE TOKEN",
+    }
+    monkeypatch.setattr(core_mesh, "_genesis_request", lambda path: payload)
+    result = core_mesh.get_genesis_proposal("safe_tool")
+    serialized = str(result)
+    assert result["proposal"]["specification"]["title"] == "Safe tool"
+    assert result["proposal"]["research_summary"]["source_count"] == 1
+    assert result["proposal"]["research_summary"]["finding_count"] == 1
+    assert "PRIVATE USER DEMAND" not in serialized
+    assert "PRIVATE RAW SOURCE" not in serialized
+    assert "PRIVATE RAW FINDING" not in serialized
+    assert "PRIVATE SOURCE CODE" not in serialized
+    assert "PRIVATE TOKEN" not in serialized
+    assert result["automatic_execution"] is False
+    assert result["automatic_merge"] is False
