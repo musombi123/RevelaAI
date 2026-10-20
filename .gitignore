@@ -18,3 +18,14 @@ node_modules/
 # OS files
 .DS_Store
 Thumbs.db
+
+# RevelaCode private recipe material and local billing data
+/revela_recipe/
+/recipe/master.key
+/recipe/*.key
+/recipe/*.secret
+/recipe/*private*.pem
+/core_billing/keys/license_private.pem
+/.revela-build/
+/.data/
+*.rvx.tmp

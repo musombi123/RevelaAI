@@ -80,14 +80,18 @@ class GeminiRoutingTests(unittest.TestCase):
             ),
             patch.object(chat_routes, "get_identity_answer", return_value=None),
             patch.object(chat_routes, "get_self_description_answer", return_value=None),
-            patch.object(chat_routes, "process_message", return_value={
-                "response": "The feature is working.",
-                "confidence": "high",
-                "intent": "coding",
-                "domain": "coding",
-                "provider": "test-provider",
-                "model": "test-model",
-            }),
+            patch.object(
+                chat_routes,
+                "process_message",
+                return_value={
+                    "response": "The feature is working.",
+                    "confidence": "high",
+                    "intent": "coding",
+                    "domain": "coding",
+                    "provider": "test-provider",
+                    "model": "test-model",
+                },
+            ),
             patch.object(chat_routes, "_persist_turn"),
             patch(
                 "revelai.core.brain_os.record_chat_outcome",

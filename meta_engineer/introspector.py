@@ -4,11 +4,11 @@ import ast, json, re
 from pathlib import Path
 from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
-PROTECTED = ["revelai/routers/auth.py", "revelai/middleware/security.py", "revelai/core/config.py"]
+PROTECTED = ["fastapi_routes/auth.py", "fastapi_routes/admin_auth.py", "revelai/core/config.py", "revelai/core/brain_os.py"]
 
 def scan_architecture() -> dict[str, Any]:
     """Walk source roots and map Python imports without writing files."""
-    roots = [ROOT / "revelai", ROOT / "routes", ROOT / "services", ROOT / "ai", ROOT / "models"]
+    roots = [ROOT / "fastapi_routes", ROOT / "revelai", ROOT / "services", ROOT / "ai", ROOT / "models", ROOT / "automation_fabric", ROOT / "meta_engineer"]
     structure, dependencies, schemas, files = {}, {}, {}, []
     for root in roots:
         if not root.is_dir(): continue
@@ -33,7 +33,7 @@ def scan_architecture() -> dict[str, Any]:
                     fields = [{"name": n.target.id, "annotation": ast.unparse(n.annotation)} for n in node.body if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)]
                     classes[node.name] = {"fields": fields, "docstring": ast.get_docstring(node)}
             schemas[rel] = classes
-    for rel in ("config/db.py", "routes/memory_routes.py"):
+    for rel in ("config/db.py", "services/memory_store.py"):
         path = ROOT / rel
         if path.is_file():
             try: source = path.read_text(encoding="utf-8")

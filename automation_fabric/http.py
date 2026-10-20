@@ -1,6 +1,7 @@
 """Native FastAPI router factory for cloud and loopback-local Automation Fabric."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Callable
@@ -149,7 +150,7 @@ def create_automation_router(
         try:
             scopes = normalize_scopes(body.get("scopes"))
             ttl = body.get("ttl_seconds", DEFAULT_CONSENT_TTL_SECONDS)
-            if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 60 or ttl > MAX_CONSENT_TTL_SECONDS:
+            if isinstance(ttl, bool) or not isinstance(ttl, int) or not 60 <= ttl <= MAX_CONSENT_TTL_SECONDS:
                 raise ValueError("ttl_seconds must be an integer from 60 to 86400")
             reason = body.get("reason", "")
             if not isinstance(reason, str) or len(reason) > 240:

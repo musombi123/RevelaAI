@@ -162,7 +162,7 @@ def test_authoritative_user_not_found_remains_forbidden(monkeypatch):
 
 
 def test_malformed_success_payload_fails_closed(monkeypatch):
-    upstream = FakeResponse(200, {"success": True})
+    (actor, error), _ = call_verifier(monkeypatch, FakeResponse(200, {"success": True}))
 
     (actor, error), _observed = call_verifier(monkeypatch, upstream)
 

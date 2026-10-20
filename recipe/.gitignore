@@ -1,0 +1,8 @@
+# Owner-held recipe material must never be committed.
+master.key
+*.key
+*.secret
+*.pem
+rvx_compiler_binary
+dialects/
+*.rvx.tmp

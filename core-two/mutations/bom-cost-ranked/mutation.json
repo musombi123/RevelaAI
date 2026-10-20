@@ -1,7 +1,8 @@
+
 {
-  "id": "bom-cost-ranked",
-  "category": "bom_search",
-  "purpose": "Compare already supplied local quotes by total cost and stock status",
+  "id": "cross-industry-pollination",
+  "category": "pollination",
+  "purpose": "Normalize, compare, deduplicate, and deterministically sort safe capability tags across industries. Comparison only; never auto-connect, execute source code, or deploy.",
   "status": "candidate_for_human_review",
   "source_core": "core-one",
   "fixture_only": true,

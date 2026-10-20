@@ -141,7 +141,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the loopback-only RevelaAI Automation Fabric local agent.")
     parser.add_argument("--host", default="127.0.0.1", help="Only 127.0.0.1 is permitted.")
     parser.add_argument("--port", type=int, default=38741)
-    parser.add_argument("--show-token", action="store_true", help="Print the local bearer token for deliberate manual setup.")
+    parser.add_argument(
+        "--show-token",
+        action="store_true",
+        help="Print the local bearer token for deliberate manual setup.",
+    )
     args = parser.parse_args()
     if args.host != "127.0.0.1":
         parser.error("For safety, Automation Fabric only binds to 127.0.0.1.")

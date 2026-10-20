@@ -3,33 +3,220 @@ package mind
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"strings"
 	"time"
 )
 
-func selectCandidate(objective string, evals []CandidateEvaluation) (CandidateEvaluation, bool) {
-	want := "graph-indexed"
-	lower := strings.ToLower(objective)
-	switch {
-	case strings.Contains(lower, "bom") || strings.Contains(lower, "cost"): want = "bom-cost-ranked"
-	case strings.Contains(lower, "hardware") || strings.Contains(lower, "fundi") || strings.Contains(lower, "guide"): want = "hardware-guide-structured"
-	case strings.Contains(lower, "rvx") || strings.Contains(lower, "encrypt") || strings.Contains(lower, "protect"): want = "rvx-aead-envelope"
-	case strings.Contains(lower, "pollinat") || strings.Contains(lower, "industry"): want = "cross-industry-pollination"
-	case strings.Contains(lower, "audit"): want = "tamper-evident-audit-chain"
-	case strings.Contains(lower, "input") || strings.Contains(lower, "safety"): want = "bounded-input-guard"
-	case strings.Contains(lower, "dedup") || strings.Contains(lower, "evidence"): want = "evidence-hash-dedup"
-	case strings.Contains(lower, "path"): want = "repository-path-index"
-	case strings.Contains(lower, "cache") || strings.Contains(lower, "spec"): want = "canonical-spec-cache"
+const (
+	defaultMindDaemonInterval = 24 * time.Hour
+	minMindDaemonInterval     = time.Second
+	maxMindDaemonInterval     = 30 * 24 * time.Hour
+)
+
+// selectCandidate maps the objective to a known static candidate.
+//
+// It deliberately does not compare percentages across unrelated categories:
+// graph speed, cost, checklist coverage, and security-control checks are not
+// directly comparable metrics.
+func selectCandidate(
+	objective string,
+	evaluations []CandidateEvaluation,
+) (CandidateEvaluation, bool) {
+	target := candidateForObjective(objective)
+
+	for _, evaluation := range evaluations {
+		if evaluation.ID != target {
+			continue
+		}
+
+		if !evaluation.Passed || !validSelectionEvaluation(evaluation) {
+			return CandidateEvaluation{}, false
+		}
+
+		spec, exists := sourceFor(evaluation.ID)
+		if !exists || !isExactAllowlistedCandidate(spec) {
+			return CandidateEvaluation{}, false
+		}
+
+		return evaluation, true
 	}
-	for _,e:=range evals {if e.ID==want&&e.Passed&&e.ImprovementPct>0{return e,true}}
-	var best CandidateEvaluation;found:=false;bestScore:=-1.0
-	for _,e:=range evals {if !e.Passed||e.ImprovementPct<=0{continue};score:=e.ImprovementPct;if score>200{score=200};if e.ID=="graph-indexed"{score+=1};if score>bestScore{best,bestScore,found=e,score,true}}
-	return best,found
+
+	return CandidateEvaluation{}, false
 }
 
+// candidateForObjective applies a deterministic keyword-to-candidate policy.
+// More specific categories take precedence when an objective mentions several
+// topics. An unclassified objective defaults to graph-indexed.
+func candidateForObjective(objective string) string {
+	lower := strings.ToLower(strings.TrimSpace(objective))
+
+	rules := []struct {
+		candidate string
+		keywords  []string
+	}{
+		{
+			candidate: "bom-cost-ranked",
+			keywords:  []string{"bom", "cost", "quote", "supplier", "bill of materials"},
+		},
+		{
+			candidate: "hardware-guide-structured",
+			keywords:  []string{"hardware", "fundi", "guide", "installation instructions"},
+		},
+		{
+			candidate: "rvx-aead-envelope",
+			keywords:  []string{"rvx", "encrypt", "encryption", "artifact protection", "cryptographic"},
+		},
+		{
+			candidate: "cross-industry-pollination",
+			keywords:  []string{"pollination", "cross-industry", "cross industry", "industry reuse"},
+		},
+		{
+			candidate: "tamper-evident-audit-chain",
+			keywords:  []string{"audit", "tamper-evident", "tamper evident", "audit integrity"},
+		},
+		{
+			candidate: "bounded-input-guard",
+			keywords:  []string{"bounded input", "input validation", "input safety", "path traversal"},
+		},
+		{
+			candidate: "evidence-hash-dedup",
+			keywords:  []string{"dedup", "deduplicate", "duplicate evidence", "evidence hashing"},
+		},
+		{
+			candidate: "repository-path-index",
+			keywords:  []string{"repository path", "path index", "path lookup", "file lookup"},
+		},
+		{
+			candidate: "canonical-spec-cache",
+			keywords:  []string{"cache", "canonical spec", "specification fingerprint", "spec fingerprint"},
+		},
+		{
+			candidate: "graph-indexed",
+			keywords:  []string{"graph", "traversal", "offline_vault", "dependency graph"},
+		},
+	}
+
+	for _, rule := range rules {
+		for _, keyword := range rule.keywords {
+			if strings.Contains(lower, keyword) {
+				return rule.candidate
+			}
+		}
+	}
+
+	return "graph-indexed"
+}
+
+func validSelectionEvaluation(evaluation CandidateEvaluation) bool {
+	values := []float64{
+		evaluation.BaselineValue,
+		evaluation.CandidateValue,
+		evaluation.ImprovementPct,
+	}
+
+	for _, value := range values {
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return false
+		}
+	}
+
+	if strings.TrimSpace(evaluation.ID) == "" ||
+		strings.TrimSpace(evaluation.Category) == "" {
+		return false
+	}
+
+	return true
+}
+
+// RunDaemon periodically records evidence and, when explicitly enabled,
+// stages a proposal for human review.
+//
+// MIND_AUTO_EVOLVE is disabled by default. Setting it to "1", "true", "yes",
+// or "enabled" enables proposal generation; it never enables automatic merge.
 func (s *Service) RunDaemon(ctx context.Context, interval time.Duration) {
-	if interval<=0{interval=24*time.Hour}
-	cycle:=func(){if _,err:=s.Scan(ctx);err!=nil{s.publish("mirror_error",map[string]any{"error":err.Error()});return};if strings.EqualFold(strings.TrimSpace(os.Getenv("MIND_AUTO_EVOLVE")),"0")||strings.EqualFold(strings.TrimSpace(os.Getenv("MIND_AUTO_EVOLVE")),"false"){return};if _,err:=s.Evolve(ctx,EvolveRequest{ToolName:"offline_vault_fixture",Objective:"improve offline_vault graph traversal efficiency"});err!=nil&&!errors.Is(err,ErrGuardianBlocked){s.publish("evolution_cycle_error",map[string]any{"error":err.Error()})}}
-	cycle();ticker:=time.NewTicker(interval);defer ticker.Stop();for{select{case<-ctx.Done():return;case<-ticker.C:cycle()}}
+	if s == nil {
+		return
+	}
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	if interval <= 0 {
+		interval = defaultMindDaemonInterval
+	}
+	if interval < minMindDaemonInterval {
+		interval = minMindDaemonInterval
+	}
+	if interval > maxMindDaemonInterval {
+		interval = maxMindDaemonInterval
+	}
+
+	runCycle := func() {
+		if ctx.Err() != nil {
+			return
+		}
+
+		if daemonAutoEvolveEnabled() {
+			// Evolve already performs its evidence scan; invoking Scan
+			// separately here would duplicate the work.
+			_, err := s.Evolve(ctx, EvolveRequest{
+				ToolName:  "offline_vault_fixture",
+				Objective: "improve offline_vault graph traversal efficiency",
+			})
+
+			if err == nil || ctx.Err() != nil {
+				return
+			}
+
+			if errors.Is(err, ErrGuardianBlocked) {
+				s.publish("daemon_evolution_blocked", map[string]any{
+					"tool_name":       "offline_vault_fixture",
+					"proposal_created": false,
+					"automatic_merge":  false,
+				})
+				return
+			}
+
+			s.publish("evolution_cycle_error", map[string]any{
+				"operation": "evolve",
+				"error":     limitLabel(err.Error(), 300),
+			})
+			return
+		}
+
+		// The ordinary daemon mode is observation-only.
+		if _, err := s.Scan(ctx); err != nil && ctx.Err() == nil {
+			s.publish("mirror_error", map[string]any{
+				"operation": "scan",
+				"error":     limitLabel(err.Error(), 300),
+			})
+		}
+	}
+
+	runCycle()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ticker.C:
+			runCycle()
+		}
+	}
+}
+
+func daemonAutoEvolveEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("MIND_AUTO_EVOLVE"))) {
+	case "1", "true", "yes", "enabled":
+		return true
+	default:
+		return false
+	}
 }

@@ -480,6 +480,7 @@ def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails(monkeypatc
     from asgi import app
     from fastapi_routes import chat as chat_routes
 
+    client = TestClient(app)
     interaction = {
         "hub": "general",
         "hubRequested": "auto",
