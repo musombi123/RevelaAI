@@ -279,14 +279,7 @@ func prepareSandboxSource(candidateDir, parent string) (string, func(), error) {
 		if total > maxRegistryBytes || fileCount > maxRegistryFiles {
 			return errors.New("candidate exceeds sandbox size limits")
 		}
-		raw, err := os.ReadFile(source)
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(target, raw, 0o600); err != nil {
-			return err
-		}
-		return nil
+		return copyArtifactFile(source, target, 0o600)
 	})
 	if err != nil {
 		cleanup()
