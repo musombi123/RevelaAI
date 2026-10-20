@@ -103,3 +103,65 @@ def test_execution_rejects_oversized_arguments_before_network(monkeypatch):
         assert exc.code == "tool_arguments_too_large"
     else:
         raise AssertionError("oversized arguments must be rejected")
+
+
+def test_provider_context_selects_native_gemini_or_prompt_based_fallback():
+    active = _active_item(_manifest())
+    gemini = tool_registry.provider_tool_context("gemini", [active])
+    assert gemini["mode"] == "native_function_declarations"
+    assert gemini["provider"] == "gemini"
+    assert gemini["function_declarations"][0]["name"] == "genesis_safe_tool"
+
+    for provider in ("hf", "mvi"):
+        result = tool_registry.provider_tool_context(provider, [active])
+        assert result["mode"] == "prompt_based"
+        assert result["provider"] == provider
+        assert "genesis_safe_tool" in result["tool_catalog"]
+
+
+def test_tier2_confirmation_is_forwarded_as_a_one_use_token(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.invalid")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    seen = {}
+
+    def fake_request(path, *, method="GET", payload=None, extra_headers=None, timeout=8.0):
+        seen.update(path=path, method=method, payload=payload, headers=extra_headers, timeout=timeout)
+        return {
+            "status": "confirmed",
+            "confirmation_token": "b" * 64,
+            "artifact_hash": "a" * 64,
+        }
+
+    monkeypatch.setattr(tool_registry, "_request", fake_request)
+    result = tool_registry.confirm_tier2_action(
+        "safe_tool",
+        "1.0.0",
+        "a" * 64,
+        {"action": "inspect", "consent": True},
+        action_approval_token="test-action-approval",
+    )
+    assert result["status"] == "confirmed"
+    assert seen["path"].endswith("/confirm")
+    assert seen["method"] == "POST"
+    assert seen["payload"] == {"arguments": {"action": "inspect", "consent": True}}
+    assert seen["headers"] == {"X-Genesis-Action-Approval": "test-action-approval"}
+
+
+def test_confirmation_rejects_invalid_or_oversized_arguments_before_network(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.invalid")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    monkeypatch.setattr(
+        tool_registry,
+        "_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network must not be called")),
+    )
+    try:
+        tool_registry.confirm_tier2_action(
+            "safe_tool", "1.0.0", "a" * 64,
+            {"action": "x", "payload": "x" * 70000},
+            action_approval_token="test-action-approval",
+        )
+    except tool_registry.GenesisToolRegistryError as exc:
+        assert exc.code == "invalid_tool_arguments"
+    else:
+        raise AssertionError("oversized confirmation arguments must be rejected")
