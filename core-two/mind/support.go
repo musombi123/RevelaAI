@@ -394,8 +394,7 @@ func validName(name string) bool {
 			character >= 'a' && character <= 'z' ||
 				character >= '0' && character <= '9' ||
 				character == '_' ||
-				character == '-'
-		) {
+				character == '-') {
 			return false
 		}
 	}
