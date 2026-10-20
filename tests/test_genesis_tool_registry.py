@@ -211,3 +211,27 @@ def test_public_ipv6_http_genesis_url_is_rejected(monkeypatch):
         assert exc.code == "genesis_url_tls_required"
     else:
         raise AssertionError("public IPv6 Genesis URLs must use HTTPS")
+
+
+def test_genesis_registry_request_bypasses_environment_proxies(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    observed = {}
+
+    class FakeResponse:
+        content = b'{"tools": []}'
+        status_code = 200
+        ok = True
+
+        def json(self):
+            return {"tools": []}
+
+    def fake_request(method, url, **kwargs):
+        observed.update(method=method, url=url, kwargs=kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(tool_registry.requests, "request", fake_request)
+    result = tool_registry._request("/v1/genesis/registry/tools")
+    assert result == {"tools": []}
+    assert observed["kwargs"]["headers"]["X-Genesis-Token"] == "test-token"
+    assert observed["kwargs"]["proxies"] == {"http": "", "https": ""}
