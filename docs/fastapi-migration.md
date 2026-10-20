@@ -57,18 +57,17 @@ Flask or WSGI.
   in-memory demo API is disabled by default and is not the authoritative
   RevelaCode account store.
 
-## Deliberately untouched sector source files
+## Legacy route-module import paths
 
-As requested, the remaining older blueprint files under `routes/` and some
-older `revelai/routers/` modules are not rewritten in this pass. They are not
-imported or registered by `asgi.py`, and are not part of the active request
-path. Convert or retire those source files manually when reviewing their
-sector-specific logic. Do not re-add them to the active app as Flask blueprints.
+The old `routes/*.py` module paths now export aliases to their corresponding
+native `APIRouter` implementations under `fastapi_routes/`. They no longer
+contain Flask blueprints or route handlers and must not be registered as a
+second copy of the same router. This preserves common import names without
+keeping Flask in the runtime or dependency tree.
 
-The current FastAPI routers are the public runtime contract. If a path in one of
-the dormant source modules is not represented in `fastapi_routes/`, it is not
-automatically exposed; add a native router endpoint when bringing that sector
-online. This avoids quietly reintroducing Flask as a fallback.
+The native FastAPI routers are the public HTTP contract. A unique endpoint from
+older source code that is not represented in `fastapi_routes/` is not silently
+exposed; add a native FastAPI endpoint before bringing that feature online.
 
 ## Dependency and security notes
 
@@ -91,10 +90,7 @@ uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
 ```
 
 One worker remains intentional while conversation/session state is process-local.
-The migration workflow compiles `app.py` and `asgi.py`, asserts that Flask/WSGI
-runtime dependencies and mounts are absent from both gateways, and runs the
-FastAPI route regression tests. The active FastAPI import graph is tested in an
-environment that installs no Flask package.
+The migration workflow compiles the entry points and route modules, scans production Python source (including historical `routes/` module paths) for Flask/WSGI imports, asserts that forbidden runtime dependencies and mounts are absent from both gateways, and runs the native FastAPI regression suite in an environment that installs no Flask package.
 
 PR #72 remains a draft while sector-specific source is reviewed. The separate
 Go Core-Zero/Core-Two CI suites have independent compile/test failures unrelated
