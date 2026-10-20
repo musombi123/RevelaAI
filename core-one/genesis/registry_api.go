@@ -103,7 +103,7 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 			writeAPIError(w, http.StatusUnprocessableEntity, "tool_manifest_invalid", "The invention tool manifest failed validation.")
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(manifest.TimeoutMillis)*time.Millisecond)
+		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(MaxToolTimeoutMillis)*time.Millisecond)
 		defer cancel()
 		evidence, err := RunCandidateSandbox(ctx, candidateDir, filepath.Join(s.Engine.CoreRoot, "state", "sandbox-evidence", name, manifest.Version), manifest)
 		if err != nil {
