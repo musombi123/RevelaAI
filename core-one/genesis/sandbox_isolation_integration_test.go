@@ -53,8 +53,8 @@ if __name__ == "__main__":
 		SchemaVersion: ToolManifestSchemaVersion,
 		Name: "sandbox_boundary_test", Version: "1.0.0", Language: "python",
 		Entrypoint: "test_sandbox_security.py",
-		InputSchema: json.RawMessage("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"),
-		OutputSchema: json.RawMessage("{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"),
+		InputSchema: json.RawMessage(runtimeToolInputSchemaJSON),
+		OutputSchema: json.RawMessage(runtimeToolOutputSchemaJSON),
 		RiskTier: 0, Permissions: ToolPermissions{}, TimeoutMillis: 10000, MemoryBytes: 128 << 20,
 	}
 	if _, err := RunCandidateSandbox(context.Background(), candidate, filepath.Join(root, "evidence"), manifest); err != nil {
