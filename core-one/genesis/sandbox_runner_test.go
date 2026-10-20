@@ -95,7 +95,7 @@ func TestSandboxFailureCannotPassCandidate(t *testing.T) {
 	if err == nil || result.Passed {
 		t.Fatalf("failed sandbox run must fail closed: evidence=%#v error=%v", result, err)
 	}
-	if result.IsolationLevel != "unavailable_fail_closed" {
+	if result.IsolationLevel != "docker_unavailable_fail_closed" {
 		t.Fatalf("missing Docker must be reported as unavailable: %#v", result)
 	}
 }
