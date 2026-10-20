@@ -43,6 +43,8 @@ services:
           type: pserv
           name: genesis-core-one
           envVarKey: GENESIS_ADMIN_TOKEN
+      - key: GENESIS_ORCHESTRATOR_TOOLS_ENABLED
+        value: "true"
       # User IDs authorized to explicitly approve Tier 1-2 Genesis activation/rollback.
       - key: GENESIS_OWNER_USER_IDS
         sync: false
