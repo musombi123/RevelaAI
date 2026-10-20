@@ -457,8 +457,7 @@ func validateLearningEvidenceRef(value string) error {
 				r >= 'A' && r <= 'Z' ||
 				r >= '0' && r <= '9' ||
 				r == '-' || r == '_' || r == '.' ||
-				r == '/' || r == ':' || r == '#'
-		) {
+				r == '/' || r == ':' || r == '#') {
 			return errors.New("reference contains unsupported characters")
 		}
 	}
