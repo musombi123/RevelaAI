@@ -842,6 +842,9 @@ func (m *KeyManager) Request(
 	reason string,
 	scopes []string,
 ) (KeyRequest, error) {
+	if m == nil {
+		return KeyRequest{}, errors.New("key manager is not initialized")
+	}
 	name = strings.TrimSpace(name)
 	email = strings.TrimSpace(email)
 	repo = strings.TrimSpace(repo)
