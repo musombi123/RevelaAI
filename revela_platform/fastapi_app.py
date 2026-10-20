@@ -38,6 +38,8 @@ from core_meter.meter import record_usage, usage_summary
 from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
 from core_foundry.attestation import AttestationError, sign_approved_manifest
 from core_seed.seed_runner import SeedError, SeedRunner
+from core_uncopyable.dna_vault_guard import DnaVaultError, sign_tool_watermark
+from core_uncopyable.license_lock import require_enterprise_claims
 from core_auditor.ledger import AuditLedger, AuditLedgerError
 from marketplace.service import country_bundle, creator_earnings, safety_screen
 from revela_platform.database import (
@@ -695,6 +697,7 @@ def build_factory(body: FactoryBuildInput,
     country = _country(body.country)
     claims, license_record = _active_license(session, license_key or "", user_id, country=country)
     try:
+        require_enterprise_claims(claims, "factory_build")
         enforce_tool_creation_quota(session, license_record)
         proposal = FoundryBuilder().build_plan(
             owner_user_id=user_id, name=body.name, description=body.description,
@@ -705,6 +708,15 @@ def build_factory(body: FactoryBuildInput,
         raise _license_http_error(exc) from exc
     except FactoryBuildError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        watermark = sign_tool_watermark(
+            tool_id=proposal["build_id"],
+            creator_user_id=user_id,
+            factory_id=proposal["build_id"],
+            artifact_sha256=proposal["manifest_sha256"],
+        )
+    except DnaVaultError as exc:
+        raise HTTPException(status_code=503, detail="Founder watermark signing is unavailable; factory build was not committed.") from exc
     record = FactoryRecord(
         id=proposal["build_id"], owner_user_id=user_id, name=body.name.strip(),
         status="await_merge", country=country, manifest_sha256=proposal["manifest_sha256"],
@@ -726,6 +738,7 @@ def build_factory(body: FactoryBuildInput,
         "build_id": proposal["build_id"],
         "status": proposal["status"],
         "manifest_sha256": proposal["manifest_sha256"],
+        "provenance_watermark": watermark,
         "manifest": proposal["manifest"],
         "audit_chain_recorded": chain_logged,
         "execution": "disabled_until_review",
@@ -815,6 +828,10 @@ def seed_factory(build_id: str, body: SeedFactoryInput,
     claims, license_record = _active_license(
         session, license_key or "", user_id, country=country
     )
+    try:
+        require_enterprise_claims(claims, "seed_create")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
     record = session.get(FactoryRecord, build_id)
     if record is None or record.status != "approved":
         raise HTTPException(status_code=409, detail="Factory must be approved by a human reviewer before seeding")
