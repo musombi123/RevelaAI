@@ -42,15 +42,20 @@ def _configuration() -> tuple[str, dict[str, str]]:
     return base, {"Accept": "application/json", "X-Genesis-Token": token}
 
 
-def _request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None, timeout: float = _TIMEOUT_SECONDS) -> dict[str, Any]:
     base, headers = _configuration()
+    for key, value in (extra_headers or {}).items():
+        if key not in {"X-Genesis-Owner-Approval", "X-Genesis-Action-Approval"}:
+            raise GenesisToolRegistryError("Unsupported Genesis elevated-operation header.", code="invalid_elevated_header", status_code=400)
+        if value:
+            headers[key] = value
     try:
         response = requests.request(
             method,
             base + path,
             json=payload,
             headers=headers,
-            timeout=_TIMEOUT_SECONDS,
+            timeout=max(1.0, min(float(timeout), 180.0)),
             allow_redirects=False,
         )
     except requests.RequestException:
@@ -147,6 +152,106 @@ def prompt_based_tool_catalog(tools: list[dict[str, Any]] | None = None) -> str:
             "description": "Invoke only by emitting a structured tool request; never claim execution before the gateway confirms it.",
         })
     return json.dumps(rows, ensure_ascii=False, separators=(",", ":"))[:32_000]
+
+
+def list_signed_tools() -> list[dict[str, Any]]:
+    """Return every verified append-only registry version, active or inactive."""
+    result = _request("/v1/genesis/registry/tools")
+    tools = result.get("tools")
+    if not isinstance(tools, list):
+        raise GenesisToolRegistryError("Genesis tool registry response is missing tools.", code="genesis_invalid_payload")
+    return [item for item in tools[:512] if isinstance(item, dict) and isinstance(item.get("manifest"), dict)]
+
+
+def provider_tool_context(provider: str, tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Choose Gemini function declarations or a provider-neutral prompt catalogue."""
+    provider = str(provider or "").strip().lower()
+    if provider not in {"gemini", "hf", "mvi"}:
+        raise GenesisToolRegistryError("Provider must be one of the existing text providers.", code="invalid_provider", status_code=400)
+    tools = list_active_tools() if tools is None else tools
+    if provider == "gemini":
+        return {"mode": "native_function_declarations", "provider": "gemini", "function_declarations": gemini_function_declarations(tools)}
+    return {"mode": "prompt_based", "provider": provider, "tool_catalog": prompt_based_tool_catalog(tools)}
+
+
+def activate_signed_tool(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
+    """Activate a signed version via the Gateway; owner credential stays server-side."""
+    if not _NAME_RE.fullmatch(str(name or "")) or not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+        raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
+    owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
+    if not owner_token:
+        raise GenesisToolRegistryError("Owner approval is not configured; activation remains disabled.", code="owner_approval_not_configured", status_code=503)
+    return _request(
+        "/v1/genesis/registry/tools/" + quote(name, safe="") + "/" + quote(str(version), safe="") + "/" + quote(artifact_hash, safe="") + "/activate",
+        method="POST",
+        payload={"owner_approval_hash": artifact_hash},
+        extra_headers={"X-Genesis-Owner-Approval": owner_token},
+        timeout=15.0,
+    )
+
+
+def deactivate_signed_tool(name: str) -> dict[str, Any]:
+    if not _NAME_RE.fullmatch(str(name or "")):
+        raise GenesisToolRegistryError("Invalid Genesis tool name.", code="invalid_tool_name", status_code=400)
+    return _request("/v1/genesis/registry/tools/" + quote(name, safe="") + "/deactivate", method="POST", payload={}, timeout=15.0)
+
+
+def rollback_signed_tool(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
+    if not _NAME_RE.fullmatch(str(name or "")) or not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+        raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
+    owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
+    if not owner_token:
+        raise GenesisToolRegistryError("Owner approval is not configured; rollback remains disabled.", code="owner_approval_not_configured", status_code=503)
+    return _request(
+        "/v1/genesis/registry/tools/" + quote(name, safe="") + "/rollback",
+        method="POST",
+        payload={"version": version, "artifact_hash": artifact_hash, "owner_approval_hash": artifact_hash},
+        extra_headers={"X-Genesis-Owner-Approval": owner_token},
+        timeout=15.0,
+    )
+
+
+def publish_signed_tool(name: str) -> dict[str, Any]:
+    if not _NAME_RE.fullmatch(str(name or "")):
+        raise GenesisToolRegistryError("Invalid Genesis tool name.", code="invalid_tool_name", status_code=400)
+    return _request(
+        "/v1/genesis/registry/tools/" + quote(name, safe="") + "/publish",
+        method="POST", payload={}, timeout=180.0,
+    )
+
+
+def confirm_tier2_action(
+    name: str,
+    version: str,
+    artifact_hash: str,
+    arguments: dict[str, Any],
+    *,
+    action_approval_token: str,
+) -> dict[str, Any]:
+    """Issue a one-use confirmation for exact Tier 2 arguments after an operator action."""
+    if not _NAME_RE.fullmatch(str(name or "")) or not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+        raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
+    if not action_approval_token:
+        raise GenesisToolRegistryError("A separate per-action human approval credential is required.", code="action_approval_required", status_code=403)
+    try:
+        raw = json.dumps(arguments, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError):
+        raise GenesisToolRegistryError("Tool arguments must be JSON-serializable.", code="invalid_tool_arguments", status_code=400) from None
+    if not isinstance(arguments, dict) or not raw or len(raw) > _MAX_INPUT_BYTES:
+        raise GenesisToolRegistryError("Tool arguments are invalid or oversized.", code="invalid_tool_arguments", status_code=400)
+    path = (
+        "/v1/genesis/registry/tools/" + quote(name, safe="")
+        + "/" + quote(str(version), safe="")
+        + "/" + quote(artifact_hash, safe="")
+        + "/confirm"
+    )
+    return _request(
+        path,
+        method="POST",
+        payload={"arguments": arguments},
+        extra_headers={"X-Genesis-Action-Approval": action_approval_token},
+        timeout=15.0,
+    )
 
 
 def execute_active_tool(
