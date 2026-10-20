@@ -5,13 +5,14 @@ sent to the Genesis service, which owns sandbox policy and artifact verification
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
 import re
 import time
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import requests
 
@@ -31,16 +32,68 @@ class GenesisToolRegistryError(RuntimeError):
 
 
 def _configuration() -> tuple[str, dict[str, str]]:
-    base = str(os.getenv("GENESIS_BASE_URL") or "").strip().rstrip("/")
+    raw_base = str(os.getenv("GENESIS_BASE_URL") or "").strip().rstrip("/")
     token = str(os.getenv("GENESIS_ADMIN_TOKEN") or "").strip()
-    if not base:
+    if not raw_base:
         raise GenesisToolRegistryError("Genesis is unavailable: GENESIS_BASE_URL is not configured.", code="genesis_unavailable", status_code=503)
     if not token:
         raise GenesisToolRegistryError("Genesis tool access is not configured.", code="genesis_admin_token_not_configured", status_code=503)
-    if not base.startswith(("https://", "http://")) or any(ch in base for ch in "\r\n"):
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in raw_base):
         raise GenesisToolRegistryError("Genesis service URL is invalid.", code="genesis_url_invalid", status_code=503)
-    return base, {"Accept": "application/json", "X-Genesis-Token": token}
 
+    # Render injects a private service's hostport as a bare DNS label and
+    # port (for example genesis-core-one:10000). Normalize only that narrow
+    # authority form to HTTP; external hosts still require HTTPS.
+    base = raw_base
+    if "://" not in raw_base:
+        authority = urlsplit("//" + raw_base)
+        try:
+            port = authority.port
+        except ValueError:
+            port = None
+        host = authority.hostname or ""
+        if (
+            not host
+            or port is None
+            or authority.username is not None
+            or authority.password is not None
+            or authority.path
+            or authority.query
+            or authority.fragment
+            or "." in host
+            or host.lower() == "localhost"
+        ):
+            raise GenesisToolRegistryError("Bare Genesis URL must be a Render private hostport.", code="genesis_url_invalid", status_code=503)
+        base = "http://" + raw_base
+
+    parsed = urlsplit(base)
+    try:
+        parsed.port
+    except ValueError:
+        raise GenesisToolRegistryError("Genesis service URL contains an invalid port.", code="genesis_url_invalid", status_code=503) from None
+    host = parsed.hostname or ""
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise GenesisToolRegistryError("Genesis service URL must be an HTTP(S) origin without credentials or a path.", code="genesis_url_invalid", status_code=503)
+    if parsed.scheme != "https":
+        is_loopback = host.lower() == "localhost"
+        try:
+            is_loopback = is_loopback or ipaddress.ip_address(host.strip("[]")).is_loopback
+        except ValueError:
+            pass
+        is_render_private = "." not in host and host.lower() != "localhost"
+        if not (is_loopback or is_render_private):
+            raise GenesisToolRegistryError("Public Genesis hosts must use HTTPS.", code="genesis_url_tls_required", status_code=503)
+
+    base = base.rstrip("/")
+    return base, {"Accept": "application/json", "X-Genesis-Token": token}
 
 def _request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None, timeout: float = _TIMEOUT_SECONDS) -> dict[str, Any]:
     base, headers = _configuration()
