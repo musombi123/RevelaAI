@@ -293,6 +293,9 @@ func aggregateToolTelemetry(events []ToolTelemetryEvent) []ToolVersionMetrics {
 }
 
 func telemetryProvenance(events []ToolTelemetryEvent) string {
+	if len(events) == 0 {
+		return "not_observed"
+	}
 	for _, event := range events {
 		if event.EvidenceOrigin == "synthetic_fixture" { return "synthetic_fixture" }
 	}
@@ -407,6 +410,8 @@ func (s *Service) ScoreFoundryCandidate(ctx context.Context, candidate FoundryCa
 	result.CoreOneGuardianPassed=true
 	result.Scored=decision.ScoreAvailable
 	result.Score=decision.Score
+	result.SyntheticFixture=decision.SyntheticFixture
+	result.ProductionVerified=decision.ProductionVerified
 	result.Canary=decision
 	result.EvidenceRecordedAt=time.Now().UTC()
 	result.EvidencePath=filepath.ToSlash(filepath.Join("core-two","state","candidates",candidate.CandidateID+".json"))
