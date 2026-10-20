@@ -13,8 +13,8 @@ func validManifestForTest() ToolManifest {
 		Version: "1.0.0",
 		Language: "go",
 		Entrypoint: "code.go",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
-		OutputSchema: json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		InputSchema: json.RawMessage(runtimeToolInputSchemaJSON),
+		OutputSchema: json.RawMessage(runtimeToolOutputSchemaJSON),
 		RiskTier: 0,
 		Permissions: ToolPermissions{},
 		TimeoutMillis: 10000,
@@ -54,6 +54,19 @@ func TestManifestRejectsUnsafeEntrypointsAndSchemas(t *testing.T) {
 	m.InputSchema = json.RawMessage(`{"type":"object","$ref":"https://example.invalid/schema.json"}`)
 	if err := ValidateToolManifest(m); err == nil {
 		t.Fatal("referenced schema must be rejected")
+	}
+}
+
+func TestManifestRejectsSchemasUnsupportedByRuntimeABI(t *testing.T) {
+	m := validManifestForTest()
+	m.InputSchema = json.RawMessage(`{"type":"object","properties":{"arbitrary":{"type":"string"}},"additionalProperties":false}`)
+	if err := ValidateToolManifest(m); err == nil {
+		t.Fatal("input schema that the runtime cannot accept must be rejected")
+	}
+	m = validManifestForTest()
+	m.OutputSchema = json.RawMessage(`{"type":"object","properties":{"arbitrary":{"type":"string"}},"additionalProperties":false}`)
+	if err := ValidateToolManifest(m); err == nil {
+		t.Fatal("output schema that the runtime cannot produce must be rejected")
 	}
 }
 
