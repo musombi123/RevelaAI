@@ -152,9 +152,18 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 			writeAPIError(w, http.StatusBadRequest, "invalid_json", "Rollback requires version and artifact_hash.")
 			return
 		}
+		record, err := loadSignedToolArtifact(s.Engine.CoreRoot, name, body.Version, body.ArtifactHash)
+		if err != nil {
+			writeAPIError(w, http.StatusForbidden, "rollback_rejected", "Rollback target is not a verified signed version.")
+			return
+		}
+		if record.Manifest.RiskTier > 0 && !genesisCredentialMatches("GENESIS_OWNER_APPROVAL_TOKEN", r.Header.Get("X-Genesis-Owner-Approval")) {
+			writeAPIError(w, http.StatusForbidden, "owner_approval_required", "Tier 1-2 rollback requires a separate owner approval credential and hash-bound approval.")
+			return
+		}
 		pointer, err := RollbackSignedTool(s.Engine.CoreRoot, name, body.Version, body.ArtifactHash, body.OwnerApprovalHash)
 		if err != nil {
-			writeAPIError(w, http.StatusForbidden, "rollback_rejected", "Rollback target is not a verified signed version or its required approval is missing.")
+			writeAPIError(w, http.StatusForbidden, "rollback_rejected", "Rollback target or hash-bound approval was rejected.")
 			return
 		}
 		writeAPIJSON(w, http.StatusOK, map[string]any{"status": "rolled_back", "tool": pointer})
@@ -180,6 +189,15 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 			writeAPIError(w, http.StatusBadRequest, "invalid_json", "Activation requires owner_approval_hash for Tier 1-2.")
 			return
 		}
+		record, err := loadSignedToolArtifact(s.Engine.CoreRoot, name, parts[1], parts[2])
+		if err != nil {
+			writeAPIError(w, http.StatusForbidden, "activation_rejected", "Activation requires a verified signed artifact.")
+			return
+		}
+		if record.Manifest.RiskTier > 0 && !genesisCredentialMatches("GENESIS_OWNER_APPROVAL_TOKEN", r.Header.Get("X-Genesis-Owner-Approval")) {
+			writeAPIError(w, http.StatusForbidden, "owner_approval_required", "Tier 1-2 activation requires a separate owner approval credential and hash-bound approval.")
+			return
+		}
 		pointer, err := ActivateSignedToolVersion(s.Engine.CoreRoot, name, parts[1], parts[2], body.OwnerApprovalHash)
 		if err != nil {
 			writeAPIError(w, http.StatusForbidden, "activation_rejected", "Activation requires a verified signed artifact and hash-bound approval for Tier 1-2.")
@@ -189,13 +207,45 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 		return
 	}
 
+	if len(parts) == 4 && parts[3] == "confirm" && r.Method == http.MethodPost {
+		if !s.allowMutation(w, r) {
+			return
+		}
+		if !genesisCredentialMatches("GENESIS_ACTION_APPROVAL_TOKEN", r.Header.Get("X-Genesis-Action-Approval")) {
+			writeAPIError(w, http.StatusForbidden, "action_approval_required", "Tier 2 confirmation requires the separate human action-approval credential.")
+			return
+		}
+		var body struct {
+			Arguments map[string]any `json:"arguments"`
+		}
+		if err := decodeAPIJSON(w, r, &body); err != nil || body.Arguments == nil || !validGeneratedToolArguments(body.Arguments) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_tool_arguments", "Confirmation requires a valid action arguments object.")
+			return
+		}
+		input, err := json.Marshal(body.Arguments)
+		if err != nil || len(input) > 64*1024 {
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "tool_arguments_too_large", "Tool arguments exceed the permitted size.")
+			return
+		}
+		token, expires, err := IssueToolActionConfirmation(s.Engine.CoreRoot, name, parts[1], parts[2], input)
+		if err != nil {
+			writeAPIError(w, http.StatusForbidden, "action_confirmation_rejected", "Genesis refused the action confirmation; the exact active Tier 2 artifact and owner approval are required.")
+			return
+		}
+		writeAPIJSON(w, http.StatusCreated, map[string]any{
+			"status": "confirmed", "confirmation_token": token, "expires_at": expires,
+			"tool": name, "version": parts[1], "artifact_hash": parts[2],
+		})
+		return
+	}
+
 	if len(parts) == 4 && parts[3] == "invoke" && r.Method == http.MethodPost {
 		if !s.allowMutation(w, r) {
 			return
 		}
 		var body struct {
 			Arguments map[string]any `json:"arguments"`
-			ConfirmationHash string `json:"confirmation_hash,omitempty"`
+			ConfirmationToken string `json:"confirmation_token,omitempty"`
 		}
 		if err := decodeAPIJSON(w, r, &body); err != nil || body.Arguments == nil {
 			writeAPIError(w, http.StatusBadRequest, "invalid_tool_arguments", "Invocation requires an arguments JSON object.")
@@ -211,7 +261,7 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 			return
 		}
 		started := time.Now()
-		output, runErr := RunSignedToolInvocation(r.Context(), s.Engine.CoreRoot, name, parts[1], parts[2], input, body.ConfirmationHash)
+		output, runErr := RunSignedToolInvocation(r.Context(), s.Engine.CoreRoot, name, parts[1], parts[2], input, body.ConfirmationToken)
 		event := ToolCallTelemetry{
 			At: time.Now().UTC(), Tool: name, VersionHash: parts[2],
 			Success: runErr == nil, LatencyMS: time.Since(started).Milliseconds(),
@@ -307,4 +357,11 @@ func (s *Server) serveToolTelemetry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeAPIJSON(w, http.StatusOK, map[string]any{"events": events, "count": len(events), "content_included": false})
+}
+
+
+func genesisCredentialMatches(environmentName, presented string) bool {
+	configured := strings.TrimSpace(os.Getenv(environmentName))
+	presented = strings.TrimSpace(presented)
+	return configured != "" && presented != "" && constantTimeStringEqual(configured, presented)
 }
