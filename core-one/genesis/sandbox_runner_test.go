@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -73,7 +74,7 @@ func TestSandboxFailureCannotPassCandidate(t *testing.T) {
 	}
 	m := validManifestForTest()
 	result, err := runCandidateSandbox(context.Background(), candidate, filepath.Join(root, "evidence"), m, func(context.Context, string, ...string) ([]byte, error) {
-		return []byte("compile error"), os.ErrNotExist
+		return []byte("compile error"), exec.ErrNotFound
 	})
 	if err == nil || result.Passed {
 		t.Fatalf("failed sandbox run must fail closed: evidence=%#v error=%v", result, err)
