@@ -230,3 +230,94 @@ def test_genesis_registry_request_bypasses_environment_proxies(monkeypatch):
     assert result == {"tools": []}
     assert observed["kwargs"]["headers"]["X-Genesis-Token"] == "test-token"
     assert observed["kwargs"]["proxies"] == {"http": "", "https": ""}
+
+
+def _signed_registry_item(manifest: dict, *, signature_valid: bool = True) -> dict:
+    item = _active_item(manifest)
+    item["risk_tier"] = manifest["risk_tier"]
+    item["signature"] = "ed25519:" + ("b" * 128 if signature_valid else "not-a-signature")
+    item["sandbox_evidence"] = {"passed": True, "isolation_level": "test-only"}
+    return item
+
+
+def test_manifest_contract_rejects_schemas_and_types_not_supported_by_runtime():
+    import copy
+
+    valid = _manifest()
+    assert tool_registry._valid_manifest_shape(valid)
+
+    bad_input = copy.deepcopy(valid)
+    bad_input["input_schema"] = {
+        "type": "object",
+        "properties": {"arbitrary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    assert not tool_registry._valid_manifest_shape(bad_input)
+
+    bad_output = copy.deepcopy(valid)
+    bad_output["output_schema"] = {"type": "object", "properties": {}, "additionalProperties": False}
+    assert not tool_registry._valid_manifest_shape(bad_output)
+
+    bool_tier = copy.deepcopy(valid)
+    bool_tier["risk_tier"] = False
+    assert not tool_registry._valid_manifest_shape(bool_tier)
+
+    non_boolean_permission = copy.deepcopy(valid)
+    non_boolean_permission["permissions"]["network"] = "false"
+    assert not tool_registry._valid_manifest_shape(non_boolean_permission)
+
+
+def test_active_tool_listing_requires_matching_signed_identity_and_passed_evidence(monkeypatch):
+    good_manifest = _manifest()
+    good = _signed_registry_item(good_manifest)
+    bad_signature = _signed_registry_item(_manifest(), signature_valid=False)
+    bad_hash = _signed_registry_item(_manifest())
+    bad_hash["artifact_hash"] = "../not-a-hash"
+    bad_evidence = _signed_registry_item(_manifest())
+    bad_evidence["sandbox_evidence"]["passed"] = False
+    wrong_identity = _signed_registry_item(_manifest())
+    wrong_identity["version"] = "2.0.0"
+
+    monkeypatch.setattr(
+        tool_registry,
+        "_request",
+        lambda path, **kwargs: {
+            "tools": [good, bad_signature, bad_hash, bad_evidence, wrong_identity]
+        },
+    )
+    result = tool_registry.list_active_tools()
+    assert result == [good]
+
+
+def test_tier0_activation_does_not_require_owner_secret(monkeypatch):
+    monkeypatch.delenv("GENESIS_OWNER_APPROVAL_TOKEN", raising=False)
+    observed = {}
+
+    def fake_request(path, *, method="GET", payload=None, extra_headers=None, timeout=8.0):
+        observed.update(path=path, method=method, payload=payload, headers=extra_headers, timeout=timeout)
+        return {"status": "activated"}
+
+    monkeypatch.setattr(tool_registry, "_request", fake_request)
+    result = tool_registry.activate_signed_tool(
+        "safe_tool", "1.0.0", "a" * 64, owner_approval_required=False
+    )
+    assert result["status"] == "activated"
+    assert observed["method"] == "POST"
+    assert observed["payload"] == {}
+    assert observed["headers"] == {}
+
+
+def test_invalid_version_is_rejected_before_execution_network_call(monkeypatch):
+    monkeypatch.setattr(
+        tool_registry,
+        "_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network must not be called")),
+    )
+    try:
+        tool_registry.execute_active_tool(
+            "safe_tool", "../1.0.0", "a" * 64, {"action": "plan"}
+        )
+    except tool_registry.GenesisToolRegistryError as exc:
+        assert exc.code == "invalid_tool_version"
+    else:
+        raise AssertionError("malformed tool version must be rejected before networking")
