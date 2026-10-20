@@ -192,6 +192,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 
 @app.on_event("startup")
+def validate_gemini_models_on_startup() -> None:
+    """Log provider model availability without making optional upstream outages fatal."""
+    try:
+        from ai.ai_client import validate_gemini_models
+        validate_gemini_models()
+    except Exception as exc:
+        logger.warning("Gemini model validation skipped: %s", type(exc).__name__)
+
+
+@app.on_event("startup")
 def enforce_uncopyable_startup() -> None:
     """Enforce owner recipe trust when the deployment explicitly enables strict mode."""
     if __import__("os").getenv("REVELA_UNCOPYABLE_ENFORCE", "").strip().lower() not in {"1", "true", "yes"}:
