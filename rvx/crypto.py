@@ -120,7 +120,8 @@ def _dialect_generation(root_key: bytes, day: str) -> str:
     if not path.is_file():
         return day
     try:
-        document = json.loads(open_blob(path.read_bytes(), root_key))
+        dialect_root = load_master_key()
+        document = json.loads(open_blob(path.read_bytes(), dialect_root))
     except (OSError, ValueError, RecipeError) as exc:
         raise RecipeError("RVX dialect artifact is missing, corrupt, or cannot be authenticated.") from exc
     if document.get("day") != day:
