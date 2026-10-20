@@ -1081,21 +1081,5 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func validResourceName(name string) bool {
-	if name == "" ||
-		len(name) > 64 ||
-		name == "." ||
-		name == ".." {
-		return false
-	}
-
-	for _, r := range name {
-		if !(r >= 'a' && r <= 'z' ||
-			r >= '0' && r <= '9' ||
-			r == '_' ||
-			r == '-') {
-			return false
-		}
-	}
-
-	return true
+	return toolManifestNamePattern.MatchString(name)
 }
