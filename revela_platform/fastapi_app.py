@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.wsgi import WSGIMiddleware
 
 from core_billing.licensing import LicenseError, create_license_token, verify_license_token
@@ -62,6 +63,33 @@ app = FastAPI(
     description="Python-native billing, signed licensing, usage metering, marketplace and encrypted RVX integrations.",
     docs_url="/v1/platform/docs",
     openapi_url="/v1/platform/openapi.json",
+)
+
+# Keep browser clients on the trusted RevelaCode production domains working
+# regardless of whether requests reach this native billing gateway or asgi:app.
+# Explicit origins are used with credentials; never use "*" here.
+_DEFAULT_CORS_ORIGINS = (
+    "https://revelacode.co.ke",
+    "https://www.revelacode.co.ke",
+    "https://revelacode-frontend.onrender.com",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
+_configured_cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
+_CORS_ORIGINS = list(dict.fromkeys(
+    origin.strip().rstrip("/")
+    for origin in (*_DEFAULT_CORS_ORIGINS, *_configured_cors_origins)
+    if origin.strip()
+))
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization", "Content-Type", "userId", "X-User-ID",
+        "X-Session-ID", "X-Request-ID", "Accept", "Origin",
+    ],
 )
 
 
