@@ -5,6 +5,8 @@ on:
     paths:
       - "core-zero/**"
       - "routes/usect_zero_routes.py"
+      - "fastapi_routes/usect_zero.py"
+      - "requirements.txt"
       - "services/usect_zero_client.py"
       - "ai/usect_zero_tools.py"
       - "services/ai_service.py"
@@ -54,6 +56,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install adapter test dependencies
-        run: python -m pip install "Flask>=2.3,<4" "requests>=2.31" "python-dotenv>=1.0" "pytest>=8,<9"
+        run: python -m pip install -r requirements.txt
       - name: Run adapter and brain-tool tests
         run: python -m pytest -q tests/test_usect_zero_backend.py tests/test_usect_zero_brain_tool.py
