@@ -62,13 +62,23 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		items, err := s.listEvolutions(); if err != nil { writeAPIError(w, 503, "evolutions_unavailable", err.Error()); return }; writeJSON(w, 200, map[string]any{"status": "ok", "evolutions": items, "count": len(items)})
 	case strings.HasPrefix(r.URL.Path, "/v1/mind/tools/") && strings.HasSuffix(r.URL.Path, "/improvement") && r.Method == http.MethodGet:
 		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/mind/tools/"), "/improvement")
-		if !validName(name) { writeAPIError(w, 400, "invalid_tool_name", "Invalid tool name."); return }
-		raw, err := os.ReadFile(filepath.Join(s.CoreRoot, "metrics", name+".json")); if err != nil { writeAPIError(w, 404, "metrics_not_found", "No improvement record exists for this name."); return }
-		var detail map[string]any
-		if err := json.Unmarshal(raw, &detail); err != nil || detail == nil { writeAPIError(w, 503, "metrics_invalid", "The stored improvement record is invalid."); return }
+		if !validName(name) || !safeMindToolName(name) { writeAPIError(w, 400, "invalid_tool_name", "Invalid tool name."); return }
 		snapshot := s.ToolTelemetrySnapshot()
 		versions := []ToolVersionMetrics{}
 		if all, ok := snapshot["tools"].(map[string][]ToolVersionMetrics); ok { versions = all[name] }
+		raw, readErr := readMindFileWithinRoot(s.CoreRoot, filepath.Join("metrics", name+".json"), maxEvidenceBytes)
+		var detail map[string]any
+		if readErr == nil {
+			if err := json.Unmarshal(raw, &detail); err != nil || detail == nil { writeAPIError(w, 503, "metrics_invalid", "The stored improvement record is invalid."); return }
+		} else if os.IsNotExist(readErr) && len(versions) > 0 {
+			detail = map[string]any{"tool_name": name, "status": "observed", "provenance": "recorded_tool_runner_events"}
+		} else if snapshot["status"] == "unavailable" {
+			writeAPIError(w, 503, "telemetry_unavailable", "Recorded tool telemetry is unavailable or invalid."); return
+		} else if os.IsNotExist(readErr) {
+			writeAPIError(w, 404, "metrics_not_found", "No improvement or telemetry record exists for this name."); return
+		} else {
+			writeAPIError(w, 503, "metrics_unavailable", "The stored improvement record is unavailable or unsafe."); return
+		}
 		detail["tool_telemetry"] = map[string]any{"status": snapshot["status"], "versions": versions, "provenance": "recorded_tool_runner_events"}
 		detail["synthetic_fixture"] = false
 		detail["production_verified"] = false
