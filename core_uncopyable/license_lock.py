@@ -38,10 +38,12 @@ def require_entitlement(
         token,
         hardware_fingerprint=hardware_fingerprint,
         factory_id=factory_id,
-        entitlement=entitlement,
     )
     if entitlement in ENTERPRISE_ENTITLEMENTS and claims.get("plan") != "enterprise":
         raise EntitlementError(f"Enterprise plan required for {entitlement}.")
+    granted = claims.get("entitlements")
+    if not isinstance(granted, list) or entitlement not in granted:
+        raise EntitlementError(f"License does not grant the {entitlement} entitlement.")
     return claims
 
 
