@@ -76,8 +76,8 @@ services:
     name: genesis-core-one
     runtime: go
     plan: starter
-    buildCommand: go -C core-one build -o ./genesis ./cmd/genesis
-    startCommand: ./core-one/genesis -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
+    buildCommand: go -C core-one build -o ./genesis-server ./cmd/genesis
+    startCommand: ./core-one/genesis-server -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
     envVars:
       - key: GENESIS_ADMIN_TOKEN
         generateValue: true
