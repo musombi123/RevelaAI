@@ -42,13 +42,37 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var feedback LearningFeedback
 		if err := decodeJSON(w, r, &feedback); err != nil { writeAPIError(w, 400, "invalid_json", err.Error()); return }
 		summary, err := s.RecordFeedback(feedback); if err != nil { writeAPIError(w, 422, "feedback_rejected", err.Error()); return }; writeJSON(w, 201, summary)
+	case r.URL.Path == "/v1/mind/telemetry/events" && r.Method == http.MethodPost:
+		if !s.allowMutation(w, r) { return }
+		var event ToolTelemetryEvent
+		if err := decodeStrictAPIJSON(w, r, &event); err != nil { writeAPIError(w, 400, "invalid_telemetry", "Telemetry must contain only the declared operational fields."); return }
+		if err := s.RecordToolTelemetry(event); err != nil { writeAPIError(w, 422, "telemetry_rejected", err.Error()); return }
+		writeJSON(w, 201, map[string]any{"status": "recorded", "tool_name": event.ToolName, "version_hash": event.VersionHash, "user_content_recorded": false, "synthetic_fixture": false})
+	case r.URL.Path == "/v1/mind/candidates" && r.Method == http.MethodPost:
+		if !s.allowMutation(w, r) { return }
+		var candidate FoundryCandidate
+		if err := decodeStrictAPIJSON(w, r, &candidate); err != nil { writeAPIError(w, 400, "invalid_candidate", "Candidate must contain only the declared metadata fields."); return }
+		result, err := s.ScoreFoundryCandidate(r.Context(), candidate, CoreOneFoundrySource{})
+		if err != nil {
+			if errors.Is(err, ErrGuardianBlocked) { writeAPIError(w, 403, "guardian_blocked", "Mind or Core-One Guardian blocked this candidate before scoring."); return }
+			writeAPIError(w, 422, "candidate_rejected", err.Error()); return
+		}
+		writeJSON(w, 200, result)
 	case r.URL.Path == "/v1/mind/evolutions" && r.Method == http.MethodGet:
 		items, err := s.listEvolutions(); if err != nil { writeAPIError(w, 503, "evolutions_unavailable", err.Error()); return }; writeJSON(w, 200, map[string]any{"status": "ok", "evolutions": items, "count": len(items)})
 	case strings.HasPrefix(r.URL.Path, "/v1/mind/tools/") && strings.HasSuffix(r.URL.Path, "/improvement") && r.Method == http.MethodGet:
 		name := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/mind/tools/"), "/improvement")
 		if !validName(name) { writeAPIError(w, 400, "invalid_tool_name", "Invalid tool name."); return }
 		raw, err := os.ReadFile(filepath.Join(s.CoreRoot, "metrics", name+".json")); if err != nil { writeAPIError(w, 404, "metrics_not_found", "No improvement record exists for this name."); return }
-		w.Header().Set("Content-Type", "application/json; charset=utf-8"); w.WriteHeader(200); _, _ = w.Write(raw)
+		var detail map[string]any
+		if err := json.Unmarshal(raw, &detail); err != nil || detail == nil { writeAPIError(w, 503, "metrics_invalid", "The stored improvement record is invalid."); return }
+		snapshot := s.ToolTelemetrySnapshot()
+		versions := []ToolVersionMetrics{}
+		if all, ok := snapshot["tools"].(map[string][]ToolVersionMetrics); ok { versions = all[name] }
+		detail["tool_telemetry"] = map[string]any{"status": snapshot["status"], "versions": versions, "provenance": "recorded_tool_runner_events"}
+		detail["synthetic_fixture"] = false
+		detail["production_verified"] = false
+		writeJSON(w, 200, detail)
 	case r.URL.Path == "/v1/mind/key" && r.Method == http.MethodGet:
 		mesh := provider.FromEnvironment(); writeJSON(w, 200, map[string]any{"status": "request_required", "provider_url_configured": mesh.BaseURL != "", "provider_key_configured": mesh.Key != "", "credential_env_names": []string{"REVELACODE_PROVIDER_URL", "REVELACODE_PROVIDER_KEY"}, "same_credentials_as_core_one": true, "secret_disclosed": false})
 	case r.URL.Path == "/v1/mind/key" && r.Method == http.MethodPost:
@@ -130,3 +154,17 @@ func (s *Service) publish(event string,data map[string]any){s.mu.Lock();defer s.
 
 func(s *Service)readMirrorSnapshot()any{raw,err:=os.ReadFile(filepath.Join(s.CoreRoot,"metrics","mirror.json"));if err!=nil{return map[string]any{"status":"not_observed_yet"}};var value any;if json.Unmarshal(raw,&value)!=nil{return map[string]any{"status":"invalid_saved_snapshot"}};return value}
 func(s *Service)learningSummarySnapshot()any{value,err:=s.learningSummary();if err!=nil{return map[string]any{"status":"unavailable"}};return value}
+
+
+func decodeStrictAPIJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil { return err }
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil { return errors.New("multiple JSON values are not allowed") }
+		return err
+	}
+	return nil
+}
