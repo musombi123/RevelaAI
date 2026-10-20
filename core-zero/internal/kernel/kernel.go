@@ -65,12 +65,14 @@ type ScanEvidence struct {
 }
 
 type AuditEvent struct {
-	At      time.Time      `json:"at"`
-	Action  string         `json:"action"`
-	Actor   string         `json:"actor"`
-	Subject string         `json:"subject,omitempty"`
-	Outcome string         `json:"outcome"`
-	Details map[string]any `json:"details,omitempty"`
+	At           time.Time      `json:"at"`
+	Action       string         `json:"action"`
+	Actor        string         `json:"actor"`
+	Subject      string         `json:"subject,omitempty"`
+	Outcome      string         `json:"outcome"`
+	Details      map[string]any `json:"details,omitempty"`
+	PreviousHash string         `json:"previous_hash,omitempty"`
+	Hash         string         `json:"hash,omitempty"`
 }
 
 type Kernel struct {
@@ -777,6 +779,9 @@ func (k *Kernel) Audit(
 		return errors.New("kernel is not initialized")
 	}
 
+	k.mu.Lock()
+	defer k.mu.Unlock()
+
 	event := AuditEvent{
 		At:      time.Now().UTC(),
 		Action:  action,
@@ -785,6 +790,12 @@ func (k *Kernel) Audit(
 		Outcome: outcome,
 		Details: details,
 	}
+	previousHash, err := k.auditChainHeadLocked()
+	if err != nil {
+		return fmt.Errorf("refuse to append to an unverifiable audit log: %w", err)
+	}
+	event.PreviousHash = previousHash
+	event.Hash = auditEventHash(event)
 
 	line, err := json.Marshal(event)
 	if err != nil {
@@ -795,26 +806,18 @@ func (k *Kernel) Audit(
 	}
 	line = append(line, '\n')
 
-	k.mu.Lock()
-	defer k.mu.Unlock()
-
 	path, err := k.coreFilePath("audit_log/events.jsonl", true)
 	if err != nil {
 		return err
 	}
 
-	f, err := os.OpenFile(
-		path,
-		os.O_CREATE|os.O_APPEND|os.O_WRONLY,
-		0600,
-	)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("open audit log: %w", err)
 	}
 
 	openedInfo, statErr := f.Stat()
 	pathInfo, pathErr := os.Lstat(path)
-
 	if statErr != nil || pathErr != nil ||
 		!openedInfo.Mode().IsRegular() ||
 		pathInfo.Mode()&os.ModeSymlink != 0 ||
@@ -822,7 +825,6 @@ func (k *Kernel) Audit(
 		_ = f.Close()
 		return errors.New("audit log changed or is not a safe regular file")
 	}
-
 	if err := f.Chmod(0600); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("secure audit log permissions: %w", err)
@@ -837,16 +839,13 @@ func (k *Kernel) Audit(
 		_ = f.Close()
 		return io.ErrShortWrite
 	}
-
 	if err := f.Sync(); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("sync audit log: %w", err)
 	}
-
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close audit log: %w", err)
 	}
-
 	return nil
 }
 
