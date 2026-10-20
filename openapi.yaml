@@ -823,6 +823,29 @@ paths:
         '201': {description: Blueprint; physical actuation remains disabled}
         '402': {description: Enterprise entitlement required}
 
+
+  /v1/uncopyable/rotate-dialect:
+    post:
+      operationId: rotateUncopyableRvxDialect
+      summary: Immediately rotate the authenticated RVX dialect
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, minLength: 3, maxLength: 80, default: scheduled_rotation}
+      responses:
+        '200': {description: Dialect rotated; packets from the previous generation are rejected}
+        '401': {description: Invalid administrator token}
+        '503': {description: Recipe unavailable or rotation failed}
+
 components:
   securitySchemes:
     RevelaCodeBearer:
