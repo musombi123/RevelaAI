@@ -21,6 +21,18 @@ tags:
   - name: bridge
   - name: mind
 paths:
+  /v1/audit/verify:
+    get:
+      tags: [system]
+      operationId: verifyAuditChain
+      summary: Verify append-only audit hash-chain integrity
+      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
+      security: [{AdminToken: []}]
+      responses:
+        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Audit-chain tampering or broken hash links detected.}
+        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/health:
     get:
       tags: [system]
