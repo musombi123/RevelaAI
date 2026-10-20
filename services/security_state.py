@@ -1,11 +1,12 @@
-"""Process-local security state shared by native FastAPI middleware and SCI controls."""
+"""Process-local security state owned by the native ASGI application."""
 from __future__ import annotations
 
 from collections import deque
 from threading import Lock
 
-from revelai.sci_core.disaster_manager import THROTTLE as SCI_THROTTLE
-
+# Shared object imported by the FastAPI middleware and the disaster simulation.
+# Keep this module dependency-free to avoid importing legacy route frameworks.
+SCI_THROTTLE = {"enabled": False, "reason": None, "since": None}
 SCI_REQUEST_TIMES: deque[float] = deque()
 SCI_RATE_LOCK = Lock()
 
