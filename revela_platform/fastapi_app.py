@@ -1,7 +1,7 @@
-"""FastAPI revenue gateway with the existing Flask API mounted as a fallback.
+"""Native FastAPI revenue gateway for licenses, usage, marketplace and platform tools.
 
-Registered published tool routes are license-gated before Flask dispatch. The
-existing Flask app and ZERO/ONE/TWO Go services are not rewritten.
+Published tools are license-gated before dispatch. RevelaAI is mounted as a native
+FastAPI subapplication; no Flask or WSGI runtime is used.
 """
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from starlette.middleware.wsgi import WSGIMiddleware
 
 from core_billing.licensing import LicenseError, create_license_token, verify_license_token
 from core_billing.payments import (
@@ -947,19 +946,8 @@ def list_audit_events(limit: int = Query(default=50, ge=1, le=250),
 
 
 # Tool licensing guard for registered tool routes and unknown single-segment /v1 paths.
-# Known static legacy Flask routes are preserved. Tool-like dynamic routes fail closed.
-def _legacy_static_route_exists(path: str, method: str) -> bool:
-    from werkzeug.exceptions import HTTPException as WerkzeugHTTPException
-
-    try:
-        rule, _values = flask_app.url_map.bind("localhost").match(
-            path, method=method, return_rule=True
-        )
-    except WerkzeugHTTPException:
-        return False
-    return "<" not in rule.rule
-
-
+# Explicit FastAPI routes are allowed to reach their own handlers. The dynamic
+# /v1/{tool_id} handler validates publication and authorization before dispatch.
 def _record_usage_safely(*, user_id: str, tool_id: str, country: str,
                          latency_ms: float, success: bool, cost_saved_usd: float = 0.0) -> None:
     import logging
@@ -997,12 +985,7 @@ async def licensed_tool_guard(request: Request, call_next):
         return JSONResponse(status_code=503, content={"error": "License registry unavailable; tool calls fail closed."})
 
     if tracked_tool is None:
-        if _legacy_static_route_exists(path, method):
-            return await call_next(request)
-        return JSONResponse(
-            status_code=404,
-            content={"error": "Tool route is not registered or published in RevelaCode."},
-        )
+        return await call_next(request)
 
     try:
         identity = str(_claims_from_bearer(request.headers.get("Authorization"))["sub"])
@@ -1064,9 +1047,8 @@ async def licensed_tool_guard(request: Request, call_next):
     return response
 
 
-# Preserve all existing Flask endpoints. FastAPI routers/docs above this mount win
-# route priority; unresolved routes are passed to the original Flask WSGI app.
-from app import app as flask_app  # noqa: E402
+# Mount the native ASGI API. No WSGI or Flask compatibility bridge is permitted.
+from asgi import app as revelaai_app  # noqa: E402
 from mesh.rvx_mesh import MeshCallError, rvx_call  # noqa: E402
 
 
@@ -1129,4 +1111,4 @@ async def invoke_licensed_tool(
     }
 
 
-app.mount("/", WSGIMiddleware(flask_app), name="existing-flask-gateway")
+app.mount("/", revelaai_app, name="revelaai-native-gateway")
