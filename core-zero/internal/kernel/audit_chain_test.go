@@ -73,3 +73,11 @@ func TestAuditLegacyPrefixIsNotClaimedVerified(t *testing.T) {
 		t.Fatalf("legacy prefix was misreported: %+v", report)
 	}
 }
+
+
+func TestAuditVerifierRejectsIncompleteTrailingRecord(t *testing.T) {
+	report := verifyAuditBytes([]byte(`{"action":"incomplete"}`))
+	if report.ChainValid || report.Verified || report.Status != "invalid" {
+		t.Fatalf("incomplete audit record was accepted: %+v", report)
+	}
+}
