@@ -75,6 +75,7 @@ func TestTelemetryEndpointAcceptsAuthenticatedMetadataOnly(t *testing.T) {
 		ErrorClass: "timeout",
 		Timestamp: time.Now().UTC(),
 		SampleKind: "runtime",
+		EvidenceOrigin: "synthetic_fixture",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil { t.Fatal(err) }
