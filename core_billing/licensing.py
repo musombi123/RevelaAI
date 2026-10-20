@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -68,7 +69,9 @@ def load_public_key() -> Ed25519PublicKey:
 
 def create_license_token(*, user_id: str, plan_id: str, country: str,
                          expires_at: datetime | None = None,
-                         license_id: str | None = None) -> tuple[str, dict[str, Any]]:
+                         license_id: str | None = None,
+                         hardware_fingerprint: str | None = None,
+                         factory_ids: list[str] | None = None) -> tuple[str, dict[str, Any]]:
     plan = get_plan(plan_id)
     now = datetime.now(timezone.utc)
     expiry = expires_at or (now + timedelta(days=30))
@@ -95,13 +98,26 @@ def create_license_token(*, user_id: str, plan_id: str, country: str,
         "exp": int(expiry.timestamp()),
         # Offline runtime is deliberately bounded even when the plan is longer-lived.
         "offline_until": int(min(expiry, now + timedelta(days=30)).timestamp()),
+        "entitlements": (
+            ["factory_build", "seed_create", "evolve", "migrate", "robot_build", "dna_restore",
+             "marketplace_publish", "private_rvx_dialect"]
+            if plan.id == "enterprise" else
+            ["marketplace_publish"] if plan.id == "pro" else []
+        ),
     }
+    if hardware_fingerprint:
+        claims["hardware_fingerprint"] = hardware_fingerprint
+    if factory_ids is not None:
+        claims["factory_ids"] = sorted({str(value).strip() for value in factory_ids if str(value).strip()})
     token = jwt.encode(claims, load_private_key(), algorithm="EdDSA", headers={"kid": "revela-license-v1"})
     return token, claims
 
 
 def verify_license_token(token: str, *, tool_id: str | None = None,
-                         now: datetime | None = None) -> dict[str, Any]:
+                         now: datetime | None = None,
+                         hardware_fingerprint: str | None = None,
+                         factory_id: str | None = None,
+                         entitlement: str | None = None) -> dict[str, Any]:
     if not token or not token.strip():
         raise LicenseError("Need RevelaCode Provider + Valid License.")
     try:
@@ -133,4 +149,16 @@ def verify_license_token(token: str, *, tool_id: str | None = None,
         raise LicenseError("License references an unsupported plan.") from exc
     if tool_id and claims.get("tool_ids") is not None and tool_id not in claims["tool_ids"]:
         raise LicenseError("License does not cover this tool.")
+    if hardware_fingerprint:
+        expected_fingerprint = claims.get("hardware_fingerprint")
+        if not isinstance(expected_fingerprint, str) or not hmac.compare_digest(expected_fingerprint, hardware_fingerprint):
+            raise LicenseError("Hardware fingerprint mismatch. Device is not licensed.")
+    if factory_id:
+        allowed_factories = claims.get("factory_ids")
+        if not isinstance(allowed_factories, list) or factory_id not in allowed_factories:
+            raise LicenseError("License does not cover this factory.")
+    if entitlement:
+        entitlements = claims.get("entitlements")
+        if not isinstance(entitlements, list) or entitlement not in entitlements:
+            raise LicenseError(f"License does not grant the {entitlement} entitlement.")
     return claims
