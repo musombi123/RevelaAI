@@ -1529,6 +1529,34 @@ def _request_gemini(
             error_code="gemini_invalid_response",
         )
 
+    # Some thinking models can consume the output budget before emitting text.
+    # Retry once with a larger bounded budget only for MAX_TOKENS + empty output.
+    candidates = data.get("candidates", [])
+    if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+        candidate = candidates[0]
+        parts = candidate.get("content", {}).get("parts", [])
+        has_text = any(isinstance(part, dict) and str(part.get("text") or "").strip() for part in parts)
+        if candidate.get("finishReason") == "MAX_TOKENS" and not has_text:
+            generation = payload["generationConfig"]
+            current_tokens = int(generation.get("maxOutputTokens") or GEMINI_MAX_OUTPUT_TOKENS)
+            if current_tokens < 65536:
+                generation["maxOutputTokens"] = min(current_tokens * 2, 65536)
+                try:
+                    retry = requests.post(
+                        url, headers=headers, json=payload,
+                        timeout=(GEMINI_CONNECT_TIMEOUT, GEMINI_READ_TIMEOUT),
+                    )
+                    if retry.ok:
+                        retry_data = retry.json()
+                        if isinstance(retry_data, dict):
+                            data = retry_data
+                    else:
+                        print("GEMINI output-budget retry failed | "
+                              f"status={retry.status_code} | model={model}")
+                except (requests.RequestException, ValueError) as retry_exc:
+                    print("GEMINI output-budget retry failed | "
+                          f"error_type={type(retry_exc).__name__} | model={model}")
+
     return data
 
 
