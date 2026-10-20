@@ -112,6 +112,9 @@ func (a *ESP32USBAdapter) Read(deviceID, token string) ([]byte, error) {
 	if a.port == nil || a.device.ID != deviceID {
 		return nil, errors.New("device is not connected")
 	}
+	if _, err := a.registry.Authorize(deviceID, token, "device:read", 0); err != nil {
+		return nil, err
+	}
 	if err := writeDeviceFrame(a.port, map[string]any{"op": "status"}); err != nil {
 		return nil, err
 	}
