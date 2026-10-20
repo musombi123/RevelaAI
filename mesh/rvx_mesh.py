@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 from rvx.crypto import RecipeError, open_packet, seal_packet
+from core_billing.licensing import LicenseError, verify_license_token
+from core_uncopyable.license_lock import require_entitlement
 
 
 class MeshCallError(RuntimeError):
@@ -43,8 +45,36 @@ def _validate_url(url: str) -> None:
     raise MeshCallError("RVX mesh requires HTTPS except for loopback or internal single-label service names.")
 
 
+def _verify_mesh_license(route: str) -> None:
+    """In hardened deployments, every mesh call verifies a signed runtime license."""
+    hardened = os.getenv("REVELA_MESH_REQUIRE_LICENSE", os.getenv("REVELA_UNCOPYABLE_ENFORCE", "false")).strip().lower()
+    if hardened not in {"1", "true", "yes", "on"}:
+        return
+    token = os.getenv("REVELA_MESH_LICENSE_TOKEN", "").strip()
+    if not token:
+        raise MeshCallError("RVX mesh license is required; no call was sent.")
+    try:
+        entitlement = None
+        route_lower = route.lower()
+        if any(part in route_lower for part in ("factory", "foundry")):
+            entitlement = "factory_build"
+        elif "seed" in route_lower:
+            entitlement = "seed_create"
+        elif "evolve" in route_lower:
+            entitlement = "evolve"
+        elif "migrate" in route_lower or "robot" in route_lower:
+            entitlement = "migrate"
+        if entitlement:
+            require_entitlement(token, entitlement)
+        else:
+            verify_license_token(token)
+    except LicenseError as exc:
+        raise MeshCallError("RVX mesh license signature, expiry, or entitlement verification failed.") from exc
+
+
 def rvx_call(route: str, packet: Any, *, timeout: float = 8.0) -> Any:
     """Send one encrypted request to an explicitly configured mesh route."""
+    _verify_mesh_license(route)
     routes = _routes()
     destination = routes.get(route)
     if not destination:
