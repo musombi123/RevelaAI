@@ -2,6 +2,7 @@ package genesis
 
 import (
 	"context"
+	"encoding/base64"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
