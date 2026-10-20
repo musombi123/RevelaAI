@@ -20,6 +20,9 @@ func TestSandboxRequestsIsolationAndStripsEnvironment(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(candidate, "code.go"), []byte("package candidate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(candidate, "test.go"), []byte("package candidate\nimport \"testing\"\nfunc TestCandidate(t *testing.T) {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	m := validManifestForTest()
 	var seen []string
 	runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -70,6 +73,12 @@ func TestSandboxFailureCannotPassCandidate(t *testing.T) {
 	root := t.TempDir()
 	candidate := filepath.Join(root, "candidate")
 	if err := os.Mkdir(candidate, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(candidate, "code.go"), []byte("package candidate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(candidate, "test.go"), []byte("package candidate\nimport \"testing\"\nfunc TestCandidate(t *testing.T) {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	m := validManifestForTest()
