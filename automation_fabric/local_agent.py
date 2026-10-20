@@ -1,7 +1,8 @@
-"""Loopback-only companion agent for executing approved tasks on the installed device.
+"""Loopback-only FastAPI companion agent for approved local Automation Fabric tasks.
 
 Run with: python -m automation_fabric.local_agent
-The server binds to 127.0.0.1 only. Never change this to 0.0.0.0.
+The socket binds to 127.0.0.1 only, proxy headers are disabled, and browser
+origins must be explicitly allowlisted.
 """
 from __future__ import annotations
 
@@ -11,16 +12,17 @@ import os
 import secrets
 from pathlib import Path
 
-from flask import Flask, jsonify, make_response, request
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, Response
+import uvicorn
+
+from automation_fabric.http import create_automation_router
+from automation_fabric.store import default_db_path
 
 _CONFIG_DIR = Path.home() / ".revelaai"
 _CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 os.environ.setdefault("REVELAAI_AUTOMATION_DB", str(_CONFIG_DIR / "automation-fabric.sqlite3"))
 os.environ.setdefault("REVELAAI_AUTOMATION_WORKSPACE", str(Path.home() / "RevelaAIWorkspace"))
-
-from automation_fabric.http import create_automation_blueprint
-from automation_fabric.store import default_db_path
-
 
 TOKEN_PATH = _CONFIG_DIR / "automation-fabric.token"
 
@@ -47,58 +49,96 @@ def _allowed_origins() -> set[str]:
     }
 
 
-def create_local_app(token: str | None = None) -> Flask:
-    expected_token = token or _load_or_create_token()[0]
-    app = Flask("revelaai_automation_local_agent")
-    workspace_root = Path(os.environ["REVELAAI_AUTOMATION_WORKSPACE"]).expanduser().resolve()
-    workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+def _is_loopback(request: Request) -> bool:
+    # Uvicorn runs with proxy_headers=False so this is the connected peer address,
+    # not user-controlled X-Forwarded-For / X-Real-IP metadata.
+    host = request.client.host if request.client else ""
+    return host in {"127.0.0.1", "::1"}
 
-    def authenticate_local():
-        # Flask's remote_addr reflects the connected peer, not X-Forwarded-For.
-        if request.remote_addr not in {"127.0.0.1", "::1"}:
-            return None, (jsonify(status="error", code="loopback_only"), 403)
+
+def create_local_app(token: str | None = None) -> FastAPI:
+    expected_token = token or _load_or_create_token()[0]
+    app = FastAPI(
+        title="RevelaAI Automation Fabric Local Agent",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
+    workspace_root = Path(
+        os.environ["REVELAAI_AUTOMATION_WORKSPACE"]
+    ).expanduser().resolve()
+    workspace_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        workspace_root.chmod(0o700)
+    except OSError:
+        pass
+
+    def authenticate_local(request: Request):
         authorization = request.headers.get("Authorization", "")
         provided = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
         if not provided or not hmac.compare_digest(provided, expected_token):
-            return None, (jsonify(status="error", code="local_token_required"), 401)
+            return None, JSONResponse(
+                {"status": "error", "code": "local_token_required"},
+                status_code=401,
+            )
         return "local-device", None
 
     def workspace_for_local_user(_principal: str) -> Path:
         return workspace_root
 
-    app.register_blueprint(create_automation_blueprint(
-        "automation_fabric_local_bp",
-        auth_resolver=authenticate_local,
-        workspace_resolver=workspace_for_local_user,
-        database_resolver=default_db_path,
-        local_mode=True,
-    ), url_prefix="/api/v1")
+    app.include_router(
+        create_automation_router(
+            "automation_fabric_local",
+            auth_resolver=authenticate_local,
+            workspace_resolver=workspace_for_local_user,
+            database_resolver=default_db_path,
+            local_mode=True,
+            prefix="/api/v1",
+        )
+    )
 
-    @app.before_request
-    def enforce_origin_and_auth_boundary():
-        if request.remote_addr not in {"127.0.0.1", "::1"}:
-            return jsonify(status="error", code="loopback_only"), 403
-        origin = (request.headers.get("Origin") or "").rstrip("/")
+    @app.middleware("http")
+    async def enforce_origin_and_local_peer(request: Request, call_next):
+        if not _is_loopback(request):
+            return JSONResponse(
+                {"status": "error", "code": "loopback_only"},
+                status_code=403,
+            )
+
+        origin = (request.headers.get("Origin") or "").strip().rstrip("/")
         allowed = _allowed_origins()
         if origin and origin not in allowed:
-            return jsonify(status="error", code="origin_not_allowed",
-                           message="Add this exact frontend origin to REVELAAI_AUTOMATION_ALLOWED_ORIGINS to enable browser access."), 403
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "code": "origin_not_allowed",
+                    "message": (
+                        "Add this exact frontend origin to "
+                        "REVELAAI_AUTOMATION_ALLOWED_ORIGINS to enable browser access."
+                    ),
+                },
+                status_code=403,
+            )
+
         if request.method == "OPTIONS":
             if not origin or origin not in allowed:
-                return jsonify(status="error", code="origin_not_allowed"), 403
-            response = make_response("", 204)
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Vary"] = "Origin"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
-            response.headers["Access-Control-Max-Age"] = "300"
-            return response
-        return None
+                return JSONResponse(
+                    {"status": "error", "code": "origin_not_allowed"},
+                    status_code=403,
+                )
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Vary": "Origin",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+                    "Access-Control-Max-Age": "300",
+                },
+            )
 
-    @app.after_request
-    def add_explicit_cors_headers(response):
-        origin = (request.headers.get("Origin") or "").rstrip("/")
-        if origin and origin in _allowed_origins():
+        response = await call_next(request)
+        if origin and origin in allowed:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Vary"] = "Origin"
         return response
@@ -107,13 +147,20 @@ def create_local_app(token: str | None = None) -> Flask:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the loopback-only RevelaAI Automation Fabric agent.")
+    parser = argparse.ArgumentParser(
+        description="Run the loopback-only RevelaAI Automation Fabric local agent."
+    )
     parser.add_argument("--host", default="127.0.0.1", help="Only 127.0.0.1 is permitted.")
     parser.add_argument("--port", type=int, default=38741)
-    parser.add_argument("--show-token", action="store_true", help="Print the local bearer token for deliberate manual setup.")
+    parser.add_argument(
+        "--show-token",
+        action="store_true",
+        help="Print the local bearer token for deliberate manual setup.",
+    )
     args = parser.parse_args()
     if args.host != "127.0.0.1":
         parser.error("For safety, Automation Fabric only binds to 127.0.0.1.")
+
     token, created = _load_or_create_token()
     print("RevelaAI Automation Fabric local agent")
     print("Endpoint: http://127.0.0.1:{}/api/v1".format(args.port))
@@ -124,7 +171,13 @@ def main() -> None:
     else:
         print("Token is stored securely; use --show-token only when you need to copy it.")
     print("Safety: loopback-only, no shell execution, no generated-code auto-run.")
-    create_local_app(token).run(host="127.0.0.1", port=args.port, debug=False, use_reloader=False, threaded=True)
+    uvicorn.run(
+        create_local_app(token),
+        host="127.0.0.1",
+        port=args.port,
+        proxy_headers=False,
+        access_log=False,
+    )
 
 
 if __name__ == "__main__":

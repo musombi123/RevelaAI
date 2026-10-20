@@ -3,9 +3,8 @@ DEFENSIVE_ONLY = True
 import os, json, time
 from datetime import datetime, timezone
 from pathlib import Path
-from flask import jsonify, request
 from .storage import collection
-THROTTLE = {"enabled":False,"reason":None,"since":None}
+from services.security_state import SCI_THROTTLE as THROTTLE
 CACHE_PATH = Path(os.getenv("REVELAAI_LOCAL_CACHE_PATH","/tmp/revelai_cache.json"))
 def simulate(kind):
     if kind not in {"db_down","api_overload","memory_leak"}: raise ValueError("unsupported disaster type")
@@ -40,11 +39,3 @@ def simulate(kind):
     record={"type":kind,"detectedAt":datetime.now(timezone.utc).isoformat(),"actionTaken":action,"recovered":recovered,"details":details,"defensive_only":True}
     collection("disasters").insert_one(record.copy())
     return record
-def register_routes(bp):
-    @bp.post("/disaster/simulate")
-    def disaster():
-        body=request.get_json(silent=True) or {}
-        try: result=simulate(str(body.get("type") or ""))
-        except ValueError as exc: return jsonify({"error":str(exc)}),400
-        except Exception: return jsonify({"error":"Disaster simulation could not be persisted"}),503
-        return jsonify(result)

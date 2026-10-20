@@ -4,14 +4,19 @@ import re
 from datetime import datetime, timezone
 from xml.etree import ElementTree
 import requests
-from flask import jsonify, request
+
+
+class ResearchForbiddenError(PermissionError):
+    """Defensive research policy denial represented without a web framework."""
+
+    code = 403
+
 
 BLOCKLIST = ["how to hack", "ddos", "create virus to attack", "bypass paywall", "hack into", "make weapon", "build a weapon", "bioweapon", "ransomware", "reverse shell"]
 def is_offensive_query(q):
     value = str(q or "").lower()
     if any(term in value for term in BLOCKLIST):
-        from werkzeug.exceptions import Forbidden
-        raise Forbidden("RevelaAI Sci-Core is defensive & civilian research only")
+        raise ResearchForbiddenError("RevelaAI Sci-Core is defensive & civilian research only")
     return False
 
 def _summarize(text, limit=5):
@@ -70,14 +75,3 @@ def run_research(query, topic="general"):
         result["storage_warning"] = "Research could not be persisted; check MongoDB configuration."
     else: result["audit_persisted"] = True
     return result
-
-def register_routes(bp):
-    @bp.post("/research")
-    def research():
-        body = request.get_json(silent=True) or {}
-        query, topic = str(body.get("query") or "").strip(), str(body.get("topic") or "general").strip()[:80]
-        if not query or len(query)>500: return jsonify({"error":"query must be 1–500 characters"}),400
-        try: return jsonify(run_research(query, topic))
-        except Exception as exc:
-            if getattr(exc,"code",None)==403: return jsonify({"error":"RevelaAI Sci-Core is defensive & civilian research only"}),403
-            return jsonify({"error":"Research request could not be completed"}),503

@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install fixed test tooling
-        run: python -m pip install --disable-pip-version-check pytest psutil pymongo flask flask-cors requests Pillow PyJWT python-dotenv
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Check candidate diff formatting
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
