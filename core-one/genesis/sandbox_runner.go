@@ -75,9 +75,33 @@ func candidateBuildScript(language string, timeoutSeconds int, memoryBytes int64
 	if language == "python" {
 		return "set -eu; " + limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
 	}
-	return "set -eu; " + limits + "mkdir -p /tmp/work/toolimpl /tmp/gocache && cp -R /candidate/. /tmp/work/toolimpl/ && chmod -R u+rwX /tmp/work && if [ -f /tmp/work/toolimpl/test.go ]; then mv /tmp/work/toolimpl/test.go /tmp/work/toolimpl/candidate_generated_test.go; fi && printf 'module genesiscandidate\\n\\ngo 1.23\\n' > /tmp/work/go.mod && cat > /tmp/work/main.go <<'GENESIS_MAIN'\npackage main\nimport (\"encoding/json\"; \"os\"; toolimpl \"genesiscandidate/toolimpl\")\nfunc main() { var in struct { Action string; Inputs map[string]string; Consent bool }; if json.NewDecoder(os.Stdin).Decode(&in) != nil { os.Exit(2) }; out, err := (toolimpl.Tool{}).Run(toolimpl.Request{Action: in.Action, Inputs: in.Inputs, Consent: in.Consent}); if err != nil { _ = json.NewEncoder(os.Stdout).Encode(map[string]string{\"status\":\"error\",\"error_class\":\"tool_rejected\"}); os.Exit(3) }; _ = json.NewEncoder(os.Stdout).Encode(map[string]any{\"status\": out.Status, \"tool\": out.Tool, \"summary\": out.Summary, \"created_at\": out.CreatedAt, \"evidence\": out.Evidence}) }\nGENESIS_MAIN\ncd /tmp/work && echo GENESIS_TESTS_BEGIN && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOCACHE=/tmp/gocache go test ./... && echo GENESIS_BUILD_BEGIN && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
+	return strings.Join([]string{
+		"set -eu;",
+		limits,
+		"mkdir -p /tmp/work/toolimpl /tmp/gocache && cp -R /candidate/. /tmp/work/toolimpl/ && chmod -R u+rwX /tmp/work && if [ -f /tmp/work/toolimpl/test.go ]; then mv /tmp/work/toolimpl/test.go /tmp/work/toolimpl/candidate_generated_test.go; fi &&",
+		"cat > /tmp/work/go.mod <<'GENESIS_MOD'",
+		"module genesiscandidate",
+		"",
+		"go 1.23",
+		"GENESIS_MOD",
+		"cat > /tmp/work/main.go <<'GENESIS_MAIN'",
+		"package main",
+		"import (\"encoding/json\"; \"os\"; toolimpl \"genesiscandidate/toolimpl\")",
+		"func main() {",
+		"    var in struct { Action string; Inputs map[string]string; Consent bool }",
+		"    if json.NewDecoder(os.Stdin).Decode(&in) != nil { os.Exit(2) }",
+		"    out, err := (toolimpl.Tool{}).Run(toolimpl.Request{Action: in.Action, Inputs: in.Inputs, Consent: in.Consent})",
+		"    if err != nil { _ = json.NewEncoder(os.Stdout).Encode(map[string]string{\"status\":\"error\",\"error_class\":\"tool_rejected\"}); os.Exit(3) }",
+		"    _ = json.NewEncoder(os.Stdout).Encode(map[string]any{\"status\": out.Status, \"tool\": out.Tool, \"summary\": out.Summary, \"created_at\": out.CreatedAt, \"evidence\": out.Evidence})",
+		"}",
+		"GENESIS_MAIN",
+		"cd /tmp/work &&",
+		"echo GENESIS_TESTS_BEGIN &&",
+		"GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOCACHE=/tmp/gocache go test ./... &&",
+		"echo GENESIS_BUILD_BEGIN &&",
+		"GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate .",
+	}, "\n")
 }
-
 func dockerSandboxArgs(candidateDir string, manifest ToolManifest) []string {
 	image := "golang:1.23-alpine"
 	if manifest.Language == "python" {
