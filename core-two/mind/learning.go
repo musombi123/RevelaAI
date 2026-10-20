@@ -349,76 +349,72 @@ func (s *Service) recordCanaryOutcome(candidate FoundryCandidate, decision Canar
 	return appendJSONLine(filepath.Join(s.CoreRoot, "state", "learning.jsonl"), entry)
 }
 
-func validateFeedbackTransition(
-	records []LearningFeedback,
-	next LearningFeedback,
-) error {
+func feedbackLedgerKey(item LearningFeedback) string {
+	source := strings.ToLower(strings.TrimSpace(item.Source))
+	if source == "" {
+		source = "human"
+	}
+	if item.CandidateID != "" {
+		return "candidate:" + item.CandidateID + ":" + source
+	}
+	return "evolution:" + item.Version
+}
+
+func validateFeedbackTransition(records []LearningFeedback, next LearningFeedback) error {
 	var previous *LearningFeedback
 	mergedPreviously := false
-
+	key := feedbackLedgerKey(next)
 	for i := range records {
-		if records[i].Version != next.Version {
+		if feedbackLedgerKey(records[i]) != key {
 			continue
 		}
-
 		if records[i].Outcome == "merged" {
 			mergedPreviously = true
 		}
-
-		if previous == nil ||
-			records[i].RecordedAt.After(previous.RecordedAt) ||
-			records[i].RecordedAt.Equal(previous.RecordedAt) {
-			item := records[i]
-			previous = &item
+		if previous == nil || !records[i].RecordedAt.Before(previous.RecordedAt) {
+			copy := records[i]
+			previous = &copy
 		}
 	}
-
 	if previous == nil {
 		return nil
 	}
-
 	if previous.Outcome == next.Outcome {
-		return errors.New(
-			"duplicate feedback outcome for this evolution is rejected",
-		)
+		return errors.New("duplicate feedback outcome for this decision key is rejected")
 	}
-
 	switch previous.Outcome {
-	case "reverted":
-		return errors.New(
-			"a reverted evolution is terminal; create a new evolution version",
-		)
-
+	case "reverted", "rollback":
+		return errors.New("a reverted or rolled-back decision is terminal; create a new candidate or evolution")
 	case "rejected":
 		if next.Outcome != "needs_work" {
-			return errors.New(
-				"a rejected evolution may only be marked needs_work; create a new version for another approval decision",
-			)
+			return errors.New("a rejected evolution may only be marked needs_work")
 		}
-
 	case "needs_work":
-		// A previously merged evolution may later be marked needs_work and
-		// subsequently reverted. An unmerged needs_work decision is terminal.
 		if next.Outcome != "reverted" || !mergedPreviously {
-			return errors.New(
-				"this evolution's needs_work decision requires a new evolution version for further review",
-			)
+			return errors.New("this needs_work decision requires a new candidate or evolution")
 		}
-
 	case "merged":
 		if next.Outcome != "reverted" && next.Outcome != "needs_work" {
-			return errors.New(
-				"after merged feedback, only reverted or needs_work may update the record",
-			)
+			return errors.New("after merged feedback, only reverted or needs_work may update the record")
 		}
-
+	case "promote", "hold":
+		// Canary and human decisions use separate ledger keys. This branch is
+		// defensive for legacy records with a missing source field.
+		if effectiveFeedbackSource(*previous) != "canary" {
+			return errors.New("unsupported transition from a non-human decision")
+		}
 	default:
-		return errors.New(
-			"existing feedback contains an unsupported outcome; refusing to continue",
-		)
+		return errors.New("existing feedback contains an unsupported outcome; refusing to continue")
 	}
-
 	return nil
+}
+
+func effectiveFeedbackSource(item LearningFeedback) string {
+	source := strings.ToLower(strings.TrimSpace(item.Source))
+	if source == "" {
+		return "human"
+	}
+	return source
 }
 
 func validateLearningEvidenceRef(value string) error {
@@ -584,8 +580,9 @@ func (s *Service) readLearningRecordsUnlocked() ([]LearningFeedback, error) {
 }
 
 func validateStoredLearningRecord(item LearningFeedback) error {
-	if !validEvolutionVersion(item.Version) {
-		return errors.New("invalid evolution version")
+	source := effectiveFeedbackSource(item)
+	if source != "human" && source != "canary" {
+		return errors.New("invalid feedback source")
 	}
 	if !validName(item.ToolName) || !safeMindToolName(item.ToolName) {
 		return errors.New("invalid tool name")
@@ -593,37 +590,56 @@ func validateStoredLearningRecord(item LearningFeedback) error {
 	if !validName(item.Mutation) {
 		return errors.New("invalid mutation")
 	}
-
-	if _, exists := sourceFor(item.Mutation); !exists {
-		return errors.New("unknown mutation")
-	}
-
-	switch item.Outcome {
-	case "merged", "rejected", "reverted", "needs_work":
-	default:
-		return errors.New("invalid outcome")
-	}
-
-	if !utf8.ValidString(item.Note) ||
-		len(item.Note) < minLearningNoteBytes ||
-		len(item.Note) > maxLearningNoteBytes {
-		return errors.New("invalid note length or encoding")
-	}
-
 	if item.RecordedAt.IsZero() {
 		return errors.New("recorded_at is missing")
 	}
-
+	if !utf8.ValidString(item.Note) || len(item.Note) < minLearningNoteBytes || len(item.Note) > maxLearningNoteBytes {
+		return errors.New("invalid note length or encoding")
+	}
+	if strings.ContainsRune(item.Note, rune(0)) {
+		return errors.New("note contains NUL characters")
+	}
 	if item.EvidenceRef != "" {
 		if err := validateLearningEvidenceRef(item.EvidenceRef); err != nil {
 			return errors.New("invalid evidence reference")
 		}
 	}
+	if source == "canary" {
+		if !toolNamePattern.MatchString(item.CandidateID) || item.Version != "" || item.Mutation != item.CandidateID {
+			return errors.New("invalid canary decision identity")
+		}
+		switch item.Outcome {
+		case "promote", "hold", "rollback":
+		default:
+			return errors.New("invalid canary decision")
+		}
+		if item.EvidenceRef == "" {
+			return errors.New("canary decision evidence reference is required")
+		}
+		return nil
+	}
 
+	if item.CandidateID != "" {
+		if !toolNamePattern.MatchString(item.CandidateID) || item.Version != "" || item.Mutation != item.CandidateID {
+			return errors.New("invalid candidate feedback identity")
+		}
+	} else {
+		if !validEvolutionVersion(item.Version) {
+			return errors.New("invalid evolution version")
+		}
+		spec, exists := sourceFor(item.Mutation)
+		if !exists || !isExactAllowlistedCandidate(spec) {
+			return errors.New("unknown or unapproved mutation")
+		}
+	}
+	switch item.Outcome {
+	case "merged", "rejected", "reverted", "needs_work":
+	default:
+		return errors.New("invalid human outcome")
+	}
 	if item.Outcome == "merged" && item.EvidenceRef == "" {
 		return errors.New("merged outcome lacks evidence_ref")
 	}
-
 	return nil
 }
 
@@ -645,25 +661,24 @@ func (s *Service) learningSummaryUnlocked() (LearningSummary, error) {
 		return LearningSummary{}, err
 	}
 
-	latestByVersion := make(map[string]LearningFeedback)
+	// Keep the latest human decision and latest canary result independently:
+	// both affect ranking; a canary result cannot erase a human decision.
+	latestByDecision := make(map[string]LearningFeedback)
 	for _, record := range records {
-		previous, exists := latestByVersion[record.Version]
-		if !exists ||
-			record.RecordedAt.After(previous.RecordedAt) ||
-			record.RecordedAt.Equal(previous.RecordedAt) {
-			latestByVersion[record.Version] = record
+		key := feedbackLedgerKey(record)
+		previous, exists := latestByDecision[key]
+		if !exists || !record.RecordedAt.Before(previous.RecordedAt) {
+			latestByDecision[key] = record
 		}
 	}
 
 	stats := make(map[string]*mutationLearning)
-
-	for _, record := range latestByVersion {
+	for _, record := range latestByDecision {
 		entry := stats[record.Mutation]
 		if entry == nil {
 			entry = &mutationLearning{Mutation: record.Mutation}
 			stats[record.Mutation] = entry
 		}
-
 		switch record.Outcome {
 		case "merged":
 			entry.Merged++
@@ -673,48 +688,48 @@ func (s *Service) learningSummaryUnlocked() (LearningSummary, error) {
 			entry.Reverted++
 		case "needs_work":
 			entry.NeedsWork++
+		case "promote":
+			entry.CanaryPromote++
+		case "hold":
+			entry.CanaryHold++
+		case "rollback":
+			entry.CanaryRollback++
+		}
+		if effectiveFeedbackSource(record) == "human" {
+			entry.HumanDecisions++
 		}
 	}
 
 	out := make([]mutationLearning, 0, len(stats))
 	for _, item := range stats {
-		item.FeedbackCount = item.Merged +
-			item.Rejected +
-			item.Reverted +
-			item.NeedsWork
-
+		item.FeedbackCount = item.Merged + item.Rejected + item.Reverted +
+			item.NeedsWork + item.CanaryPromote + item.CanaryHold + item.CanaryRollback
 		item.Score = float64(
 			item.Merged*3 -
 				item.Rejected*2 -
 				item.Reverted*5 -
-				item.NeedsWork,
+				item.NeedsWork +
+				item.CanaryPromote*2 -
+				item.CanaryRollback*4,
 		)
-
 		out = append(out, *item)
 	}
-
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Score == out[j].Score {
 			return out[i].Mutation < out[j].Mutation
 		}
 		return out[i].Score > out[j].Score
 	})
-
-	status := "learning_from_human_feedback"
-	if len(latestByVersion) == 0 {
-		status = "awaiting_human_feedback"
+	status := "learning_from_human_and_canary_evidence"
+	if len(latestByDecision) == 0 {
+		status = "awaiting_human_or_canary_evidence"
 	}
-
 	return LearningSummary{
-		Status:          status,
+		Status: status,
 		FeedbackRecords: len(records),
-		LatestDecisions: len(latestByVersion),
-		Mutations:       out,
-		RankingNote: "Scores use the latest recorded decision for each evolution: " +
-			"merged +3, rejected -2, reverted -5, needs_work -1. " +
-			"Scores are bounded ranking hints only. They cannot override objective matching, " +
-			"Guardian decisions, evidence checks, or candidate qualification. " +
-			"Feedback does not authorize automatic merge.",
+		LatestDecisions: len(latestByDecision),
+		Mutations: out,
+		RankingNote: "Human decisions influence ranking: merged +3, rejected -2, reverted -5, needs_work -1. Canary evidence influences ranking: promote +2, hold 0, rollback -4. Human and canary decisions are retained independently. Scores are ranking hints only; neither source overrides objective matching, tests, Guardian, candidate qualification, or tool risk tier. Automatic merge is disabled.",
 		AutomaticMerge: false,
 	}, nil
 }
