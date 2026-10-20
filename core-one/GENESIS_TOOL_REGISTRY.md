@@ -83,13 +83,13 @@ The public FastAPI service uses the following authenticated routes to call Genes
 
 - `GET /api/core-mesh/genesis/status`
 - `GET /api/core-mesh/genesis/proposals`
-- `GET /api/core-mesh/genesis/proposals/{name}` — returns a sanitized proposal summary and research counts; raw saved research snippets/findings are not forwarded.
-- `GET /api/core-mesh/genesis/tools/{name}/hardware-guide?country=KE&lang=sw`
-- `GET /api/core-mesh/genesis/tools/{name}/capability-plan`
+- `GET /api/core-mesh/genesis/proposals/{name}` — operator restricted; returns a sanitized proposal summary and research counts, never raw saved research snippets/findings.
+- `GET /api/core-mesh/genesis/tools/{name}/hardware-guide?country=KE&lang=sw` — operator restricted until proposal ownership can be enforced.
+- `GET /api/core-mesh/genesis/tools/{name}/capability-plan` — operator restricted until proposal ownership can be enforced.
 - `POST /api/core-mesh/genesis/queue`
 - `GET /api/core-mesh/genesis/key` and `POST /api/core-mesh/genesis/key/request` — request/approval status only; no credential is minted by the request endpoint.
 - `POST /api/core-mesh/genesis/rvx/compile` — operator restricted.
-- `GET /api/core-mesh/genesis/events?limit=100` — authenticated, bounded server-sent events.
+- `GET /api/core-mesh/genesis/events?limit=100` — operator restricted, bounded server-sent events.
 - `GET /api/core-mesh/tools?provider=gemini|hf|mvi` — exposes active signed tool contracts in native Gemini function-declaration form or a provider-neutral prompt catalogue.
 - `GET /api/core-mesh/tools/registry` — operator restricted, verified signed versions.
 - `POST /api/core-mesh/tools/execute` — executes only the exact active signed version in Genesis; generated code never runs in the Python gateway.
