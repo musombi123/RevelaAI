@@ -75,3 +75,27 @@ go -C core-one build -o ./genesis-server ./cmd/genesis
 ```
 
 CI verifies the root-checkout module replacement is available in its checkout. A live Render health check, persistent-disk behavior, owner credential setup, Docker/Bubblewrap availability, and host-level isolation are not implied by a passing CI run and must be verified on the actual service after deployment.
+
+
+## RevelaAI FastAPI gateway contract
+
+The public FastAPI service uses the following authenticated routes to call Genesis through server-to-server credentials. These are gateway paths, not direct Core-One paths:
+
+- `GET /api/core-mesh/genesis/status`
+- `GET /api/core-mesh/genesis/proposals`
+- `GET /api/core-mesh/genesis/proposals/{name}` — returns a sanitized proposal summary and research counts; raw saved research snippets/findings are not forwarded.
+- `GET /api/core-mesh/genesis/tools/{name}/hardware-guide?country=KE&lang=sw`
+- `GET /api/core-mesh/genesis/tools/{name}/capability-plan`
+- `POST /api/core-mesh/genesis/queue`
+- `GET /api/core-mesh/genesis/key` and `POST /api/core-mesh/genesis/key/request` — request/approval status only; no credential is minted by the request endpoint.
+- `POST /api/core-mesh/genesis/rvx/compile` — operator restricted.
+- `GET /api/core-mesh/genesis/events?limit=100` — authenticated, bounded server-sent events.
+- `GET /api/core-mesh/tools?provider=gemini|hf|mvi` — exposes active signed tool contracts in native Gemini function-declaration form or a provider-neutral prompt catalogue.
+- `GET /api/core-mesh/tools/registry` — operator restricted, verified signed versions.
+- `POST /api/core-mesh/tools/execute` — executes only the exact active signed version in Genesis; generated code never runs in the Python gateway.
+- `POST /api/core-mesh/tools/{name}/publish` — operator restricted.
+- `POST /api/core-mesh/tools/{name}/{version}/{artifact_hash}/activate` — operator restricted; Tier 1–2 also requires the signed-in user ID to appear in `GENESIS_OWNER_USER_IDS`.
+- `POST /api/core-mesh/tools/{name}/{version}/{artifact_hash}/confirm` — operator and configured Genesis owner required; returns a one-use Tier 2 confirmation token only after server-side action approval and exact artifact/argument binding.
+- `POST /api/core-mesh/tools/{name}/deactivate` and `POST /api/core-mesh/tools/{name}/rollback` — operator restricted; rollback of Tier 1–2 requires owner identity and the separate owner credential.
+
+The Python gateway never connects directly to registry files or databases. It authenticates the user, performs operator/owner checks where needed, then calls the Core-One HTTP API using server-only credentials. Browser clients must not receive `GENESIS_ADMIN_TOKEN`, `GENESIS_OWNER_APPROVAL_TOKEN`, `GENESIS_ACTION_APPROVAL_TOKEN`, or `GENESIS_SIGNING_KEY`.
