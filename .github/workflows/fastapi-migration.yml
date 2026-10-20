@@ -54,6 +54,7 @@ jobs:
 
           app_source = Path("app.py").read_text(encoding="utf-8")
           asgi_source = Path("asgi.py").read_text(encoding="utf-8")
+          platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
           requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
           def has_flask_import(source):
@@ -68,6 +69,10 @@ jobs:
           assert "legacy_flask_app" not in asgi_source
           assert not has_flask_import(asgi_source)
           assert not has_flask_import(app_source)
+          assert "WSGIMiddleware" not in platform_source
+          assert "from asgi import app as revelaai_app" in platform_source
+          assert "app.mount(\"/\", revelaai_app" in platform_source
+          assert not has_flask_import(platform_source)
           assert importlib.util.find_spec("flask") is None, "Flask must not be installed"
 
           requirement_lines = [
