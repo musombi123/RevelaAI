@@ -146,3 +146,30 @@ func TestStagedSnapshotGuardianRunsBeforeSandboxRunner(t *testing.T) {
 		t.Fatal("sandbox runner started before staged-snapshot Guardian review completed")
 	}
 }
+
+
+func TestGoCandidateRejectsUncopiedHelperModules(t *testing.T) {
+	root := t.TempDir()
+	for name, content := range map[string]string{
+		"code.go":    "package candidate\n",
+		"library.go": "package candidate\n",
+		"test.go":    "package candidate\nimport \"testing\"\nfunc TestCandidate(t *testing.T) {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifest := validManifestForTest()
+	if err := validateSandboxCandidate(root, manifest); err != nil {
+		t.Fatalf("runtime-compatible candidate should validate: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "helpers"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "helpers", "extra.go"), []byte("package candidate\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateSandboxCandidate(root, manifest); err == nil {
+		t.Fatal("candidate containing a helper module omitted by runtime must be rejected")
+	}
+}
