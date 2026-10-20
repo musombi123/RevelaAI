@@ -154,6 +154,23 @@ def prompt_based_tool_catalog(tools: list[dict[str, Any]] | None = None) -> str:
     return json.dumps(rows, ensure_ascii=False, separators=(",", ":"))[:32_000]
 
 
+def get_signed_tool_version(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
+    """Fetch a specific signed version and let Genesis re-verify its signature/hash."""
+    if not _NAME_RE.fullmatch(str(name or "")):
+        raise GenesisToolRegistryError("Invalid Genesis tool name.", code="invalid_tool_name", status_code=400)
+    if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,63}", str(version or "")):
+        raise GenesisToolRegistryError("Invalid Genesis tool version.", code="invalid_tool_version", status_code=400)
+    if not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+        raise GenesisToolRegistryError("Invalid Genesis artifact hash.", code="invalid_artifact_hash", status_code=400)
+    result = _request(
+        "/v1/genesis/registry/tools/" + quote(name, safe="") + "/" + quote(version, safe="") + "/" + quote(artifact_hash, safe="")
+    )
+    record = result.get("artifact")
+    if not isinstance(record, dict) or not isinstance(record.get("manifest"), dict):
+        raise GenesisToolRegistryError("Genesis returned an invalid signed version record.", code="genesis_invalid_payload")
+    return record
+
+
 def list_signed_tools() -> list[dict[str, Any]]:
     """Return every verified append-only registry version, active or inactive."""
     result = _request("/v1/genesis/registry/tools")
