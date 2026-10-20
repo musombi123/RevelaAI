@@ -1018,10 +1018,26 @@ components:
       required: [schema_version, name, version, language, entrypoint, input_schema, output_schema, risk_tier, permissions, timeout_ms, memory_bytes]
       properties:
         schema_version: { const: genesis.tool-manifest.v1 }
-        name: { type: string, pattern: "^[a-z0-9_-]{1,64}$" }
-        version: { type: string, maxLength: 64 }
+        name: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+        version: { type: string, maxLength: 64, pattern: "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" }
         language: { enum: [python, go] }
-        entrypoint: { type: string, minLength: 1, maxLength: 240 }
+        entrypoint: { type: string, minLength: 1, maxLength: 240, pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$" }
+        # Keep the public contract aligned with ValidateToolManifest.
+        allOf:
+          - if:
+              properties:
+                language: { const: go }
+              required: [language]
+            then:
+              properties:
+                entrypoint: { const: code.go }
+          - if:
+              properties:
+                language: { const: python }
+              required: [language]
+            then:
+              properties:
+                entrypoint: { pattern: "\\.py$" }
         input_schema: { type: object, required: [type], properties: { type: { const: object } } }
         output_schema: { type: object, required: [type], properties: { type: { const: object } } }
         risk_tier: { type: integer, enum: [0, 1, 2] }
