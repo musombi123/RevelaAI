@@ -14,7 +14,7 @@ import os
 import re
 import threading
 import time
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 import requests
 
@@ -375,6 +375,195 @@ def propose_genesis_invention(demand: str, country: str = "KE", language: str = 
             ) from None
         raise
     return _public_proposal(payload)
+
+
+def _genesis_request(path: str, *, method: str = "GET", payload: dict | None = None, timeout: float = 8.0) -> dict:
+    """Call Genesis with server-only credentials and a consistent unavailable error."""
+    if not (os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")):
+        raise CoreMeshError(
+            "Genesis is unavailable because the server-to-server credential is not configured.",
+            status_code=503,
+            code="genesis_unavailable",
+        )
+    base = _base_url("GENESIS_BASE_URL", "")
+    try:
+        return _request_json(
+            base,
+            path,
+            method=method,
+            payload=payload,
+            headers=_upstream_headers(include_genesis=True),
+            timeout=timeout,
+        )
+    except CoreMeshError as exc:
+        if exc.code in {
+            "core_service_not_configured",
+            "core_service_unreachable",
+            "core_service_tls_required",
+            "core_redirect_rejected",
+            "upstream_http_503",
+            "upstream_http_502",
+            "upstream_http_504",
+        }:
+            raise CoreMeshError(
+                "Genesis is unavailable. Normal RevelaAI chat remains available; retry this Genesis operation later.",
+                status_code=503,
+                code="genesis_unavailable",
+            ) from None
+        raise
+
+
+def get_genesis_status() -> dict:
+    return _genesis_request("/v1/genesis/status")
+
+
+def list_genesis_proposals() -> dict:
+    return _genesis_request("/v1/genesis/tools")
+
+
+def get_genesis_proposal(name: str) -> dict:
+    name = str(name or "").strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+        raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
+    return _genesis_request("/v1/genesis/tools/" + quote(name, safe=""))
+
+
+def get_genesis_hardware_guide(name: str, country: str = "KE", language: str = "") -> dict:
+    name = str(name or "").strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+        raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
+    query = urlencode({"country": str(country or "KE")[:3], "lang": str(language or "")[:20]})
+    return _genesis_request(
+        "/v1/genesis/tools/" + quote(name, safe="") + "/hardware_guide?" + query
+    )
+
+
+def get_genesis_capability_plan(name: str) -> dict:
+    name = str(name or "").strip()
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+        raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
+    return _genesis_request(
+        "/v1/genesis/tools/" + quote(name, safe="") + "/capability_plan"
+    )
+
+
+def queue_genesis_demand(
+    demand: str,
+    *,
+    source: str = "revelaai-gateway",
+    country: str = "KE",
+    language: str = "",
+) -> dict:
+    demand = str(demand or "").strip()
+    if not 1 <= len(demand) <= 3999:
+        raise CoreMeshError("Demand must contain between 1 and 3999 characters.", status_code=400, code="invalid_invention_demand")
+    payload = {
+        "demand": demand,
+        "source": str(source or "revelaai-gateway")[:100],
+        "country": str(country or "KE")[:3],
+        "language": str(language or "")[:20],
+    }
+    return _genesis_request("/v1/genesis/queue", method="POST", payload=payload, timeout=12.0)
+
+
+def get_genesis_key_request_info() -> dict:
+    return _genesis_request("/v1/genesis/key")
+
+
+def request_genesis_provider_key(client_id: str, reason: str) -> dict:
+    client_id = str(client_id or "").strip()
+    reason = str(reason or "").strip()
+    if not client_id or len(client_id) > 120 or not reason or len(reason) > 500:
+        raise CoreMeshError(
+            "client_id and reason are required within their size limits.",
+            status_code=400,
+            code="invalid_provider_key_request",
+        )
+    return _genesis_request(
+        "/v1/genesis/key",
+        method="POST",
+        payload={"client_id": client_id, "reason": reason},
+        timeout=12.0,
+    )
+
+
+def compile_genesis_rvx(source: str) -> dict:
+    source = str(source or "")
+    if not source.strip() or len(source.encode("utf-8")) > 16384:
+        raise CoreMeshError("RVX source must contain 1 to 16384 UTF-8 bytes.", status_code=400, code="invalid_rvx_source")
+    return _genesis_request(
+        "/v1/rvx/compile",
+        method="POST",
+        payload={"source": source},
+        timeout=12.0,
+    )
+
+
+def iter_genesis_events(*, max_events: int = 100):
+    """Yield bounded SSE event objects from Genesis; callers control reconnects."""
+    if not (os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")):
+        raise CoreMeshError(
+            "Genesis is unavailable because the server-to-server credential is not configured.",
+            status_code=503,
+            code="genesis_unavailable",
+        )
+    if not 1 <= int(max_events) <= 500:
+        raise CoreMeshError("max_events must be between 1 and 500.", status_code=400, code="invalid_event_limit")
+    base = _base_url("GENESIS_BASE_URL", "")
+    _validate_base(base)
+    url = base + "/v1/genesis/stream"
+    try:
+        with requests.get(
+            url,
+            headers={**_upstream_headers(include_genesis=True), "Accept": "text/event-stream"},
+            timeout=(3.0, 25.0),
+            allow_redirects=False,
+            stream=True,
+        ) as response:
+            if response.status_code in {401, 403}:
+                raise CoreMeshError("Genesis rejected the server credential.", status_code=response.status_code, code="genesis_auth_rejected")
+            if not response.ok:
+                raise CoreMeshError(
+                    "Genesis is unavailable. Normal RevelaAI chat remains available.",
+                    status_code=503,
+                    code="genesis_unavailable",
+                )
+            event_name = "message"
+            data_lines: list[str] = []
+            yielded = 0
+            for raw_line in response.iter_lines(decode_unicode=True):
+                line = raw_line or ""
+                if len(line) > MAX_RESPONSE_BYTES:
+                    raise CoreMeshError("Genesis event line is oversized.", status_code=502, code="genesis_response_too_large")
+                if line.startswith(":"):
+                    continue
+                if line.startswith("event:"):
+                    event_name = line[6:].strip()[:80] or "message"
+                elif line.startswith("data:"):
+                    data_lines.append(line[5:].strip())
+                elif not line:
+                    if data_lines:
+                        data_raw = "\n".join(data_lines)
+                        try:
+                            event = json.loads(data_raw)
+                        except ValueError:
+                            event = {"type": event_name, "data": data_raw[:4000]}
+                        if isinstance(event, dict):
+                            event.setdefault("type", event_name)
+                            yield event
+                            yielded += 1
+                            if yielded >= max_events:
+                                return
+                    event_name = "message"
+                    data_lines = []
+    except CoreMeshError:
+        raise
+    except requests.RequestException:
+        raise CoreMeshError(
+            "Genesis event stream is unavailable. Normal RevelaAI chat remains available.",
+            status_code=503,
+            code="genesis_unavailable",
+        ) from None
 
 
 def propose_mind_evolution(objective: str, tool_name: str) -> dict:
