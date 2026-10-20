@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+var toolManifestNamePattern = regexp.MustCompile("^[a-z][a-z0-9_-]{0,63}$")
 var toolManifestVersionPattern = regexp.MustCompile("^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")
 
 const (
@@ -62,7 +63,7 @@ func ValidateToolManifest(m ToolManifest) error {
 	if m.SchemaVersion != ToolManifestSchemaVersion {
 		return errors.New("unsupported tool manifest schema version")
 	}
-	if !validResourceName(m.Name) || len(m.Name) > maxAPIToolName {
+	if !toolManifestNamePattern.MatchString(m.Name) || len(m.Name) > maxAPIToolName {
 		return errors.New("invalid tool manifest name")
 	}
 	if !toolManifestVersionPattern.MatchString(m.Version) {
