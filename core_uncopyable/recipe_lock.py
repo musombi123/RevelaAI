@@ -46,12 +46,24 @@ def verify_recipe(*, strict_path: bool | None = None) -> dict[str, Any]:
     if expected and not hmac.compare_digest(digest, expected):
         raise RecipeLockError(f"{FOUNDER_MESSAGE}: owner recipe fingerprint mismatch.")
     if os.name != "nt":
+        # Render Secret Files are platform-managed under /etc/secrets. Their
+        # mounted mode may be broader than 0600 even though the secret is
+        # provisioned through Render's secret-file mechanism. Trust that
+        # platform-managed mount only; retain strict mode checks everywhere else.
+        render_secret_root = Path("/etc/secrets").resolve()
         try:
-            mode = path.stat().st_mode & 0o777
-        except OSError as exc:
-            raise RecipeLockError(f"{FOUNDER_MESSAGE}: recipe file cannot be inspected.") from exc
-        if mode & 0o077:
-            raise RecipeLockError("Owner recipe permissions are too broad; set master.key to mode 0600.")
+            path.relative_to(render_secret_root)
+            is_render_secret = True
+        except ValueError:
+            is_render_secret = False
+
+        if not is_render_secret:
+            try:
+                mode = path.stat().st_mode & 0o777
+            except OSError as exc:
+                raise RecipeLockError(f"{FOUNDER_MESSAGE}: recipe file cannot be inspected.") from exc
+            if mode & 0o077:
+                raise RecipeLockError("Owner recipe permissions are too broad; set master.key to mode 0600.")
     return {
         "valid": True,
         "algorithm": "SHA-256 fingerprint (digest not exposed)",
