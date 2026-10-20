@@ -216,3 +216,35 @@ func TestCanaryAndHumanFeedbackUseIndependentRankingEntries(t *testing.T) {
 		t.Fatal("expected both canary and human outcomes to influence candidate ranking")
 	}
 }
+
+
+func TestImprovementMetricsUseTelemetryWithoutLegacyMetricsFile(t *testing.T) {
+	_, service := newTestRepository(t)
+	version := strings.Repeat("a", 64)
+	for _, event := range telemetryEvents("sample_tool", version, 3, 0, true) {
+		if err := service.RecordToolTelemetry(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/mind/tools/sample_tool/improvement", nil)
+	response := httptest.NewRecorder()
+	service.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected telemetry-backed improvement response, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	telemetry, ok := payload["tool_telemetry"].(map[string]any)
+	if !ok {
+		t.Fatalf("response is missing tool telemetry: %#v", payload)
+	}
+	versions, ok := telemetry["versions"].([]any)
+	if !ok || len(versions) != 1 {
+		t.Fatalf("expected one per-version metrics record, got %#v", telemetry["versions"])
+	}
+	if payload["synthetic_fixture"] != false || payload["production_verified"] != false {
+		t.Fatalf("telemetry must not be mislabeled as verified production evidence: %#v", payload)
+	}
+}
