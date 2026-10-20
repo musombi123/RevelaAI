@@ -45,6 +45,16 @@ def _base_url(name: str, default: str) -> str:
     if not core:
         return str(os.getenv(name, default) or "").strip().rstrip("/")
     raw = core_base_url(core, default=default)
+    if raw and "://" not in raw:
+        candidate = urlsplit("//" + raw)
+        try:
+            port = candidate.port
+        except ValueError:
+            port = None
+        if (candidate.hostname and port is not None and candidate.username is None
+                and candidate.password is None and not candidate.path
+                and not candidate.query and not candidate.fragment):
+            raw = "http://" + raw
     return raw.rstrip("/")
 
 
