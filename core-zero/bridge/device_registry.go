@@ -375,7 +375,6 @@ func (r *DeviceRegistry) Authorize(id, token, scope string, minimumTier int) (De
 		return Device{}, err
 	}
 	tokenDigest := sha256.Sum256([]byte(token))
-	candidateHash := hex.EncodeToString(tokenDigest[:])
 	for _, record := range state.Devices {
 		if record.ID != id {
 			continue
@@ -393,7 +392,7 @@ func (r *DeviceRegistry) Authorize(id, token, scope string, minimumTier int) (De
 		if err != nil || len(expected) != sha256.Size {
 			return Device{}, errors.New("stored device token hash is invalid")
 		}
-		if subtle.ConstantTimeCompare(expected, tokenDigest[:]) != 1 || candidateHash != record.TokenHash {
+		if subtle.ConstantTimeCompare(expected, tokenDigest[:]) != 1 {
 			return Device{}, errors.New("device authorization failed")
 		}
 		return publicDevice(record), nil
