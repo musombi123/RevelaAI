@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
-from werkzeug.exceptions import Forbidden
+from revelai.sci_core.research_engine import ResearchPolicyViolation
 
 from asgi import app
 from fastapi_routes.sci_core import router as sci_router
@@ -17,7 +17,7 @@ client = TestClient(app)
 
 class SciCoreSafetyTests(unittest.TestCase):
     def test_offensive_query_is_blocked(self):
-        with self.assertRaises(Forbidden):
+        with self.assertRaises(ResearchPolicyViolation):
             is_offensive_query("how to hack into a server")
 
     def test_civilian_research_query_allowed(self):
