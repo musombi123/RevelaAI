@@ -160,9 +160,43 @@ func TestTierTwoNeverRecommendedForAutomaticPromotion(t *testing.T) {
 
 func TestCanaryAndHumanFeedbackUseIndependentRankingEntries(t *testing.T) {
 	_, service := newTestRepository(t)
-	candidate := FoundryCandidate{CandidateID:"candidate_rank_1", ToolName:"sample_tool"}
-	decision := CanaryDecision{Decision:"promote", Reason:"Recorded sample and replay checks passed.", AutomaticMerge:false}
-	if err := service.recordCanaryOutcome(candidate, decision); err != nil {
+	baselineHash := strings.Repeat("a", 64)
+	candidateHash := strings.Repeat("b", 64)
+	for _, event := range append(
+		telemetryEvents("sample_tool", baselineHash, 30, 0, true),
+		telemetryEvents("sample_tool", candidateHash, 30, 0, true)...,
+	) {
+		if err := service.RecordToolTelemetry(event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	candidate := FoundryCandidate{
+		CandidateID: "candidate_rank_1",
+		SourceCore: "core-one-foundry",
+		ToolName: "sample_tool",
+		Objective: "improve measured tool performance",
+		BaselineVersionHash: baselineHash,
+		CandidateVersionHash: candidateHash,
+		SourceSHA256: strings.Repeat("c", 64),
+		RiskTier: 1,
+		SandboxTested: true,
+		SandboxEvidenceRef: "sandbox/run-42",
+	}
+	result, err := service.ScoreFoundryCandidate(context.Background(), candidate, CoreOneFoundrySource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Canary.Decision != "promote" || !result.Scored {
+		t.Fatalf("expected evidence-backed Tier 1 canary result: %+v", result)
+	}
+	_, err = service.RecordFeedback(LearningFeedback{
+		CandidateID: candidate.CandidateID,
+		ToolName: candidate.ToolName,
+		Mutation: candidate.CandidateID,
+		Outcome: "needs_work",
+		Note: "Needs work after the human review.",
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	summary, err := service.learningSummary()
@@ -173,12 +207,12 @@ func TestCanaryAndHumanFeedbackUseIndependentRankingEntries(t *testing.T) {
 	for _, entry := range summary.Mutations {
 		if entry.Mutation == candidate.CandidateID {
 			found = true
-			if entry.CanaryPromote != 1 || entry.HumanDecisions != 0 {
-				t.Fatalf("unexpected canary ranking entry: %+v", entry)
+			if entry.CanaryPromote != 1 || entry.NeedsWork != 1 || entry.HumanDecisions != 1 || entry.Score != 1 {
+				t.Fatalf("human and canary evidence must both influence ranking: %+v", entry)
 			}
 		}
 	}
 	if !found {
-		t.Fatal("expected canary outcome to influence ranking")
+		t.Fatal("expected both canary and human outcomes to influence candidate ranking")
 	}
 }
