@@ -1,7 +1,7 @@
 {
   "id": "canonical-spec-cache",
   "category": "spec_cache",
-  "purpose": "Validate and fingerprint complete Core-One-shaped ToolSpec records with bounded canonical JSON and a concurrency-safe in-memory deduplication cache",
+  "purpose": "Validate and deterministically fingerprint bounded Core-One-shaped ToolSpec records; deduplicate exact repeats in a bounded, concurrency-safe in-memory cache without executing source or activating proposals",
   "status": "candidate_for_human_review",
   "source_core": "core-one",
   "fixture_only": true,
