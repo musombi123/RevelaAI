@@ -321,6 +321,19 @@ func screenCandidateForPublication(engine *Engine, candidateDir string, manifest
 	if err != nil || rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
 		return errors.New("candidate root is unsafe or unavailable")
 	}
+	embeddedRaw, err := readRegularFileLimited(filepath.Join(candidateDir, "tool_manifest.json"), 256*1024)
+	if err != nil {
+		return errors.New("candidate must contain a safe tool_manifest.json")
+	}
+	embeddedManifest, err := DecodeToolManifest(embeddedRaw)
+	if err != nil {
+		return errors.New("embedded candidate manifest is invalid")
+	}
+	embeddedJSON, err := json.Marshal(embeddedManifest)
+	providedJSON, providedErr := json.Marshal(manifest)
+	if err != nil || providedErr != nil || string(embeddedJSON) != string(providedJSON) {
+		return errors.New("embedded candidate manifest does not match the manifest being reviewed")
+	}
 
 	// The manifest can be edited after Forge's original Guardian pass, so
 	// always screen its current canonical representation at publication time.
