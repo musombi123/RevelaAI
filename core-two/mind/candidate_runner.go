@@ -16,7 +16,6 @@ import (
 
 const (
 	candidateCompileTimeout = 30 * time.Second
-	maxCandidateSourceBytes = 256 * 1024
 	maxCandidateTestBytes   = 256 * 1024
 	maxCompilerOutputBytes  = 12 * 1024
 )
@@ -200,26 +199,6 @@ func runCandidateTest(
 	// A regular test executable may now exist inside the temporary directory,
 	// but this function never runs it. Deferred cleanup removes the directory.
 	return nil
-}
-
-// isExactAllowlistedCandidate prevents callers from submitting arbitrary
-// candidate source under a known candidate ID.
-func isExactAllowlistedCandidate(spec candidateSpec) bool {
-	if !validName(spec.ID) {
-		return false
-	}
-
-	for _, allowed := range candidateCatalog {
-		if allowed.ID != spec.ID {
-			continue
-		}
-
-		return spec.Source == allowed.Source &&
-			spec.Category == allowed.Category &&
-			spec.Purpose == allowed.Purpose
-	}
-
-	return false
 }
 
 // offlineGoEnvironment constructs a minimal build environment rather than
