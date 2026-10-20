@@ -17,8 +17,8 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install test runner
-        run: python -m pip install --upgrade pip pytest
+        run: python -m pip install --upgrade pip -r requirements.txt
       - name: Compile new module and application wiring
-        run: python -m compileall -q automation_fabric routes/automation_fabric_routes.py app.py
+        run: python -m compileall -q automation_fabric fastapi_routes/automation_fabric.py app.py asgi.py
       - name: Run Automation Fabric tests
         run: python -m pytest -q tests/test_automation_fabric.py
