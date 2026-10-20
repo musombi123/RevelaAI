@@ -18,8 +18,8 @@ def test_app_module_exports_the_native_fastapi_instance() -> None:
 
 
 def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
+    import ast
     from pathlib import Path
-    import re
     import asgi
 
     app_source = Path("app.py").read_text(encoding="utf-8")
@@ -29,12 +29,27 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
     assert "WSGIMiddleware" not in asgi_source
     assert "legacy_flask_app" not in asgi_source
     assert "WSGIMiddleware" not in app_source
-    assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", asgi_source, re.M)
-    assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", app_source, re.M)
-    for dependency in ("flask", "flask-cors", "a2wsgi"):
-        assert not re.search(rf"^\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\s|$)", requirements, re.M), dependency
     assert not Path("legacy_flask_app.py").exists()
 
+    for filename, source in (("app.py", app_source), ("asgi.py", asgi_source)):
+        tree = ast.parse(source, filename=filename)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert all(alias.name.split(".")[0].lower() != "flask" for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                module = (node.module or "").lower()
+                assert module != "flask" and not module.startswith("flask.")
+
+    forbidden = {"flask", "flask-cors", "a2wsgi"}
+    for line in requirements.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        import re
+        match = re.match(r"^([a-zA-Z0-9_.-]+)", stripped)
+        if match:
+            package = match.group(1).replace("_", "-").lower()
+            assert package not in forbidden, package
 
 
 def test_native_core_routers_do_not_import_the_flask_compatibility_module() -> None:
