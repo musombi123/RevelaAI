@@ -822,6 +822,7 @@ paths:
     post:
       operationId: createUsectEvolutionProposal
       summary: Create a bounded, auditable evolution proposal
+      security: []
       parameters:
         - $ref: '#/components/parameters/OrganAdminToken'
       requestBody:
@@ -844,6 +845,7 @@ paths:
     post:
       operationId: evaluateUsectEvolutionProposal
       summary: Evaluate a proposal against measured observations and review gates
+      security: []
       parameters:
         - name: proposal_id
           in: path
@@ -857,6 +859,7 @@ paths:
     get:
       operationId: listUsectEnrolledDevices
       summary: List explicitly enrolled migration targets
+      security: []
       parameters:
         - $ref: '#/components/parameters/OrganAdminToken'
       responses:
@@ -865,6 +868,7 @@ paths:
     post:
       operationId: enrollUsectMigrationDevice
       summary: Register an explicitly authorized device inventory
+      security: []
       parameters:
         - $ref: '#/components/parameters/OrganAdminToken'
       responses:
@@ -873,6 +877,7 @@ paths:
     post:
       operationId: createUsectMigrationPlan
       summary: Produce a capability-checked, digest-bound migration plan
+      security: []
       parameters:
         - $ref: '#/components/parameters/OrganAdminToken'
       responses:
@@ -881,6 +886,7 @@ paths:
     post:
       operationId: createUsectRobotBlueprint
       summary: Propose a robot blueprint from verified enrolled hardware resources
+      security: []
       parameters:
         - $ref: '#/components/parameters/OrganAdminToken'
       responses:
