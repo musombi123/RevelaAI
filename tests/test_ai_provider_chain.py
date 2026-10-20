@@ -70,6 +70,7 @@ def test_gemini_list_models_selects_first_available_configured_model(monkeypatch
             }
 
     monkeypatch.setattr(client, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(client, "GEMINI_MODEL_VALIDATION", {})
     monkeypatch.setattr(client, "GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(client, "GEMINI_MODEL", "gemini-retired-test-model")
     monkeypatch.setattr(client, "GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite")
