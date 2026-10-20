@@ -29,7 +29,7 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
 
     def has_flask_import(source: str) -> bool:
         return bool(re.search(
-            r"^\\s*(?:from\\s+flask(?:\\.[\\w.]+)?\\s+import|import\\s+flask(?:\\s|,|$))",
+            r"^\s*(?:from\s+flask(?:\.[\w.]+)?\s+import|import\s+flask(?:\s|,|$))",
             source,
             re.MULTILINE,
         ))
@@ -40,6 +40,12 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
     assert "WSGIMiddleware" not in app_source
     assert not has_flask_import(asgi_source)
     assert not has_flask_import(app_source)
+
+    platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+    assert "WSGIMiddleware" not in platform_source
+    assert "from asgi import app as revelaai_app" in platform_source
+    assert "app.mount(\"/\", revelaai_app" in platform_source
+    assert not has_flask_import(platform_source)
     assert importlib.util.find_spec("flask") is None
 
     requirement_lines = [
