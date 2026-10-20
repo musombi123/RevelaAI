@@ -58,7 +58,7 @@ jobs:
         run: npx --yes @redocly/cli@latest lint core-two/openapi.yaml
 
   mind-startup-smoke:
-    name: Mind health and fail-closed startup smoke test
+    name: Mind health, fail-closed writes, and Render-compatible startup smoke test
     runs-on: ubuntu-latest
     env:
       MIND_ADMIN_TOKEN: ""
