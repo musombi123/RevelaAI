@@ -92,7 +92,13 @@ services:
     plan: starter
     buildCommand: go -C core-one build -o ./genesis-server ./cmd/genesis
     startCommand: ./core-one/genesis-server -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
+    disk:
+      name: genesis-core-one-data
+      mountPath: /var/data/genesis
+      sizeGB: 1
     envVars:
+      - key: GENESIS_REGISTRY_DIR
+        value: /var/data/genesis/tool-registry
       - key: GENESIS_ADMIN_TOKEN
         generateValue: true
       # Render terminates public TLS at the platform proxy; this is a private service.
