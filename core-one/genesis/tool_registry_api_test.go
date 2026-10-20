@@ -33,6 +33,7 @@ func setRegistryAPITestKeys(t *testing.T) {
 func TestRegistryAPITierOneActivationRequiresSeparateOwnerCredential(t *testing.T) {
 	setRegistryAPITestKeys(t)
 	engine := newTestEngine(t)
+	t.Cleanup(func() { _ = makeTreeWritable(filepath.Dir(engine.CoreRoot)) })
 	manifest := validManifestForTest()
 	manifest.Permissions.Network = true
 	manifest.RiskTier = 1
@@ -67,6 +68,7 @@ func TestRegistryAPITierOneActivationRequiresSeparateOwnerCredential(t *testing.
 func TestRegistryAPITierTwoConfirmationRequiresActionCredentialAndMintsOneUseToken(t *testing.T) {
 	setRegistryAPITestKeys(t)
 	engine := newTestEngine(t)
+	t.Cleanup(func() { _ = makeTreeWritable(filepath.Dir(engine.CoreRoot)) })
 	manifest := validManifestForTest()
 	manifest.Permissions.Hardware = true
 	manifest.RiskTier = 2
