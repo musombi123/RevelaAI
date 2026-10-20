@@ -36,6 +36,13 @@ func auditEventHash(event AuditEvent) string {
 
 func verifyAuditBytes(data []byte) AuditVerification {
 	result := AuditVerification{Status: "verified", Verified: true, ChainValid: true}
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		result.ChainValid = false
+		result.Verified = false
+		result.Status = "invalid"
+		result.Error = "audit log ends with an incomplete record"
+		return result
+	}
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 64*1024), maxAuditRecordBytes)
 	previousHash := ""
