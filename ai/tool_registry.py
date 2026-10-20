@@ -88,7 +88,7 @@ def _configuration() -> tuple[str, dict[str, str]]:
             is_loopback = is_loopback or ipaddress.ip_address(host.strip("[]")).is_loopback
         except ValueError:
             pass
-        is_render_private = "." not in host and host.lower() != "localhost"
+        is_render_private = bool(re.fullmatch(r"[a-z0-9-]+", host.lower())) and host.lower() != "localhost"
         if not (is_loopback or is_render_private):
             raise GenesisToolRegistryError("Public Genesis hosts must use HTTPS.", code="genesis_url_tls_required", status_code=503)
 
