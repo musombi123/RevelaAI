@@ -96,3 +96,42 @@ def test_only_allowlisted_proposal_fields_are_returned():
     assert proposal["automatic_merge"] is False
     assert "source_code" not in proposal
     assert "admin_token" not in proposal
+
+
+
+def test_genesis_invention_calls_genesis_service_directly(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-genesis-token")
+    monkeypatch.delenv("MIND_ADMIN_TOKEN", raising=False)
+    observed = {}
+
+    def fake_request(base, path, **kwargs):
+        observed.update(base=base, path=path, kwargs=kwargs)
+        return {"id": "proposal-1", "name": "safe_tool", "status": "await_merge"}
+
+    monkeypatch.setattr(core_mesh, "_request_json", fake_request)
+    result = core_mesh.propose_genesis_invention("Create a safe document summarizer")
+
+    assert observed["base"] == "https://genesis.example.com"
+    assert observed["path"] == "/v1/genesis/invent"
+    assert observed["kwargs"]["headers"]["X-Genesis-Token"] == "test-genesis-token"
+    assert "X-Mind-Token" not in observed["kwargs"]["headers"]
+    assert result["human_approval_required"] is True
+
+
+def test_genesis_unreachable_is_explicit_and_does_not_fallback_to_mind(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-genesis-token")
+
+    def unavailable(*args, **kwargs):
+        raise core_mesh.CoreMeshError(
+            "Core service is unreachable.",
+            status_code=502,
+            code="core_service_unreachable",
+        )
+
+    monkeypatch.setattr(core_mesh, "_request_json", unavailable)
+    with pytest.raises(core_mesh.CoreMeshError) as error:
+        core_mesh.propose_genesis_invention("Create a safe document summarizer")
+    assert error.value.code == "genesis_unavailable"
+    assert error.value.status_code == 503
