@@ -3,6 +3,7 @@ package genesis
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -42,6 +43,58 @@ type sandboxCommandRunner func(context.Context, string, ...string) ([]byte, erro
 // the candidate fails closed and is never signed.
 func RunCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest) (SandboxEvidence, error) {
 	return runCandidateSandboxWithValidator(ctx, candidateDir, evidenceDir, manifest, runSandboxCommand, nil)
+}
+
+func newDockerContainerName(prefix string) (string, error) {
+	var nonce [12]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", errors.New("could not allocate a unique sandbox container name")
+	}
+	prefix = strings.ToLower(strings.Trim(prefix, "-"))
+	if prefix == "" {
+		prefix = "genesis-sandbox"
+	}
+	for _, ch := range prefix {
+		if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-') {
+			return "", errors.New("sandbox container name prefix is invalid")
+		}
+	}
+	return prefix + "-" + hex.EncodeToString(nonce[:]), nil
+}
+
+func dockerRunArgsWithName(args []string, name string) ([]string, error) {
+	if len(args) == 0 || args[0] != "run" || name == "" {
+		return nil, errors.New("invalid Docker run arguments")
+	}
+	named := make([]string, 0, len(args)+2)
+	named = append(named, "run", "--name", name)
+	named = append(named, args[1:]...)
+	return named, nil
+}
+
+// cleanupDockerContainer removes a named container even if the Docker client
+// was killed by its context deadline. The cleanup itself is bounded and its
+// environment contains no application credentials.
+func cleanupDockerContainer(name string, runner sandboxCommandRunner) {
+	if name == "" || runner == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _ = runner(ctx, "docker", "rm", "-f", name)
+}
+
+func runNamedDockerContainer(ctx context.Context, runner sandboxCommandRunner, prefix string, args ...string) ([]byte, error) {
+	name, err := newDockerContainerName(prefix)
+	if err != nil {
+		return nil, err
+	}
+	namedArgs, err := dockerRunArgsWithName(args, name)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanupDockerContainer(name, runner)
+	return runner(ctx, "docker", namedArgs...)
 }
 
 func runSandboxCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -181,7 +234,12 @@ func runCandidateSandboxWithValidator(
 	}
 
 	started := time.Now().UTC()
-	log, runErr := runner(ctx, "docker", dockerSandboxArgs(sourceDir, manifest)...)
+	log, runErr := runNamedDockerContainer(
+		ctx,
+		runner,
+		"genesis-build",
+		dockerSandboxArgs(sourceDir, manifest)...,
+	)
 	isolation := "docker_constraints_requested_host_enforcement_unverified"
 	if runErr != nil && dockerUnavailable(log, runErr) {
 		isolation = "docker_unavailable_fail_closed"
