@@ -42,7 +42,7 @@ type sandboxCommandRunner func(context.Context, string, ...string) ([]byte, erro
 // cannot start or its daemon/image is unavailable. If neither jail can enforce
 // its requested constraints, the candidate fails closed and is never signed.
 func RunCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest) (SandboxEvidence, error) {
-	return runCandidateSandbox(ctx, candidateDir, evidenceDir, manifest, runSandboxCommand)
+	return runCandidateSandboxWithValidator(ctx, candidateDir, evidenceDir, manifest, runSandboxCommand, nil)
 }
 
 func runSandboxCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -132,6 +132,17 @@ func bubblewrapSandboxArgs(candidateDir string, manifest ToolManifest) []string 
 }
 
 func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest, runner sandboxCommandRunner) (SandboxEvidence, error) {
+	return runCandidateSandboxWithValidator(ctx, candidateDir, evidenceDir, manifest, runner, nil)
+}
+
+func runCandidateSandboxWithValidator(
+	ctx context.Context,
+	candidateDir,
+	evidenceDir string,
+	manifest ToolManifest,
+	runner sandboxCommandRunner,
+	validateStaged func(string) error,
+) (SandboxEvidence, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -164,6 +175,14 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 	defer cleanupSource()
 	if err := validateSandboxCandidate(sourceDir, manifest); err != nil {
 		return SandboxEvidence{}, err
+	}
+	// Re-run Guardian against the exact private snapshot that will be sandboxed.
+	// A mutable invention directory cannot swap in content between screening
+	// and sandbox staging without this staged-snapshot check seeing the change.
+	if validateStaged != nil {
+		if err := validateStaged(sourceDir); err != nil {
+			return SandboxEvidence{}, errors.New("Guardian refused staged candidate snapshot before sandbox execution")
+		}
 	}
 
 	started := time.Now().UTC()
