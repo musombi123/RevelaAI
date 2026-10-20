@@ -503,7 +503,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		replyJSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"gateway": probeDependency(os.Getenv("USECT_ZERO_GATEWAY_URL"), "/api/usect-zero/health"),
-			"core_one": probeDependency(os.Getenv("GENESIS_BASE_URL"), "/v1/health"),
+			"core_one": probeDependency(os.Getenv("GENESIS_BASE_URL"), "/v1/genesis/health"),
 			"core_two": probeDependency(os.Getenv("MIND_BASE_URL"), "/v1/mind/health"),
 			"kill_switch_active": killSwitch,
 			"health_checks_are_advisory": true,
