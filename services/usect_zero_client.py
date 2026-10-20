@@ -76,9 +76,11 @@ def _configured_base_url() -> str:
     if not raw:
         # A loopback default is convenient for local development only. Render
         # and other production deployments must configure an explicit service URL.
-        production = any(
-            os.getenv(name, "").strip().lower() in _ENABLED_VALUES
-            for name in ("RENDER", "RENDER_SERVICE_ID", "K_SERVICE", "DYNO")
+        production = (
+            any(os.getenv(name, "").strip() for name in (
+                "RENDER_SERVICE_ID", "RENDER_EXTERNAL_URL", "K_SERVICE", "DYNO"
+            ))
+            or os.getenv("RENDER", "").strip().lower() in _ENABLED_VALUES
         )
         if production:
             raise USECTZeroConfigurationError(
