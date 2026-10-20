@@ -15,17 +15,6 @@ paths:
       operationId: submitUnknownKnowledge
       summary: Submit a teaching packet for an unknown topic
       description: Notes are private by default. Explicit sharing consent may trigger a Genesis proposal, which must be reviewed and merged by a human.
-      securitySchemes:
-    OrganAdminToken:
-      type: apiKey
-      in: header
-      name: X-Organ-Admin-Token
-  parameters:
-    OrganAdminToken:
-      name: X-Organ-Admin-Token
-      in: header
-      required: true
-      schema: {type: string, minLength: 32}
         - $ref: '#/components/parameters/Country'
         - $ref: '#/components/parameters/Language'
       requestBody:
@@ -547,7 +536,16 @@ paths:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    OrganAdminToken:
+      type: apiKey
+      in: header
+      name: X-Organ-Admin-Token
   parameters:
+    OrganAdminToken:
+      name: X-Organ-Admin-Token
+      in: header
+      required: true
+      schema: {type: string, minLength: 32}
     Country:
       name: country
       in: query
