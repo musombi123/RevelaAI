@@ -194,7 +194,7 @@ def ready():
     configured_providers = provider_status.get("providers", {})
     gemini_validation = provider_status.get("gemini_model_validation", {})
     provider_checks: dict[str, Any] = {}
-    for public_name, status_name in (("gemini", "gemini"), ("groq", "groq"), ("hf", "huggingface"), ("mvi", "mvi")):
+    for public_name, status_name in (("gemini", "gemini"), ("hf", "huggingface"), ("mvi", "mvi")):
         info = configured_providers.get(status_name, {}) if isinstance(configured_providers, dict) else {}
         info = info if isinstance(info, dict) else {}
         is_configured = bool(info.get("configured"))
