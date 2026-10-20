@@ -10,6 +10,9 @@ services:
     envVars:
       - key: REVELAAI_TEXT_PROVIDERS
         value: "gemini,hf,mvi"
+      # Browser origins for the FastAPI gateway; the source website is not the API URL.
+      - key: CORS_ORIGINS
+        value: "https://revelacode.co.ke,https://www.revelacode.co.ke,https://revelacode-frontend.onrender.com"
       # Authoritative platform-admin verifier used by routes/meta_engineer_routes.py.
       # Keep this server-side; bearer JWTs are never sent to the Go core.
       - key: REVELACODE_BACKEND_URL
@@ -76,6 +79,9 @@ services:
         value: /var/data/usect-zero
       - key: USECT_ZERO_ADMIN_TOKEN
         generateValue: true
+      # Browser CORS only; the gateway reaches this private service server-to-server.
+      - key: USECT_ZERO_CORS_ORIGINS
+        value: "https://revelacode.co.ke,https://revelaai.onrender.com"
   # Core-One: standalone Genesis service. Build from the repository root so
   # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
   - type: pserv
