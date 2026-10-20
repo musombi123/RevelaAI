@@ -324,22 +324,35 @@ func registryPublicKey() (ed25519.PublicKey, error) {
 }
 
 func registryRoot(coreRoot string) (string, error) {
-	if strings.TrimSpace(coreRoot) == "" {
-		return "", errors.New("Genesis registry root is not configured")
+	configured := strings.TrimSpace(os.Getenv("GENESIS_REGISTRY_DIR"))
+	var root string
+	if configured != "" {
+		// A dedicated persistent data mount can keep signed versions across
+		// Render rebuilds. The configured directory is still checked against
+		// symlinks and non-directory paths before use.
+		abs, err := filepath.Abs(filepath.Clean(configured))
+		if err != nil {
+			return "", errors.New("configured Genesis registry directory is invalid")
+		}
+		root = abs
+	} else {
+		if strings.TrimSpace(coreRoot) == "" {
+			return "", errors.New("Genesis registry root is not configured")
+		}
+		base, err := filepath.Abs(filepath.Clean(coreRoot))
+		if err != nil {
+			return "", errors.New("Genesis registry root is invalid")
+		}
+		info, err := os.Lstat(base)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return "", errors.New("Genesis repository root is unsafe or unavailable")
+		}
+		root = filepath.Join(base, registryRootName)
 	}
-	base, err := filepath.Abs(filepath.Clean(coreRoot))
-	if err != nil {
-		return "", errors.New("Genesis registry root is invalid")
-	}
-	info, err := os.Lstat(base)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", errors.New("Genesis repository root is unsafe or unavailable")
-	}
-	root := filepath.Join(base, registryRootName)
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return "", errors.New("Genesis registry storage is unavailable")
 	}
-	info, err = os.Lstat(root)
+	info, err := os.Lstat(root)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return "", errors.New("Genesis registry directory is unsafe")
 	}
