@@ -1208,7 +1208,7 @@ components:
       tags: [bridge]
       operationId: actuateEnrolledESP32
       summary: Execute one allowlisted GPIO action on an enrolled ESP32
-      description: Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION on every action. Only set_gpio with pin 0-39 and value 0 or 1 is supported; arbitrary serial commands and firmware flashing are not exposed.
+      description: Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION on every action. Only set_gpio on curated output pins with value 0 or 1 is supported; arbitrary serial commands and firmware flashing are not exposed.
       security: [{DeviceToken: []}]
       parameters:
         - name: device_id
@@ -2313,7 +2313,7 @@ components:
       required: [name, pin, value]
       properties:
         name: {type: string, const: set_gpio}
-        pin: {type: integer, minimum: 0, maximum: 39}
+        pin: {type: integer, enum: [4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33]}
         value: {type: integer, enum: [0, 1]}
         confirmation: {type: string, description: Required for every Tier 2 action; value CONFIRM_DEVICE_ACTION.}
     AssemblyBoardProfile:
