@@ -15,7 +15,17 @@ paths:
       operationId: submitUnknownKnowledge
       summary: Submit a teaching packet for an unknown topic
       description: Notes are private by default. Explicit sharing consent may trigger a Genesis proposal, which must be reviewed and merged by a human.
-      parameters:
+      securitySchemes:
+    OrganAdminToken:
+      type: apiKey
+      in: header
+      name: X-Organ-Admin-Token
+  parameters:
+    OrganAdminToken:
+      name: X-Organ-Admin-Token
+      in: header
+      required: true
+      schema: {type: string, minLength: 32}
         - $ref: '#/components/parameters/Country'
         - $ref: '#/components/parameters/Language'
       requestBody:
@@ -798,6 +808,83 @@ paths:
           description: Audit events with minimized details
         '403':
           description: Not authorized
+
+
+  /api/usect/evolve/health:
+    get:
+      operationId: getUsectEvolveHealth
+      summary: Check USECT-EVOLVE proposal service health
+      security: []
+      responses:
+        '200':
+          description: Evolver health and operating mode
+  /api/usect/evolve/proposals:
+    post:
+      operationId: createUsectEvolutionProposal
+      summary: Create a bounded, auditable evolution proposal
+      parameters:
+        - $ref: '#/components/parameters/OrganAdminToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [system_id, objective, metrics]
+              properties:
+                system_id: {type: string, minLength: 1, maxLength: 120}
+                objective: {type: string, minLength: 8, maxLength: 2000}
+                requested_depth: {type: integer, minimum: 1, maximum: 3, default: 1}
+                metrics: {type: array, minItems: 1, maxItems: 12, items: {type: object}}
+      responses:
+        '201': {description: Proposal created; deployment is not authorized}
+        '401': {description: Invalid organ administrator token}
+        '503': {description: Organ administration is not configured}
+  /api/usect/evolve/proposals/{proposal_id}/evaluate:
+    post:
+      operationId: evaluateUsectEvolutionProposal
+      summary: Evaluate a proposal against measured observations and review gates
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string}
+        - $ref: '#/components/parameters/OrganAdminToken'
+      responses:
+        '200': {description: Evidence-based evaluation report}
+        '404': {description: Proposal not found}
+  /api/usect/migrate/devices:
+    get:
+      operationId: listUsectEnrolledDevices
+      summary: List explicitly enrolled migration targets
+      parameters:
+        - $ref: '#/components/parameters/OrganAdminToken'
+      responses:
+        '200': {description: Enrolled devices and verified capabilities}
+  /api/usect/migrate/devices/enroll:
+    post:
+      operationId: enrollUsectMigrationDevice
+      summary: Register an explicitly authorized device inventory
+      parameters:
+        - $ref: '#/components/parameters/OrganAdminToken'
+      responses:
+        '201': {description: Device enrolled; remote access remains disabled}
+  /api/usect/migrate/plans:
+    post:
+      operationId: createUsectMigrationPlan
+      summary: Produce a capability-checked, digest-bound migration plan
+      parameters:
+        - $ref: '#/components/parameters/OrganAdminToken'
+      responses:
+        '201': {description: Dry-run or approval-gated migration plan}
+  /api/usect/migrate/robot-blueprints:
+    post:
+      operationId: createUsectRobotBlueprint
+      summary: Propose a robot blueprint from verified enrolled hardware resources
+      parameters:
+        - $ref: '#/components/parameters/OrganAdminToken'
+      responses:
+        '201': {description: Planning-only blueprint; physical actuation is disabled}
 
 components:
   securitySchemes:
