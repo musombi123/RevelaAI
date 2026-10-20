@@ -12,13 +12,8 @@ def _manifest(*, risk_tier: int = 0, network: bool = False, hardware: bool = Fal
         "version": "1.0.0",
         "language": "go",
         "entrypoint": "code.go",
-        "input_schema": {
-            "type": "object",
-            "properties": {"action": {"type": "string"}},
-            "required": ["action"],
-            "additionalProperties": False,
-        },
-        "output_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+        "input_schema": tool_registry._RUNTIME_INPUT_SCHEMA,
+        "output_schema": tool_registry._RUNTIME_OUTPUT_SCHEMA,
         "risk_tier": risk_tier,
         "permissions": {
             "network": network,
