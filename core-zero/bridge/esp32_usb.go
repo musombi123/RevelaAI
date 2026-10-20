@@ -71,7 +71,7 @@ func (a *ESP32USBAdapter) Connect(deviceID, token string) error {
 	if err != nil {
 		return fmt.Errorf("inspect enrolled serial port: %w", err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeDevice == 0 {
+	if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeCharDevice == 0 {
 		return errors.New("enrolled serial port is not a physical device node")
 	}
 
