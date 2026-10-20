@@ -3,6 +3,9 @@ info:
   title: Revela Infinite Mind Integrated Gateway
   version: 0.2.0
   summary: Additive API contract for Core-Zero, Core-One, and Core-Two.
+  license:
+    name: Apache 2.0
+    identifier: Apache-2.0
   description: >
     Core-Two routes are implemented by Infinite Mind. Core-One and Core-Zero
     routes are namespaced proxies. Mind only recommends changes; it never merges
@@ -10,6 +13,7 @@ info:
 servers:
   - url: http://127.0.0.1:8782
     description: Local development. Public deployment requires TLS and rate limiting.
+security: []
 tags:
   - name: mind
     description: Read-only observations, Guardian-gated proposals, telemetry and canary recommendations.
