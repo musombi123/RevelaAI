@@ -45,3 +45,17 @@ def test_local_development_keeps_loopback_default():
 def test_admin_token_is_read_from_server_environment(monkeypatch):
     monkeypatch.setenv("USECT_ZERO_ADMIN_TOKEN", "test-only-token")
     assert client._admin_token() == "test-only-token"
+
+
+def test_connection_failure_is_reported_as_zero_unavailable(monkeypatch):
+    import requests
+
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    monkeypatch.setenv("USECT_ZERO_URL", "http://zero.internal:8780")
+
+    def fail_request(*args, **kwargs):
+        raise requests.ConnectionError("connection refused")
+
+    monkeypatch.setattr(client.requests, "request", fail_request)
+    with pytest.raises(client.USECTZeroUnavailable, match="service is unavailable"):
+        client.request_core("GET", "/v1/health")
