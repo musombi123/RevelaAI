@@ -3,6 +3,9 @@ package api
 import (
 	"net/http"
 	"testing"
+	"time"
+
+	"usect-zero.local/core-zero/bridge"
 )
 
 func TestDeviceEnrollmentAndImmediateRevocation(t *testing.T) {
