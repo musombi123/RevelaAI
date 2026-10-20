@@ -424,7 +424,7 @@ def list_genesis_proposals() -> dict:
 def get_genesis_proposal(name: str) -> dict:
     """Return a sanitized proposal summary, never raw saved research or source material."""
     name = str(name or "").strip()
-    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+    if not re.fullmatch(r"[a-z0-9_-]{1,64}", name):
         raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
     payload = _genesis_request("/v1/genesis/tools/" + quote(name, safe=""))
     return _public_genesis_detail(payload)
@@ -481,7 +481,7 @@ def _public_genesis_detail(payload: dict) -> dict:
 
 def get_genesis_hardware_guide(name: str, country: str = "KE", language: str = "") -> dict:
     name = str(name or "").strip()
-    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+    if not re.fullmatch(r"[a-z0-9_-]{1,64}", name):
         raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
     query = urlencode({"country": str(country or "KE")[:3], "lang": str(language or "")[:20]})
     return _genesis_request(
@@ -491,7 +491,7 @@ def get_genesis_hardware_guide(name: str, country: str = "KE", language: str = "
 
 def get_genesis_capability_plan(name: str) -> dict:
     name = str(name or "").strip()
-    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
+    if not re.fullmatch(r"[a-z0-9_-]{1,64}", name):
         raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
     return _genesis_request(
         "/v1/genesis/tools/" + quote(name, safe="") + "/capability_plan"
