@@ -645,7 +645,16 @@ def propose_mind_evolution(objective: str, tool_name: str) -> dict:
         headers=_upstream_headers(mutation=True),
         timeout=40.0,
     )
-    return _public_proposal(payload)
+    result = _public_proposal(payload)
+    result.update({
+        "target_core": "core-one",
+        "operation_kind": "core_one_improvement_proposal",
+        "target_modified": False,
+        "human_approval_required": True,
+        "automatic_merge": False,
+        "automatic_execution": False,
+    })
+    return result
 
 
 # Only immutable candidate metadata crosses this bridge. Source files and prompts
