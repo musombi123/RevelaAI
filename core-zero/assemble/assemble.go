@@ -575,10 +575,11 @@ func ValidateTemplate(t Template) Validation {
 
 	if connectionOK {
 		for _, c := range t.Connections {
-			if _, ok := parts[c.FromPartID]; !ok ||
-				_, duplicate := parts[c.ToPartID]; !duplicate ||
-				c.FromPartID == c.ToPartID {
-
+			if _, ok := parts[c.FromPartID]; !ok {
+				connectionOK = false
+				break
+			}
+			if _, ok := parts[c.ToPartID]; !ok || c.FromPartID == c.ToPartID {
 				connectionOK = false
 				break
 			}
