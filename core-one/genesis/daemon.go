@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -380,11 +379,15 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 				failed,
 				entry.Name(),
 				"oversized-entry",
-			); moveErr != nil && firstErr == nil {
-				firstErr = fmt.Errorf(
-					"quarantine oversized queue entry: %w",
-					moveErr,
-				)
+			); moveErr != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf(
+						"quarantine oversized queue entry: %w",
+						moveErr,
+					)
+				}
+			} else if firstErr == nil {
+				firstErr = fmt.Errorf("oversized queue entry %s was quarantined", entry.Name())
 			}
 			continue
 		}
@@ -431,7 +434,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 				item.Status = "blocked"
 				item.Error = "Guardian blocked the demand during queue processing; no invention was generated."
 
-				if err := finalizeQueueRecord(
+				if err := e.finalizeQueueRecord(
 					root,
 					claim,
 					entry.Name(),
@@ -446,7 +449,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 			item.Status = "failed"
 			item.Error = limitText(validationErr.Error(), 500)
 
-			if err := finalizeQueueRecord(
+			if err := e.finalizeQueueRecord(
 				root,
 				claim,
 				entry.Name(),
@@ -540,7 +543,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 			}
 		}
 
-		if err := finalizeQueueRecord(
+		if err := e.finalizeQueueRecord(
 			root,
 			claim,
 			entry.Name(),
@@ -827,7 +830,7 @@ func readQueueDemand(path, filename string) (Demand, error) {
 
 // finalizeQueueRecord writes a durable status record before removing the
 // processing claim. The original Source value remains available for provenance.
-func finalizeQueueRecord(
+func (e *Engine) finalizeQueueRecord(
 	root string,
 	claim string,
 	filename string,

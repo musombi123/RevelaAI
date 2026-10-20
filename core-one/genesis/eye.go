@@ -61,7 +61,7 @@ var (
 		"repository": true, "kenya": true, "demand": true,
 		"emerging": true, "hardware": true, "integration": true,
 		"standards": true, "innovation": true, "available": true,
-		"recent": true, "search": true, "their": true,
+		"recent": true, "search": true,
 	}
 )
 
@@ -860,10 +860,7 @@ func repeatedTopic(sources []ResearchSource) (string, int) {
 		text := strings.ToLower(source.Title + " " + source.Snippet)
 
 		tokens := strings.FieldsFunc(text, func(r rune) bool {
-			return !(
-				(r >= 'a' && r <= 'z') ||
-					(r >= '0' && r <= '9')
-			)
+			return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
 		})
 
 		sourceTopics := make(map[string]struct{})

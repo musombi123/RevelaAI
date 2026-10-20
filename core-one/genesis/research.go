@@ -2,7 +2,6 @@ package genesis
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"

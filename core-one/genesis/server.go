@@ -330,6 +330,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/v1/genesis/key":
 		methodNotAllowed(w, "GET, POST")
 
+	case path == "/v1/genesis/telemetry/tool-calls":
+		s.serveToolTelemetry(w, r)
+
+	case path == "/v1/genesis/registry/tools" || strings.HasPrefix(path, "/v1/genesis/registry/tools/"):
+		s.serveRegistry(w, r, path)
+
 	case path == "/v1/rvx/compile" && r.Method == http.MethodPost:
 		if !s.allowMutation(w, r) {
 			return
@@ -1075,21 +1081,5 @@ func writeAPIError(w http.ResponseWriter, status int, code, message string) {
 }
 
 func validResourceName(name string) bool {
-	if name == "" ||
-		len(name) > 64 ||
-		name == "." ||
-		name == ".." {
-		return false
-	}
-
-	for _, r := range name {
-		if !(r >= 'a' && r <= 'z' ||
-			r >= '0' && r <= '9' ||
-			r == '_' ||
-			r == '-') {
-			return false
-		}
-	}
-
-	return true
+	return toolManifestNamePattern.MatchString(name)
 }
