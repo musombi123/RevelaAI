@@ -3,6 +3,8 @@ package genesis
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -89,10 +91,10 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 		return SandboxEvidence{}, errors.New("sandbox evidence directory is unavailable")
 	}
 
-	image, command := "golang:1.23-alpine", []string{"sh", "-lc", "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && GO111MODULE=off GOCACHE=/tmp/gocache go test . && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."}
+	image, command := "golang:1.23-alpine", []string{"sh", "-lc", "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."}
 	if manifest.Language == "python" {
 		image = "python:3.12-alpine"
-		command = []string{"sh", "-lc", "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && python -m compileall -q . && python -m unittest discover -v"}
+		command = []string{"sh", "-lc", "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"}
 	}
 	args := []string{
 		"run", "--rm", "--pull=never",
@@ -120,15 +122,24 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 	if len(log) > maxSandboxLogBytes {
 		log = log[:maxSandboxLogBytes]
 	}
+	manifestJSON, _ := json.Marshal(manifest)
+	manifestDigest := sha256.Sum256(manifestJSON)
+	logText := string(log)
+	testLog, buildLog := logText, ""
+	if split := strings.Index(logText, "GENESIS_BUILD_BEGIN"); split >= 0 {
+		testLog = strings.TrimSpace(strings.TrimPrefix(logText[:split], "GENESIS_TESTS_BEGIN"))
+		buildLog = strings.TrimSpace(logText[split+len("GENESIS_BUILD_BEGIN"):])
+	}
 	evidence := SandboxEvidence{
 		ToolName: manifest.Name,
+		ManifestHash: hex.EncodeToString(manifestDigest[:]),
 		StartedAt: started,
 		FinishedAt: finished,
 		Passed: runErr == nil,
 		ExitCode: 0,
 		IsolationLevel: "docker_constraints_requested_host_enforcement_unverified",
-		BuildLog: string(log),
-		TestLog: string(log),
+		BuildLog: buildLog,
+		TestLog: testLog,
 	}
 	if runErr != nil {
 		evidence.ExitCode = 1
