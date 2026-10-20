@@ -188,6 +188,10 @@ paths:
       responses:
         '200':
           description: Canary recommendation with evidence; promotion and rollback are not executed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateScoreResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -285,6 +289,8 @@ paths:
           $ref: '#/components/responses/Unavailable'
   /v1/zero/scan:
     get:
+      security:
+        - ZeroAPIKey: []
       tags: [zero]
       operationId: proxyZeroScan
       summary: Proxy Core-Zero evidence scan
@@ -299,8 +305,10 @@ paths:
       operationId: proxyZeroKeyRequest
       summary: Proxy a Core-Zero key request
       security:
-        - MindToken: [ ]
-        - MindHeaderToken: [ ]
+        - MindToken: []
+          ZeroAPIKey: []
+        - MindHeaderToken: []
+          ZeroAPIKey: []
       requestBody:
         required: true
         content:
@@ -316,6 +324,8 @@ paths:
           $ref: '#/components/responses/Unavailable'
   /v1/zero/keys/requests:
     get:
+      security:
+        - ZeroAdminToken: []
       tags: [zero]
       operationId: proxyZeroKeyRequests
       summary: Proxy the Core-Zero pending key request list
@@ -331,7 +341,9 @@ paths:
       summary: Proxy a key approval request to Core-Zero
       security:
         - MindToken: []
+          ZeroAdminToken: []
         - MindHeaderToken: []
+          ZeroAdminToken: []
       parameters:
         - name: request_id
           in: path
@@ -351,7 +363,9 @@ paths:
       summary: Proxy key revocation to Core-Zero
       security:
         - MindToken: []
+          ZeroAdminToken: []
         - MindHeaderToken: []
+          ZeroAdminToken: []
       parameters:
         - name: key_id
           in: path
@@ -366,6 +380,8 @@ paths:
           $ref: '#/components/responses/Unavailable'
   /v1/zero/heal/baseline:
     get:
+      security:
+        - ZeroAPIKey: []
       tags: [zero]
       operationId: proxyZeroHealingBaseline
       summary: Read the Core-Zero healing baseline
@@ -376,6 +392,8 @@ paths:
           $ref: '#/components/responses/Unavailable'
   /v1/zero/heal/proposals:
     get:
+      security:
+        - ZeroAPIKey: []
       tags: [zero]
       operationId: proxyZeroHealingProposals
       summary: Read Core-Zero healing proposals
@@ -391,7 +409,9 @@ paths:
       summary: Proxy proposal approval to Core-Zero
       security:
         - MindToken: []
+          ZeroAdminToken: []
         - MindHeaderToken: []
+          ZeroAdminToken: []
       parameters:
         - name: proposal_id
           in: path
@@ -406,6 +426,8 @@ paths:
           $ref: '#/components/responses/Unavailable'
   /v1/zero/assemble/templates:
     get:
+      security:
+        - ZeroAPIKey: []
       tags: [zero]
       operationId: proxyZeroAssemblyTemplates
       summary: List Core-Zero assembly templates
@@ -421,7 +443,9 @@ paths:
       summary: Proxy a guarded assembly request to Core-Zero
       security:
         - MindToken: []
+          ZeroAPIKey: []
         - MindHeaderToken: []
+          ZeroAPIKey: []
       requestBody:
         required: true
         content:
@@ -441,7 +465,9 @@ paths:
       summary: Proxy a comparison request to Core-Zero
       security:
         - MindToken: []
+          ZeroAPIKey: []
         - MindHeaderToken: []
+          ZeroAPIKey: []
       requestBody:
         required: true
         content:
@@ -461,7 +487,9 @@ paths:
       summary: Proxy a bridge planning request to Core-Zero
       security:
         - MindToken: []
+          ZeroAPIKey: []
         - MindHeaderToken: []
+          ZeroAPIKey: []
       requestBody:
         required: true
         content:
@@ -481,7 +509,9 @@ paths:
       summary: Proxy the existing Core-Zero RVX compile endpoint
       security:
         - MindToken: []
+          ZeroAPIKey: []
         - MindHeaderToken: []
+          ZeroAPIKey: []
       requestBody:
         required: true
         content:
@@ -496,6 +526,8 @@ paths:
           $ref: '#/components/responses/Unavailable'
   /v1/zero/mind/ide:
     get:
+      security:
+        - ZeroAPIKey: []
       tags: [zero]
       operationId: proxyZeroMindIDE
       summary: Proxy the Core-Zero IDE endpoint
@@ -796,6 +828,49 @@ components:
           type: string
           minLength: 1
           maxLength: 500
+    CandidateScoreResult:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [blocked, hold, promote, rollback]
+        candidate_id:
+          type: string
+        tool_name:
+          type: string
+        guardian_passed:
+          type: boolean
+        core_one_guardian_passed:
+          type: boolean
+        scored:
+          type: boolean
+        score:
+          type: number
+        ranking_context_score:
+          type: number
+        canary:
+          $ref: '#/components/schemas/CanaryDecision'
+        evidence_recorded_at:
+          type: string
+          format: date-time
+        evidence_path:
+          type: string
+        synthetic_fixture:
+          type: boolean
+          const: false
+        production_verified:
+          type: boolean
+          const: false
+        automatic_merge:
+          type: boolean
+          const: false
+        promotion_executed:
+          type: boolean
+          const: false
+        rollback_executed:
+          type: boolean
+          const: false
     CanaryDecision:
       type: object
       additionalProperties: false
