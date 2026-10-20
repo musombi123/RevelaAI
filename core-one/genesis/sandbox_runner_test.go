@@ -173,3 +173,42 @@ func TestGoCandidateRejectsUncopiedHelperModules(t *testing.T) {
 		t.Fatal("candidate containing a helper module omitted by runtime must be rejected")
 	}
 }
+
+
+func TestNamedSandboxContainerGetsCleanupAfterTimeout(t *testing.T) {
+	type invocation struct {
+		name string
+		args []string
+	}
+	var calls []invocation
+	runner := func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, invocation{name: name, args: append([]string(nil), args...)})
+		if len(calls) == 1 {
+			return []byte("runner timed out"), context.DeadlineExceeded
+		}
+		return nil, nil
+	}
+	_, err := runNamedDockerContainer(
+		context.Background(),
+		runner,
+		"genesis-test",
+		[]string{"run", "--rm", "--network=none", "python:3.12-alpine", "sh", "-lc", "true"}...,
+	)
+	if err == nil {
+		t.Fatal("runner timeout must remain a failed sandbox result")
+	}
+	if len(calls) != 2 {
+		t.Fatalf("expected run and cleanup calls, got %d", len(calls))
+	}
+	if calls[0].name != "docker" || len(calls[0].args) < 3 || calls[0].args[0] != "run" || calls[0].args[1] != "--name" {
+		t.Fatalf("Docker run must have a unique explicit container name: %#v", calls[0])
+	}
+	containerName := calls[0].args[2]
+	if !strings.HasPrefix(containerName, "genesis-test-") {
+		t.Fatalf("unexpected container name: %q", containerName)
+	}
+	if calls[1].name != "docker" || len(calls[1].args) != 3 ||
+		calls[1].args[0] != "rm" || calls[1].args[1] != "-f" || calls[1].args[2] != containerName {
+		t.Fatalf("timed-out container cleanup was not attempted: %#v", calls[1])
+	}
+}
