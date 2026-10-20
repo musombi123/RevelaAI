@@ -199,3 +199,23 @@ func TestTierTwoConfirmationIsBoundToExactArgumentsAndConsumedOnce(t *testing.T)
 		t.Fatal("the same confirmation token must not be reusable")
 	}
 }
+
+
+func TestRegistryUsesConfiguredPersistentDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "persistent-registry")
+	t.Setenv("GENESIS_REGISTRY_DIR", root)
+	resolved, err := registryRoot("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != root {
+		t.Fatalf("configured registry root was not used: got %q want %q", resolved, root)
+	}
+	info, err := os.Lstat(resolved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("persistent registry directory must be private: mode=%v", info.Mode().Perm())
+	}
+}
