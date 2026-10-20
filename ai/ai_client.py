@@ -296,17 +296,16 @@ TEXT_PROVIDER_ORDER = [
     item.strip().lower()
     for item in os.getenv(
         "REVELAAI_TEXT_PROVIDERS",
-        "gemini,groq,hf,mvi",
+        "gemini,hf,mvi",
     ).split(",")
     if item.strip()
 ]
 
 if not TEXT_PROVIDER_ORDER:
-    TEXT_PROVIDER_ORDER = ["gemini", "groq", "hf", "mvi"]
+    TEXT_PROVIDER_ORDER = ["gemini", "hf", "mvi"]
 
 
 # =========================================================
-# GROQ TEXT CONFIGURATION
 # =========================================================
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
@@ -609,8 +608,6 @@ def _provider_enabled(
             and GEMINI_MODEL
         )
 
-    if provider in {"groq", "groqcloud"}:
-        return bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL)
 
     if provider in {
         "mvi",
@@ -774,12 +771,7 @@ def get_text_provider_status() -> dict[str, Any]:
         ),
         "gemini_model_validation": dict(GEMINI_MODEL_VALIDATION),
         "providers": {
-            "groq": {
-                "enabled": bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL),
-                "configured": bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL),
-                "api_key_configured": bool(GROQ_API_KEY),
-                "model": GROQ_MODEL,
-            },
+
             "gemini": {
                 "enabled": bool(
                     GEMINI_ENABLED
@@ -3897,7 +3889,6 @@ def _extract_provider_error(
 
 
 # =========================================================
-# GROQ OPENAI-COMPATIBLE TEXT PROVIDER
 # =========================================================
 
 def _request_groq(*, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
@@ -4241,7 +4232,7 @@ def ask_hf(
 
     Recommended production configuration:
 
-        REVELAAI_TEXT_PROVIDERS=gemini,groq,hf,mvi
+        REVELAAI_TEXT_PROVIDERS=gemini,hf,mvi
     """
 
     if not str(
@@ -4366,115 +4357,6 @@ def ask_hf(
 
                 continue
 
-
-        # =====================================================
-        # GROQ
-        # =====================================================
-
-        if provider in {"groq", "groqcloud"}:
-            started = time.time()
-            try:
-                result = _ask_groq_text(
-                    text=str(text),
-                    system_prompt=str(system_prompt or ""),
-                    session_id=session_id,
-                    context=context,
-                )
-                print("TEXT PROVIDER SUCCESS | provider=groq | "
-                      f"model={result.get('model')} | time={time.time() - started:.2f}s")
-                return result
-            except AIClientError as exc:
-                print("TEXT PROVIDER FAILED | provider=groq | "
-                      f"status={exc.status_code} | error_code={exc.error_code} | "
-                      f"time={time.time() - started:.2f}s")
-                provider_errors.append({
-                    "provider": "groq",
-                    "error": str(exc),
-                    "error_code": exc.error_code or "groq_error",
-                    "status_code": exc.status_code,
-                })
-                continue
-
-        # =====================================================
-        # MVI
-        # =====================================================
-
-        if provider in {
-            "mvi",
-            "mvi-ai",
-            "mvi_ai",
-        }:
-
-            if not _provider_enabled(
-                "mvi"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": (
-                            "MVI provider "
-                            "is not configured."
-                        ),
-                        "error_code": (
-                            "mvi_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _request_mvi(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    context=context,
-                    session_id=session_id,
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=mvi | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=mvi | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "mvi_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
 
         # =====================================================
         # HUGGING FACE
