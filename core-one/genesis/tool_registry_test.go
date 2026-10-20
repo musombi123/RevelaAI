@@ -1,6 +1,7 @@
 package genesis
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -94,7 +95,7 @@ func TestTierTwoInvocationRequiresHashBoundPerActionConfirmation(t *testing.T) {
 	record, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, true))
 	if err != nil { t.Fatal(err) }
 	if _, err := ActivateSignedToolVersion(coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, record.ArtifactHash); err != nil { t.Fatal(err) }
-	_, err = RunSignedToolInvocation(t.Context(), coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, []byte(`{"action":"plan"}`), "")
+	_, err = RunSignedToolInvocation(context.Background(), coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, []byte(`{"action":"plan"}`), "")
 	if err == nil {
 		t.Fatal("Tier 2 tool invocation must be refused without per-action confirmation")
 	}
