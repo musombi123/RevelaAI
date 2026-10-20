@@ -397,8 +397,9 @@ func hashArtifactTree(root string) (string, error) {
 		return "", errors.New("artifact root must be a non-symlink directory")
 	}
 	type fileEntry struct {
-		path string
-		content []byte
+		path     string
+		fullPath string
+		size     int64
 	}
 	var entries []fileEntry
 	var total int64
@@ -423,15 +424,13 @@ func hashArtifactTree(root string) (string, error) {
 		if total > maxRegistryBytes || len(entries) >= maxRegistryFiles {
 			return errors.New("artifact exceeds registry size limits")
 		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		entries = append(entries, fileEntry{path: filepath.ToSlash(rel), content: raw})
+		entries = append(entries, fileEntry{
+			path: filepath.ToSlash(rel), fullPath: path, size: info.Size(),
+		})
 		return nil
 	})
 	if err != nil {
@@ -439,10 +438,28 @@ func hashArtifactTree(root string) (string, error) {
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
 	hash := sha256.New()
+	buffer := make([]byte, 64*1024)
 	for _, entry := range entries {
-		_, _ = io.WriteString(hash, entry.path+"\x00")
-		_, _ = hash.Write(entry.content)
-		_, _ = io.WriteString(hash, "\x00")
+		if _, err := io.WriteString(hash, entry.path+"\x00"); err != nil {
+			return "", errors.New("could not hash artifact path")
+		}
+		file, err := os.Open(entry.fullPath)
+		if err != nil {
+			return "", errors.New("could not read artifact file")
+		}
+		openedInfo, statErr := file.Stat()
+		if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Size() != entry.size {
+			_ = file.Close()
+			return "", errors.New("artifact changed while hashing")
+		}
+		n, copyErr := io.CopyBuffer(hash, file, buffer)
+		closeErr := file.Close()
+		if copyErr != nil || closeErr != nil || n != entry.size {
+			return "", errors.New("artifact changed or could not be read while hashing")
+		}
+		if _, err := io.WriteString(hash, "\x00"); err != nil {
+			return "", errors.New("could not finalize artifact hash")
+		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
@@ -451,7 +468,9 @@ func copyArtifactTree(source, destination string) error {
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return errors.New("could not create artifact copy")
 	}
-	return filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
+	var total int64
+	fileCount := 0
+	err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -469,12 +488,71 @@ func copyArtifactTree(source, destination string) error {
 		if !entry.Type().IsRegular() {
 			return errors.New("artifact contains a non-regular file")
 		}
-		raw, err := os.ReadFile(path)
+		info, err := entry.Info()
 		if err != nil {
 			return err
 		}
-		return atomicWrite(target, raw, 0o400)
+		total += info.Size()
+		fileCount++
+		if total > maxRegistryBytes || fileCount > maxRegistryFiles {
+			return errors.New("artifact exceeds registry size limits")
+		}
+		return copyArtifactFile(path, target, 0o400)
 	})
+	if err != nil {
+		return errors.New("could not copy artifact tree")
+	}
+	return nil
+}
+
+// copyArtifactFile copies with bounded memory into a same-directory temporary
+// file, verifies that the input stayed a regular file of the same size, then
+// atomically renames it to the destination.
+func copyArtifactFile(source, destination string, mode os.FileMode) error {
+	before, err := os.Lstat(source)
+	if err != nil || before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() || before.Size() < 0 || before.Size() > maxRegistryBytes {
+		return errors.New("artifact source is unsafe or oversized")
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		return errors.New("artifact source could not be opened")
+	}
+	defer input.Close()
+	opened, err := input.Stat()
+	if err != nil || !opened.Mode().IsRegular() || opened.Size() != before.Size() {
+		return errors.New("artifact source changed before copy")
+	}
+	temp, err := os.CreateTemp(filepath.Dir(destination), ".artifact-copy-*")
+	if err != nil {
+		return errors.New("artifact temporary file could not be created")
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	n, copyErr := io.CopyBuffer(temp, input, make([]byte, 64*1024))
+	if copyErr != nil || n != before.Size() {
+		_ = temp.Close()
+		return errors.New("artifact source changed or failed during copy")
+	}
+	if err := temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return errors.New("artifact file permissions could not be set")
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return errors.New("artifact temporary file could not be synced")
+	}
+	if err := temp.Close(); err != nil {
+		return errors.New("artifact temporary file could not be closed")
+	}
+	if _, err := os.Lstat(destination); err == nil {
+		return errors.New("artifact copy destination already exists")
+	} else if !os.IsNotExist(err) {
+		return errors.New("artifact copy destination could not be inspected")
+	}
+	if err := os.Rename(tempPath, destination); err != nil {
+		return errors.New("artifact file could not be published")
+	}
+	return nil
 }
 
 func makeTreeReadOnly(root string) error {
