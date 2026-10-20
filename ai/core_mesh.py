@@ -582,8 +582,14 @@ def iter_genesis_events(*, max_events: int = 100):
             event_name = "message"
             data_lines: list[str] = []
             yielded = 0
-            for raw_line in response.iter_lines(decode_unicode=True):
-                line = raw_line or ""
+            # Requests may yield bytes for event-stream responses that do
+            # not declare a charset. Decode explicitly to avoid bytes/str
+            # comparison errors on the first SSE line.
+            for raw_line in response.iter_lines(decode_unicode=False):
+                if isinstance(raw_line, bytes):
+                    line = raw_line.decode("utf-8", errors="replace")
+                else:
+                    line = str(raw_line or "")
                 if len(line) > MAX_RESPONSE_BYTES:
                     raise CoreMeshError("Genesis event line is oversized.", status_code=502, code="genesis_response_too_large")
                 if line.startswith(":"):
