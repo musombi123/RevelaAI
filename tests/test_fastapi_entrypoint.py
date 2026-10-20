@@ -541,3 +541,56 @@ def test_native_stream_route_rejects_empty_message_before_provider_calls() -> No
     assert response.json()["error"]["code"] == "EMPTY_MESSAGE"
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
+
+
+def test_legacy_route_module_names_are_native_fastapi_router_aliases() -> None:
+    from fastapi import APIRouter
+
+    from routes import (
+        automation_fabric_routes,
+        chat_routes,
+        explain_routes,
+        hub_routes,
+        living_brain_routes,
+        memory_routes,
+        meta_engineer_routes,
+        research,
+        research_routes,
+        rss_research,
+        usect_zero_routes,
+        users_routes,
+        vision_routes,
+    )
+    from fastapi_routes import (
+        automation_fabric,
+        chat,
+        explain,
+        hub,
+        living_brain,
+        memory,
+        meta_engineer,
+        research as fastapi_research,
+        usect_zero,
+        users,
+        vision,
+    )
+
+    aliases = (
+        (automation_fabric_routes.automation_fabric_bp, automation_fabric.router),
+        (chat_routes.chat_bp, chat.router),
+        (explain_routes.explain_bp, explain.router),
+        (hub_routes.hub_bp, hub.router),
+        (living_brain_routes.living_brain_bp, living_brain.router),
+        (memory_routes.memory_bp, memory.router),
+        (meta_engineer_routes.meta_engineer_bp, meta_engineer.router),
+        (research.research_bp, fastapi_research.router),
+        (research_routes.research_bp, fastapi_research.router),
+        (rss_research.rss_bp, fastapi_research.router),
+        (usect_zero_routes.usect_zero_bp, usect_zero.router),
+        (users_routes.users_bp, users.router),
+        (vision_routes.vision_bp, vision.router),
+    )
+    for legacy_name, native_router in aliases:
+        assert isinstance(legacy_name, APIRouter)
+        assert legacy_name is native_router
+
