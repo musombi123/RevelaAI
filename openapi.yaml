@@ -568,36 +568,20 @@ paths:
         - name: tool_id
           in: path
           required: true
-          schema: {type: string, pattern: '^[a-z0-9][a-z0-9_-]{0,63}  securitySchemes:
-    RevelaCodeBearer:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    Country:
-      name: country
-      in: query
-      required: false
-      schema:
-        type: string
-        default: KE
-      description: Backward-compatible Kenya default.
-    Language:
-      name: lang
-      in: query
-      required: false
-      schema:
-        type: string
-        enum: [en, de, zh, ja, fr, es, sw]
-}
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
         - name: X-Revela-License
           in: header
           required: true
-          schema: {type: string}
+          schema:
+            type: string
         - name: X-Country
           in: header
           required: false
-          schema: {type: string, default: KE}
+          schema:
+            type: string
+            default: KE
       requestBody:
         required: false
         content:
@@ -606,10 +590,15 @@ paths:
               type: object
               additionalProperties: true
       responses:
-        '200': {description: Authenticated RVXP1 tool adapter response}
-        '402': {description: License missing, expired, or out of scope}
-        '404': {description: Tool is not published or registered}
-        '503': {description: Encrypted mesh transport unavailable}
+        '200':
+          description: Authenticated RVXP1 tool adapter response
+        '402':
+          description: License missing, expired, or out of scope
+        '404':
+          description: Tool is not published or registered
+        '503':
+          description: Encrypted mesh transport unavailable
+
   /v1/verify/{tool_id}:
     get:
       operationId: verifyRevelaCodeToolWatermark
