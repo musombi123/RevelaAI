@@ -27,7 +27,7 @@ type ToolCallTelemetry struct {
 }
 
 func appendToolCallTelemetry(coreRoot string, event ToolCallTelemetry) error {
-	if !validResourceName(event.Tool) || len(event.VersionHash) != 64 {
+	if !validResourceName(event.Tool) || len(event.VersionHash) != 64 || strings.Trim(event.VersionHash, "0123456789abcdef") != "" {
 		return errors.New("invalid tool telemetry identity")
 	}
 	raw, err := json.Marshal(event)
@@ -38,9 +38,9 @@ func appendToolCallTelemetry(coreRoot string, event ToolCallTelemetry) error {
 	toolTelemetryMu.Lock()
 	defer toolTelemetryMu.Unlock()
 
-	root, err := filepath.Abs(coreRoot)
+	root, err := registryRoot(coreRoot)
 	if err != nil {
-		return errors.New("tool telemetry root is invalid")
+		return errors.New("tool telemetry registry root is unavailable")
 	}
 	dir := filepath.Join(root, "telemetry")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -81,7 +81,11 @@ func listToolCallTelemetry(coreRoot string, limit int) ([]ToolCallTelemetry, err
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	path := filepath.Join(coreRoot, "telemetry", "tool_calls.jsonl")
+	root, err := registryRoot(coreRoot)
+	if err != nil {
+		return nil, errors.New("tool telemetry registry root is unavailable")
+	}
+	path := filepath.Join(root, "telemetry", "tool_calls.jsonl")
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return []ToolCallTelemetry{}, nil
