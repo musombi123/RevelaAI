@@ -58,7 +58,7 @@ jobs:
 
           def has_flask_import(source):
               return bool(re.search(
-                  r"^\\s*(?:from\\s+flask(?:\\.[\\w.]+)?\\s+import|import\\s+flask(?:\\s|,|$))",
+                  r"^\s*(?:from\s+flask(?:\.[\w.]+)?\s+import|import\s+flask(?:\s|,|$))",
                   source,
                   re.MULTILINE,
               ))
