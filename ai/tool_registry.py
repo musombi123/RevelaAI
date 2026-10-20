@@ -155,7 +155,7 @@ def execute_active_tool(
     artifact_hash: str,
     arguments: dict[str, Any],
     *,
-    confirmation_hash: str | None = None,
+    confirmation_token: str | None = None,
 ) -> dict[str, Any]:
     """Delegate execution to Genesis; never run generated code in the Python gateway."""
     if not _NAME_RE.fullmatch(str(name or "")):
@@ -183,8 +183,8 @@ def execute_active_tool(
             + "/invoke"
         )
         payload: dict[str, Any] = {"arguments": arguments}
-        if confirmation_hash:
-            payload["confirmation_hash"] = confirmation_hash
+        if confirmation_token:
+            payload["confirmation_token"] = confirmation_token
         result = _request(path, method="POST", payload=payload)
         encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(encoded) > _MAX_RESULT_BYTES:
