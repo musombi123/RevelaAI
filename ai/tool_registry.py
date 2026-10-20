@@ -316,18 +316,29 @@ def provider_tool_context(provider: str, tools: list[dict[str, Any]] | None = No
     return {"mode": "prompt_based", "provider": provider, "tool_catalog": prompt_based_tool_catalog(tools)}
 
 
-def activate_signed_tool(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
-    """Activate a signed version via the Gateway; owner credential stays server-side."""
+def activate_signed_tool(
+    name: str,
+    version: str,
+    artifact_hash: str,
+    *,
+    owner_approval_required: bool = True,
+) -> dict[str, Any]:
+    """Activate a signed version; elevated owner credentials are Tier 1-2 only."""
     if not _NAME_RE.fullmatch(str(name or "")) or not _VERSION_RE.fullmatch(str(version or "")) or not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
-    owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
-    if not owner_token:
-        raise GenesisToolRegistryError("Owner approval is not configured; activation remains disabled.", code="owner_approval_not_configured", status_code=503)
+    headers: dict[str, str] = {}
+    payload: dict[str, Any] = {}
+    if owner_approval_required:
+        owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
+        if not owner_token:
+            raise GenesisToolRegistryError("Owner approval is not configured; activation remains disabled.", code="owner_approval_not_configured", status_code=503)
+        headers["X-Genesis-Owner-Approval"] = owner_token
+        payload["owner_approval_hash"] = artifact_hash
     return _request(
-        "/v1/genesis/registry/tools/" + quote(name, safe="") + "/" + quote(str(version), safe="") + "/" + quote(artifact_hash, safe="") + "/activate",
+        "/v1/genesis/registry/tools/" + quote(name, safe="") + "/" + quote(version, safe="") + "/" + quote(artifact_hash, safe="") + "/activate",
         method="POST",
-        payload={"owner_approval_hash": artifact_hash},
-        extra_headers={"X-Genesis-Owner-Approval": owner_token},
+        payload=payload,
+        extra_headers=headers,
         timeout=15.0,
     )
 
@@ -338,17 +349,28 @@ def deactivate_signed_tool(name: str) -> dict[str, Any]:
     return _request("/v1/genesis/registry/tools/" + quote(name, safe="") + "/deactivate", method="POST", payload={}, timeout=15.0)
 
 
-def rollback_signed_tool(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
+def rollback_signed_tool(
+    name: str,
+    version: str,
+    artifact_hash: str,
+    *,
+    owner_approval_required: bool = True,
+) -> dict[str, Any]:
     if not _NAME_RE.fullmatch(str(name or "")) or not _VERSION_RE.fullmatch(str(version or "")) or not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
-    owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
-    if not owner_token:
-        raise GenesisToolRegistryError("Owner approval is not configured; rollback remains disabled.", code="owner_approval_not_configured", status_code=503)
+    payload: dict[str, Any] = {"version": version, "artifact_hash": artifact_hash}
+    headers: dict[str, str] = {}
+    if owner_approval_required:
+        owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
+        if not owner_token:
+            raise GenesisToolRegistryError("Owner approval is not configured; rollback remains disabled.", code="owner_approval_not_configured", status_code=503)
+        payload["owner_approval_hash"] = artifact_hash
+        headers["X-Genesis-Owner-Approval"] = owner_token
     return _request(
         "/v1/genesis/registry/tools/" + quote(name, safe="") + "/rollback",
         method="POST",
-        payload={"version": version, "artifact_hash": artifact_hash, "owner_approval_hash": artifact_hash},
-        extra_headers={"X-Genesis-Owner-Approval": owner_token},
+        payload=payload,
+        extra_headers=headers,
         timeout=15.0,
     )
 
@@ -376,7 +398,7 @@ def confirm_tier2_action(
     if not action_approval_token:
         raise GenesisToolRegistryError("A separate per-action human approval credential is required.", code="action_approval_required", status_code=403)
     try:
-        raw = json.dumps(arguments, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        raw = json.dumps(arguments, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     except (TypeError, ValueError):
         raise GenesisToolRegistryError("Tool arguments must be JSON-serializable.", code="invalid_tool_arguments", status_code=400) from None
     if not isinstance(arguments, dict) or not raw or len(raw) > _MAX_INPUT_BYTES:
