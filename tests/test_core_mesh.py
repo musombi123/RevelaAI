@@ -192,6 +192,20 @@ def test_genesis_queue_key_and_rvx_use_expected_http_contracts(monkeypatch):
     assert calls[3][1]["payload"]["source"] == "module safe_tool"
 
 
+def test_genesis_detail_rejects_uppercase_resource_names_before_network(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    monkeypatch.setattr(
+        core_mesh,
+        "_genesis_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network must not be called")),
+    )
+    with pytest.raises(core_mesh.CoreMeshError) as error:
+        core_mesh.get_genesis_proposal("Safe_Tool")
+    assert error.value.code == "invalid_tool_name"
+    assert error.value.status_code == 400
+
+
 def test_genesis_clients_fail_explicitly_when_gateway_credential_missing(monkeypatch):
     monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
     monkeypatch.delenv("GENESIS_ADMIN_TOKEN", raising=False)
