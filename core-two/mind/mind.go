@@ -586,6 +586,7 @@ func (s *Service) Scan(ctx context.Context) (map[string]any, error) {
 		"status":             "ok",
 		"observed_tool_count": len(items),
 		"metrics":            metrics,
+		"tool_telemetry":      s.ToolTelemetrySnapshot(),
 		"research_evidence_path": filepath.Join(
 			"core-two",
 			"research_evidence.json",
