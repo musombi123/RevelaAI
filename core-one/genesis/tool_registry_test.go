@@ -97,7 +97,7 @@ func TestFailedSandboxEvidenceCannotBeSigned(t *testing.T) {
 
 func TestApprovalForHashACannotActivateHashB(t *testing.T) {
 	testSigningKey(t)
-	coreRoot := t.TempDir()
+	coreRoot := registryTestRoot(t)
 	manifestA := validManifestForTest()
 	manifestA.Permissions.Network = true
 	manifestA.RiskTier = 1
@@ -121,7 +121,7 @@ func TestApprovalForHashACannotActivateHashB(t *testing.T) {
 
 func TestRollbackRestoresPreviousSignedVersion(t *testing.T) {
 	testSigningKey(t)
-	coreRoot := t.TempDir()
+	coreRoot := registryTestRoot(t)
 	manifestA := validManifestForTest()
 	recordA := publishTestArtifact(t, coreRoot, manifestA, "package candidate\n// version A\n", true)
 
@@ -147,7 +147,7 @@ func TestRollbackRestoresPreviousSignedVersion(t *testing.T) {
 
 func TestTierTwoInvocationRequiresHashBoundPerActionConfirmation(t *testing.T) {
 	testSigningKey(t)
-	coreRoot := t.TempDir()
+	coreRoot := registryTestRoot(t)
 	manifest := validManifestForTest()
 	manifest.Permissions.Hardware = true
 	manifest.RiskTier = 2
@@ -163,7 +163,7 @@ func TestTierTwoInvocationRequiresHashBoundPerActionConfirmation(t *testing.T) {
 
 func TestTierTwoConfirmationIsBoundToExactArgumentsAndConsumedOnce(t *testing.T) {
 	testSigningKey(t)
-	coreRoot := t.TempDir()
+	coreRoot := registryTestRoot(t)
 	manifest := validManifestForTest()
 	manifest.Permissions.Hardware = true
 	manifest.RiskTier = 2
