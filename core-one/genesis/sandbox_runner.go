@@ -18,9 +18,9 @@ import (
 
 const maxSandboxLogBytes = 1 << 20
 
-// SandboxEvidence records the requested isolation contract and observed result.
-// It deliberately does not claim that host/container enforcement was independently
-// attested; a successful Docker invocation is not a host security audit.
+// SandboxEvidence records observed build/test results and the isolation
+// constraints requested from the runner. It never attests that host enforcement
+// has been independently verified.
 type SandboxEvidence struct {
 	ToolName       string    `json:"tool_name"`
 	ManifestHash   string    `json:"manifest_hash"`
@@ -36,16 +36,18 @@ type SandboxEvidence struct {
 
 type sandboxCommandRunner func(context.Context, string, ...string) ([]byte, error)
 
-// RunCandidateSandbox builds and tests an artifact in a Docker container with
-// networking disabled, read-only root filesystem, a read-only candidate mount,
-// bounded tmpfs, memory/CPU/PID limits, dropped capabilities and non-root UID.
-// If Docker is unavailable or any constraint cannot be requested, it fails closed.
+// RunCandidateSandbox builds and tests a candidate in a no-network, resource-
+// limited jail. Docker is preferred; Bubblewrap is attempted only if Docker
+// cannot start or its daemon/image is unavailable. If neither jail can enforce
+// its requested constraints, the candidate fails closed and is never signed.
 func RunCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest) (SandboxEvidence, error) {
 	return runCandidateSandbox(ctx, candidateDir, evidenceDir, manifest, runSandboxCommand)
 }
 
 func runSandboxCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	// Do not inherit provider credentials, cloud credentials, or arbitrary host
+	// environment variables into either runner process.
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=/tmp", "TMPDIR=/tmp"}
 	var out boundedBuffer
 	cmd.Stdout = &out
@@ -54,7 +56,7 @@ func runSandboxCommand(ctx context.Context, name string, args ...string) ([]byte
 	return out.Bytes(), err
 }
 
-type boundedBuffer struct { bytes.Buffer }
+type boundedBuffer struct{ bytes.Buffer }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	if b.Len() >= maxSandboxLogBytes {
@@ -66,6 +68,57 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return b.Buffer.Write(p)
+}
+
+func candidateBuildScript(language string, timeoutSeconds int, memoryBytes int64) string {
+	limits := fmt.Sprintf("ulimit -t %d; ulimit -v %d; ulimit -f 65536; ulimit -u 64 2>/dev/null || true; ", timeoutSeconds, memoryBytes/1024)
+	if language == "python" {
+		return limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
+	}
+	return limits + "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
+}
+
+func dockerSandboxArgs(candidateDir string, manifest ToolManifest) []string {
+	image := "golang:1.23-alpine"
+	if manifest.Language == "python" {
+		image = "python:3.12-alpine"
+	}
+	args := []string{
+		"run", "--rm", "--pull=never",
+		"--network=none", "--read-only",
+		"--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
+		"--memory", strconv.FormatInt(manifest.MemoryBytes, 10),
+		"--memory-swap", strconv.FormatInt(manifest.MemoryBytes, 10),
+		"--cpus", "1", "--pids-limit", "64",
+		"--user", "65534:65534", "--cap-drop=ALL",
+		"--security-opt=no-new-privileges",
+		"--mount", "type=bind,src=" + candidateDir + ",dst=/candidate,readonly",
+		"--workdir", "/tmp",
+		"--env", "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
+		"--env", "HOME=/tmp", "--env", "TMPDIR=/tmp",
+		"--env", "GOTOOLCHAIN=local",
+		image, "sh", "-lc", candidateBuildScript(manifest.Language, maxInt(1, manifest.TimeoutMillis/1000), manifest.MemoryBytes),
+	}
+	return args
+}
+
+func bubblewrapSandboxArgs(candidateDir string, manifest ToolManifest) []string {
+	// Root filesystem is mounted read-only; /tmp is the only writable tree;
+	// network is unshared; environment is cleared; the child runs with a
+	// non-root UID inside a user namespace. Failure to create namespaces is fatal.
+	args := []string{
+		"--die-with-parent", "--new-session",
+		"--unshare-net", "--unshare-user", "--uid", "65534", "--gid", "65534",
+		"--ro-bind", "/", "/",
+		"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+		"--ro-bind", candidateDir, "/candidate",
+		"--chdir", "/tmp", "--clearenv",
+		"--setenv", "PATH", "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
+		"--setenv", "HOME", "/tmp", "--setenv", "TMPDIR", "/tmp",
+		"--setenv", "GOTOOLCHAIN", "local",
+		"--", "/bin/sh", "-lc", candidateBuildScript(manifest.Language, maxInt(1, manifest.TimeoutMillis/1000), manifest.MemoryBytes),
+	}
+	return args
 }
 
 func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest, runner sandboxCommandRunner) (SandboxEvidence, error) {
@@ -91,33 +144,22 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 		return SandboxEvidence{}, errors.New("sandbox evidence directory is unavailable")
 	}
 
-	image, command := "golang:1.23-alpine", []string{"sh", "-lc", "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."}
-	if manifest.Language == "python" {
-		image = "python:3.12-alpine"
-		command = []string{"sh", "-lc", "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"}
-	}
-	args := []string{
-		"run", "--rm", "--pull=never",
-		"--network=none", "--read-only",
-		"--tmpfs", "/tmp:rw,nosuid,nodev,size=256m,mode=1777",
-		"--memory", strconv.FormatInt(manifest.MemoryBytes, 10),
-		"--memory-swap", strconv.FormatInt(manifest.MemoryBytes, 10),
-		"--cpus", "1",
-		"--pids-limit", "64",
-		"--user", "65534:65534",
-		"--cap-drop=ALL",
-		"--security-opt=no-new-privileges",
-		"--mount", "type=bind,src="+candidateDir+",dst=/candidate,readonly",
-		"--workdir", "/tmp",
-		"--env", "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
-		"--env", "HOME=/tmp",
-		"--env", "TMPDIR=/tmp",
-		"--env", "GOTOOLCHAIN=local",
-		image,
-	}
-	args = append(args, command...)
+	// Ensure the candidate cannot be reached by modifying a path after initial
+	// validation. Absolute paths are passed as data, never through a shell.
 	started := time.Now().UTC()
-	log, runErr := runner(ctx, "docker", args...)
+	log, runErr := runner(ctx, "docker", dockerSandboxArgs(candidateDir, manifest)...)
+	isolation := "docker_constraints_requested_host_enforcement_unverified"
+
+	if runnerNeedsFallback(log, runErr) {
+		fallbackLog, fallbackErr := runner(ctx, "bwrap", bubblewrapSandboxArgs(candidateDir, manifest)...)
+		log = append(append([]byte{}, log...), []byte("\n--- Bubblewrap fallback ---\n")...)
+		log = append(log, fallbackLog...)
+		runErr = fallbackErr
+		isolation = "bubblewrap_constraints_requested_host_enforcement_unverified"
+		if fallbackErr != nil {
+			isolation = "unavailable_fail_closed"
+		}
+	}
 	finished := time.Now().UTC()
 	if len(log) > maxSandboxLogBytes {
 		log = log[:maxSandboxLogBytes]
@@ -130,26 +172,35 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 		testLog = strings.TrimSpace(strings.TrimPrefix(logText[:split], "GENESIS_TESTS_BEGIN"))
 		buildLog = strings.TrimSpace(logText[split+len("GENESIS_BUILD_BEGIN"):])
 	}
+	exitCode := 0
+	errorClass := ""
+	if runErr != nil {
+		exitCode = 1
+		errorClass = "sandbox_or_candidate_failed"
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+		if isolation == "unavailable_fail_closed" {
+			errorClass = "sandbox_unavailable"
+		}
+	}
 	evidence := SandboxEvidence{
 		ToolName: manifest.Name,
 		ManifestHash: hex.EncodeToString(manifestDigest[:]),
 		StartedAt: started,
 		FinishedAt: finished,
 		Passed: runErr == nil,
-		ExitCode: 0,
-		IsolationLevel: "docker_constraints_requested_host_enforcement_unverified",
+		ExitCode: exitCode,
+		IsolationLevel: isolation,
 		BuildLog: buildLog,
 		TestLog: testLog,
+		ErrorClass: errorClass,
 	}
-	if runErr != nil {
-		evidence.ExitCode = 1
-		evidence.ErrorClass = "sandbox_or_candidate_failed"
-		if strings.Contains(strings.ToLower(runErr.Error()), "executable file not found") {
-			evidence.ErrorClass = "docker_unavailable"
-			evidence.IsolationLevel = "unavailable_fail_closed"
-		}
+	raw, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		return evidence, errors.New("sandbox evidence could not be encoded")
 	}
-	raw, _ := jsonMarshalIndent(evidence)
 	if err := atomicWrite(filepath.Join(evidenceDir, "sandbox_evidence.json"), raw, 0o600); err != nil {
 		return evidence, errors.New("sandbox evidence could not be persisted")
 	}
@@ -159,6 +210,29 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 	return evidence, nil
 }
 
-func jsonMarshalIndent(value any) ([]byte, error) {
-	return json.MarshalIndent(value, "", "  ")
+func runnerNeedsFallback(output []byte, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, exec.ErrNotFound) || strings.Contains(strings.ToLower(err.Error()), "executable file not found") {
+		return true
+	}
+	text := strings.ToLower(string(output) + " " + err.Error())
+	for _, marker := range []string{
+		"cannot connect to the docker daemon",
+		"is the docker daemon running",
+		"docker daemon is not running",
+		"no such image",
+		"docker: command not found",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func maxInt(a, b int) int {
+	if a > b { return a }
+	return b
 }
