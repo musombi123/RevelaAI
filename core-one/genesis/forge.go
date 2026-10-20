@@ -572,6 +572,14 @@ func (e *Engine) forge(
 	if manifestErr != nil {
 		return Invention{}, fmt.Errorf("validate generated tool manifest: %w", manifestErr)
 	}
+	manifestRaw, manifestErr := json.Marshal(toolManifest)
+	if manifestErr != nil {
+		return Invention{}, errors.New("encode generated tool manifest for Guardian review")
+	}
+	manifestDecision := (Guardian{CoreRoot: e.CoreRoot}).CheckAtStage("tool_manifest", string(manifestRaw))
+	if !manifestDecision.Allowed {
+		return Invention{}, fmt.Errorf("Guardian blocked generated tool manifest: %s", manifestDecision.Code)
+	}
 
 	files := []string{
 		"code.go",
