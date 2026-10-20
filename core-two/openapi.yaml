@@ -560,7 +560,22 @@ paths:
         required: true
         content:
           application/json:
-            schema: {type: object}
+            schema:
+              type: object
+              additionalProperties: false
+              required: [demand]
+              properties:
+                demand:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+                country:
+                  type: string
+                  maxLength: 80
+                  default: KE
+                language:
+                  type: string
+                  maxLength: 20
       responses:
         '202':
           description: Existing Core-One response.
