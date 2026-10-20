@@ -333,7 +333,7 @@ func (s *Service) recordCanaryOutcome(candidate FoundryCandidate, decision Canar
 		ToolName: candidate.ToolName,
 		Mutation: candidate.CandidateID,
 		Outcome: decision.Decision,
-		Note: limitLabel(decision.Reason, maxLearningNoteBytes),
+		Note: decision.Reason,
 		EvidenceRef: candidate.CandidateID,
 		RecordedAt: time.Now().UTC(),
 	}
