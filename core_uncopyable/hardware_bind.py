@@ -6,6 +6,7 @@ For high-assurance deployments, bind enrollment to TPM-backed device attestation
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import platform
@@ -55,7 +56,7 @@ def compare_hardware_binding(claims: dict[str, Any], *, current: str | None = No
     expected = claims.get("hardware_fingerprint")
     if not expected:
         return False
-    return hashlib.compare_digest(str(expected), current or hardware_fingerprint()) if hasattr(hashlib, "compare_digest") else __import__("hmac").compare_digest(str(expected), current or hardware_fingerprint())
+    return hmac.compare_digest(str(expected), current or hardware_fingerprint())
 
 
 def hardware_status() -> dict[str, Any]:
