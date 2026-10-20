@@ -151,14 +151,14 @@ GEMINI_API_BASE_URL = (
 GEMINI_MODEL = (
     os.getenv(
         "GEMINI_MODEL",
-        "gemini-3.8-flash",
+        "gemini-3.5-flash",
     ).strip()
 )
 
 GEMINI_FALLBACK_MODEL = (
     os.getenv(
         "GEMINI_FALLBACK_MODEL",
-        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
     ).strip()
 )
 
@@ -185,7 +185,7 @@ GEMINI_CONNECT_TIMEOUT = float(
 GEMINI_READ_TIMEOUT = float(
     os.getenv(
         "GEMINI_READ_TIMEOUT",
-        "30",
+        "60",
     )
 )
 
@@ -216,10 +216,8 @@ MVI_API_URL = (
 )
 
 MVI_API_KEY = (
-    os.getenv(
-        "MVI_API_KEY",
-        "",
-    ).strip()
+    os.getenv("MVI_API_KEY", "").strip()
+    or os.getenv("MVI_API", "").strip()
 )
 
 MVI_TIMEOUT = float(
@@ -293,15 +291,28 @@ TEXT_PROVIDER_ORDER = [
     item.strip().lower()
     for item in os.getenv(
         "REVELAAI_TEXT_PROVIDERS",
-        "gemini",
+        "gemini,groq,hf,mvi",
     ).split(",")
     if item.strip()
 ]
 
 if not TEXT_PROVIDER_ORDER:
-    TEXT_PROVIDER_ORDER = [
-        "gemini",
-    ]
+    TEXT_PROVIDER_ORDER = ["gemini", "groq", "hf", "mvi"]
+
+
+# =========================================================
+# GROQ TEXT CONFIGURATION
+# =========================================================
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_API_BASE_URL = (
+    os.getenv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1").strip()
+    or "https://api.groq.com/openai/v1"
+)
+GROQ_MODEL = (
+    os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+    or "openai/gpt-oss-120b"
+)
 
 
 # =========================================================
@@ -593,6 +604,9 @@ def _provider_enabled(
             and GEMINI_MODEL
         )
 
+    if provider in {"groq", "groqcloud"}:
+        return bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL)
+
     if provider in {
         "mvi",
         "mvi-ai",
@@ -687,6 +701,12 @@ def get_text_provider_status() -> dict[str, Any]:
             TEXT_PROVIDER_ORDER
         ),
         "providers": {
+            "groq": {
+                "enabled": bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL),
+                "configured": bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL),
+                "api_key_configured": bool(GROQ_API_KEY),
+                "model": GROQ_MODEL,
+            },
             "gemini": {
                 "enabled": bool(
                     GEMINI_ENABLED
@@ -1588,20 +1608,14 @@ def _ask_gemini_text(
 
             last_error = exc
 
-            if exc.status_code in {
-                401,
-                403,
-            }:
-
+            if exc.status_code in {401, 403}:
                 print(
-                    "GEMINI provider authentication "
-                    "or permission failure | "
-                    f"model={model} | "
-                    f"status={exc.status_code} | "
+                    "GEMINI provider authentication/permission failure; "
+                    "trying the next configured model/provider | "
+                    f"model={model} | status={exc.status_code} | "
                     f"error_code={exc.error_code}"
                 )
-
-                break
+                continue
 
             if exc.status_code in {
                 400,
@@ -3062,14 +3076,7 @@ def generate_hf_image(
             # by retrying another model.
             # -------------------------------------------------
 
-            if exc.status_code in {
-                401,
-                402,
-                403,
-            }:
-
-                break
-
+            # Authentication/permission failures must fall through to the outer provider chain.
             continue
 
         except Exception as exc:
@@ -3787,6 +3794,71 @@ def _extract_provider_error(
     )
 
 
+
+# =========================================================
+# GROQ OPENAI-COMPATIBLE TEXT PROVIDER
+# =========================================================
+
+def _request_groq(*, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
+    if not GROQ_API_KEY:
+        raise AIClientError("GROQ_API_KEY is not configured.", provider="groq",
+                            error_code="groq_api_key_missing")
+    if not model:
+        raise AIClientError("GROQ_MODEL is not configured.", provider="groq",
+                            error_code="groq_model_missing")
+    try:
+        response = requests.post(
+            f"{GROQ_API_BASE_URL.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                     "Content-Type": "application/json", "Accept": "application/json",
+                     "User-Agent": REQUEST_USER_AGENT},
+            json={"model": model, "messages": messages, "temperature": 0.7,
+                  "max_tokens": HF_MAX_TOKENS},
+            timeout=(10, GEMINI_READ_TIMEOUT),
+        )
+    except requests.Timeout as exc:
+        raise AIClientError("Groq request timed out.", provider="groq",
+                            error_code="groq_timeout") from exc
+    except requests.RequestException as exc:
+        raise AIClientError("Groq request could not reach the provider.",
+                            provider="groq", error_code="groq_connection_error") from exc
+    if not response.ok:
+        message, error_code = "Groq request failed.", "groq_provider_error"
+        try:
+            payload = response.json()
+            err = payload.get("error", {}) if isinstance(payload, dict) else {}
+            if isinstance(err, dict):
+                message = str(err.get("message") or message)
+                error_code = str(err.get("code") or err.get("type") or error_code)
+            elif err:
+                message = str(err)
+        except ValueError:
+            pass
+        raise AIClientError(message, provider="groq",
+                            status_code=response.status_code, error_code=error_code)
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise AIClientError("Groq returned invalid JSON.", provider="groq",
+                            status_code=response.status_code,
+                            error_code="groq_invalid_json") from exc
+
+
+def _ask_groq_text(*, text: str, system_prompt: str = "",
+                   session_id: str | None = None,
+                   context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    messages = build_messages(text=str(text), system_prompt=str(system_prompt or ""),
+                              context=context)
+    data = _request_groq(model=GROQ_MODEL, messages=messages)
+    response_text = _extract_hf_response(data)
+    if not response_text:
+        raise AIClientError("Groq returned empty text.", provider="groq",
+                            error_code="groq_empty_text")
+    return {"success": True, "response": response_text, "provider": "groq",
+            "model": GROQ_MODEL, "session_id": session_id,
+            "usage": data.get("usage", {})}
+
+
 # =========================================================
 # HF TEXT REQUEST
 # =========================================================
@@ -4068,7 +4140,7 @@ def ask_hf(
 
     Recommended production configuration:
 
-        REVELAAI_TEXT_PROVIDERS=gemini
+        REVELAAI_TEXT_PROVIDERS=gemini,groq,hf,mvi
     """
 
     if not str(
@@ -4191,6 +4263,35 @@ def ask_hf(
                     }
                 )
 
+                continue
+
+
+        # =====================================================
+        # GROQ
+        # =====================================================
+
+        if provider in {"groq", "groqcloud"}:
+            started = time.time()
+            try:
+                result = _ask_groq_text(
+                    text=str(text),
+                    system_prompt=str(system_prompt or ""),
+                    session_id=session_id,
+                    context=context,
+                )
+                print("TEXT PROVIDER SUCCESS | provider=groq | "
+                      f"model={result.get('model')} | time={time.time() - started:.2f}s")
+                return result
+            except AIClientError as exc:
+                print("TEXT PROVIDER FAILED | provider=groq | "
+                      f"status={exc.status_code} | error_code={exc.error_code} | "
+                      f"time={time.time() - started:.2f}s")
+                provider_errors.append({
+                    "provider": "groq",
+                    "error": str(exc),
+                    "error_code": exc.error_code or "groq_error",
+                    "status_code": exc.status_code,
+                })
                 continue
 
         # =====================================================
