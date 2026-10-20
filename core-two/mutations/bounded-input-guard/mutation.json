@@ -1,7 +1,7 @@
 {
   "id": "bounded-input-guard",
   "category": "input_safety",
-  "purpose": "Reject empty, oversized, null-byte, absolute and path-traversal inputs before mutation",
+  "purpose": "Reject empty or oversized inputs, NUL bytes, POSIX and Windows absolute paths, and parent-directory path segments using a bounded lexical check",
   "status": "candidate_for_human_review",
   "source_core": "core-one",
   "fixture_only": true,

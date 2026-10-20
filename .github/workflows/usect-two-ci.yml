@@ -56,7 +56,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test-only dependencies
-        run: python -m pip install "requests>=2.31" "pytest>=8,<9"
+        run: python -m pip install -r requirements.txt
       - name: Compile integration modules
         run: python -m py_compile app.py ai/core_mesh.py ai/orchestrator.py ai/unknown_learning.py ai/worldwide_context.py ai/living_brain.py services/ai_service.py
       - name: Test Core Mesh routing and safety contracts

@@ -1,7 +1,7 @@
-"""FastAPI revenue gateway with the existing Flask API mounted as a fallback.
+"""Native FastAPI revenue gateway for licenses, usage, marketplace and platform tools.
 
-Registered published tool routes are license-gated before Flask dispatch. The
-existing Flask app and ZERO/ONE/TWO Go services are not rewritten.
+Published tools are license-gated before dispatch. RevelaAI's API is mounted as
+a FastAPI ASGI subapplication; no Flask or WSGI runtime is used.
 """
 from __future__ import annotations
 
@@ -40,6 +40,8 @@ from core_meter.meter import record_usage, usage_summary
 from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
 from core_foundry.attestation import AttestationError, sign_approved_manifest
 from core_seed.seed_runner import SeedError, SeedRunner
+from core_uncopyable.dna_vault_guard import DnaVaultError, sign_tool_watermark, verify_tool_watermark
+from core_uncopyable.license_lock import require_enterprise_claims
 from core_auditor.ledger import AuditLedger, AuditLedgerError
 from marketplace.service import country_bundle, creator_earnings, safety_screen
 from revela_platform.database import (
@@ -511,13 +513,37 @@ def publish_tool(body: PublishToolInput,
         # Publisher-supplied savings are not trusted; reviewer may set a verified estimate later.
         verified_cost_saved_usd=0.0,
     )
+    watermark = None
+    if allowed:
+        artifact_payload = {
+            "tool_id": body.tool_id,
+            "name": body.name.strip(),
+            "description": body.description.strip(),
+            "endpoint": body.endpoint,
+            "factory_build_id": body.factory_build_id,
+            "price_usd_cents": body.price_usd_cents,
+        }
+        artifact_digest = hashlib.sha256(
+            json.dumps(artifact_payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        try:
+            watermark = sign_tool_watermark(
+                tool_id=body.tool_id,
+                creator_user_id=user_id,
+                factory_id=body.factory_build_id or body.tool_id,
+                artifact_sha256=artifact_digest,
+            )
+        except DnaVaultError as exc:
+            raise HTTPException(status_code=503, detail="Founder watermark signing is unavailable; listing was not saved.") from exc
     session.add(tool)
     _audit(session, user_id, "marketplace.tool.submitted", tool.id,
-           {"status": status, "safety_note": note, "license_id": claims["jti"]})
+           {"status": status, "safety_note": note, "license_id": claims["jti"],
+            "watermark_valid": bool(watermark)})
     session.commit()
     if not allowed:
         raise HTTPException(status_code=403, detail=note)
     return {"tool_id": tool.id, "status": status, "safety_note": note,
+            "provenance_watermark": watermark,
             "next_step": "A configured reviewer must approve this listing before it becomes searchable or callable."}
 
 
@@ -533,6 +559,9 @@ def review_tool(tool_id: str, body: ReviewToolInput,
                 session: Session = Depends(get_db)) -> dict[str, Any]:
     if not _reviewer(user_id):
         raise HTTPException(status_code=403, detail="Marketplace reviewer permission required")
+    provenance = verify_tool_watermark(tool_id)
+    if not provenance.get("valid"):
+        raise HTTPException(status_code=409, detail="Tool has no valid founder-signed RevelaCode provenance watermark")
     tool = session.get(ToolRecord, tool_id)
     if tool is None:
         raise HTTPException(status_code=404, detail="Tool listing not found")
@@ -724,6 +753,7 @@ def build_factory(body: FactoryBuildInput,
     country = _country(body.country)
     claims, license_record = _active_license(session, license_key or "", user_id, country=country)
     try:
+        require_enterprise_claims(claims, "factory_build")
         enforce_tool_creation_quota(session, license_record)
         proposal = FoundryBuilder().build_plan(
             owner_user_id=user_id, name=body.name, description=body.description,
@@ -734,6 +764,15 @@ def build_factory(body: FactoryBuildInput,
         raise _license_http_error(exc) from exc
     except FactoryBuildError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    try:
+        watermark = sign_tool_watermark(
+            tool_id=proposal["build_id"],
+            creator_user_id=user_id,
+            factory_id=proposal["build_id"],
+            artifact_sha256=proposal["manifest_sha256"],
+        )
+    except DnaVaultError as exc:
+        raise HTTPException(status_code=503, detail="Founder watermark signing is unavailable; factory build was not committed.") from exc
     record = FactoryRecord(
         id=proposal["build_id"], owner_user_id=user_id, name=body.name.strip(),
         status="await_merge", country=country, manifest_sha256=proposal["manifest_sha256"],
@@ -755,6 +794,7 @@ def build_factory(body: FactoryBuildInput,
         "build_id": proposal["build_id"],
         "status": proposal["status"],
         "manifest_sha256": proposal["manifest_sha256"],
+        "provenance_watermark": watermark,
         "manifest": proposal["manifest"],
         "audit_chain_recorded": chain_logged,
         "execution": "disabled_until_review",
@@ -844,6 +884,10 @@ def seed_factory(build_id: str, body: SeedFactoryInput,
     claims, license_record = _active_license(
         session, license_key or "", user_id, country=country
     )
+    try:
+        require_enterprise_claims(claims, "seed_create")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
     record = session.get(FactoryRecord, build_id)
     if record is None or record.status != "approved":
         raise HTTPException(status_code=409, detail="Factory must be approved by a human reviewer before seeding")
@@ -975,17 +1019,16 @@ def list_audit_events(limit: int = Query(default=50, ge=1, le=250),
 
 
 # Tool licensing guard for registered tool routes and unknown single-segment /v1 paths.
-# Known static legacy Flask routes are preserved. Tool-like dynamic routes fail closed.
+# Only explicitly registered static FastAPI endpoints bypass the marketplace-tool gate.
 def _legacy_static_route_exists(path: str, method: str) -> bool:
-    from werkzeug.exceptions import HTTPException as WerkzeugHTTPException
-
-    try:
-        rule, _values = flask_app.url_map.bind("localhost").match(
-            path, method=method, return_rule=True
-        )
-    except WerkzeugHTTPException:
-        return False
-    return "<" not in rule.rule
+    for route in app.router.routes:
+        route_path = getattr(route, "path", "")
+        if route_path != path or "{" in route_path or "}" in route_path:
+            continue
+        methods = set(getattr(route, "methods", set()) or set())
+        if method.upper() in methods:
+            return True
+    return False
 
 
 def _record_usage_safely(*, user_id: str, tool_id: str, country: str,
@@ -1092,9 +1135,9 @@ async def licensed_tool_guard(request: Request, call_next):
     return response
 
 
-# Preserve all existing Flask endpoints. FastAPI routers/docs above this mount win
-# route priority; unresolved routes are passed to the original Flask WSGI app.
-from app import app as flask_app  # noqa: E402
+# Mount RevelaAI's actual ASGI application after the platform routes above.
+# The platform endpoints win by routing order; unresolved paths dispatch to FastAPI.
+from asgi import app as revelaai_app  # noqa: E402
 from mesh.rvx_mesh import MeshCallError, rvx_call  # noqa: E402
 
 
@@ -1157,4 +1200,4 @@ async def invoke_licensed_tool(
     }
 
 
-app.mount("/", WSGIMiddleware(flask_app), name="existing-flask-gateway")
+app.mount("/", revelaai_app, name="revelaai-native-gateway")

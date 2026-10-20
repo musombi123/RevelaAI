@@ -5,7 +5,6 @@ from importlib import metadata
 from pathlib import Path
 from datetime import datetime, timezone
 import requests
-from flask import jsonify, request
 from .storage import collection
 LOG_PATH=Path(os.getenv("REVELAAI_ACCESS_LOG","revelai/logs/access.log"))
 ROOT=Path(__file__).resolve().parents[2]
@@ -76,16 +75,3 @@ def run_scan():
     try: collection("shields").insert_one({"type":"scan_summary","timestamp":datetime.now(timezone.utc).isoformat(),"vulnerabilities":len(vulns),"cves":len(cves),"threats":len(threats)})
     except Exception: pass
     return {"vulnerabilities":vulns,"threats":threats,"cves":cves,"firewall_recommendations":firewall_recommendations(),"status":"shield_active","defensive_only":True}
-def register_routes(bp):
-    @bp.get("/shield/status")
-    def status():
-        try:
-            db_counts={}
-            for name in ("threats","shields","disasters","research"):
-                db_counts[name]=collection(name).count_documents({})
-            return jsonify({"status":"shield_active","defensive_only":True,"counts":db_counts,"firewall_recommendations":firewall_recommendations()})
-        except Exception: return jsonify({"status":"degraded","error":"MongoDB shield status unavailable"}),503
-    @bp.post("/shield/scan")
-    def scan():
-        try: return jsonify(run_scan())
-        except Exception: return jsonify({"status":"degraded","error":"Scan incomplete; inspect service logs and MongoDB configuration"}),503

@@ -126,3 +126,55 @@ def test_consent_can_be_revoked(tmp_path):
     assert store.has_scope("test-user", "workspace:read", db_path=db)
     assert store.revoke_scopes("test-user", ["workspace:read"], db_path=db) == ["workspace:read"]
     assert not store.has_scope("test-user", "workspace:read", db_path=db)
+
+
+
+def test_local_agent_is_native_fastapi_and_enforces_local_token_and_origin(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from automation_fabric import local_agent
+
+    monkeypatch.setenv("REVELAAI_AUTOMATION_DB", str(tmp_path / "local-agent.sqlite3"))
+    monkeypatch.setenv("REVELAAI_AUTOMATION_WORKSPACE", str(tmp_path / "workspace"))
+    monkeypatch.setenv("REVELAAI_AUTOMATION_ALLOWED_ORIGINS", "https://local.example")
+    monkeypatch.setattr(local_agent, "TOKEN_PATH", tmp_path / "agent.token")
+
+    app = local_agent.create_local_app(token="local-test-token")
+    assert isinstance(app, FastAPI)
+    client = TestClient(app, client=("127.0.0.1", 38741))
+
+    health = client.get("/api/v1/health")
+    assert health.status_code == 200
+    assert health.json()["mode"] == "local-device"
+    assert health.json()["generated_code_autorun"] is False
+
+    unauthorized = client.get("/api/v1/tools")
+    assert unauthorized.status_code == 401
+    assert unauthorized.json()["code"] == "local_token_required"
+
+    authorized = client.get(
+        "/api/v1/tools",
+        headers={"Authorization": "Bearer local-test-token"},
+    )
+    assert authorized.status_code == 200
+    assert authorized.json()["runtime"] == "local-device"
+
+    rejected_origin = client.get(
+        "/api/v1/health",
+        headers={"Origin": "https://untrusted.example"},
+    )
+    assert rejected_origin.status_code == 403
+    assert rejected_origin.json()["code"] == "origin_not_allowed"
+
+    preflight = client.options(
+        "/api/v1/tools",
+        headers={
+            "Origin": "https://local.example",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert preflight.status_code == 204
+    assert preflight.headers["Access-Control-Allow-Origin"] == "https://local.example"
+    assert "Authorization" in preflight.headers["Access-Control-Allow-Headers"]

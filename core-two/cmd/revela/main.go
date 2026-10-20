@@ -1,8 +1,9 @@
 // Command revela builds and composes the three existing cores without editing their source.
 package main
-import("context";"errors";"flag";"fmt";"log";"net/http";"os";"os/exec";"os/signal";"path/filepath";"runtime";"strings";"sync";"syscall";"time")
+import("context";"crypto/sha256";"errors";"flag";"fmt";"log";"net/http";"os";"os/exec";"os/signal";"path/filepath";"runtime";"strings";"sync";"syscall";"time")
 type serviceSpec struct{name,moduleDir,packagePath,binaryName,listen,health string;args []string}
 func main(){
+ if err:=verifyOwnerRecipe();err!=nil{log.Fatal(err)}
  rootFlag:=flag.String("repo-root",".","repository root");zero:=flag.String("zero-listen","127.0.0.1:8780","ZERO listener");one:=flag.String("genesis-listen","127.0.0.1:8781","ONE listener");two:=flag.String("mind-listen","127.0.0.1:8782","TWO listener");interval:=flag.Duration("mind-interval",24*time.Hour,"Mind improvement cycle interval");daemon:=flag.Bool("daemon",false,"start ZERO + ONE + TWO together");flag.Parse();if !*daemon{fmt.Fprintln(os.Stderr,"Use --daemon to start ZERO + ONE + TWO together.");os.Exit(2)}
  root,err:=filepath.Abs(*rootFlag);if err!=nil{log.Fatal(err)};for _,p:=range []string{"core-zero/go.mod","core-one/go.mod","core-two/go.mod"}{if info,e:=os.Stat(filepath.Join(root,p));e!=nil||info.IsDir(){log.Fatalf("required module missing: %s",p)}}
  tmp,err:=os.MkdirTemp("","revela-core-stack-");if err!=nil{log.Fatal(err)};defer os.RemoveAll(tmp);suffix:="";if runtime.GOOS=="windows"{suffix=".exe"}
@@ -15,3 +16,34 @@ func main(){
  select{case<-ctx.Done():case err:=<-exits:log.Print(err)};stop();wg.Wait()
 }
 func waitHealthy(ctx context.Context,address,path string,timeout time.Duration)error{deadline:=time.NewTimer(timeout);defer deadline.Stop();ticker:=time.NewTicker(250*time.Millisecond);defer ticker.Stop();client:=&http.Client{Timeout:800*time.Millisecond};for{req,_:=http.NewRequestWithContext(ctx,http.MethodGet,"http://"+strings.TrimSpace(address)+path,nil);if req!=nil{resp,err:=client.Do(req);if err==nil{_ = resp.Body.Close();if resp.StatusCode>=200&&resp.StatusCode<300{return nil}}};select{case<-ctx.Done():return ctx.Err();case<-deadline.C:return fmt.Errorf("health deadline exceeded for http://%s%s",address,path);case<-ticker.C:}}}
+
+
+func verifyOwnerRecipe() error {
+    mode := strings.ToLower(strings.TrimSpace(os.Getenv("REVELA_UNCOPYABLE_ENFORCE")))
+    if mode != "1" && mode != "true" && mode != "yes" && mode != "on" {
+        return nil
+    }
+    path := strings.TrimSpace(os.Getenv("REVELA_MASTER_KEY_PATH"))
+    if path == "" {
+        home, err := os.UserHomeDir()
+        if err != nil {
+            return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner home is unavailable")
+        }
+        path = filepath.Join(home, ".revela_recipe", "master.key")
+    }
+    key, err := os.ReadFile(path)
+    if err != nil {
+        return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe is unavailable")
+    }
+    if len(key) != 512 {
+        return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe length is invalid")
+    }
+    expected := strings.TrimSpace(os.Getenv("REVELA_RECIPE_EXPECTED_SHA256"))
+    if expected != "" {
+        digest := sha256.Sum256(key)
+        if !strings.EqualFold(fmt.Sprintf("%x", digest), expected) {
+            return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe fingerprint mismatch")
+        }
+    }
+    return nil
+}

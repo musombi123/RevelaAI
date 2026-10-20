@@ -1,51 +1,90 @@
-"""Shared HTTP API factory for cloud and loopback-local Automation Fabric runtimes."""
+"""Native FastAPI router factory for cloud and loopback-local Automation Fabric."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Callable
 
-from flask import Blueprint, jsonify, request
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
 
 from . import store
 from .engine import AutomationError, create_plan, execute_plan
 from .policy import (
     DEFAULT_CONSENT_TTL_SECONDS,
     MAX_CONSENT_TTL_SECONDS,
-    SCOPES,
     normalize_scopes,
 )
 from .registry import tool_catalog
 
 logger = logging.getLogger("revelaai.automation_fabric")
 
-
-AuthResolver = Callable[[], tuple[str | None, Any | None]]
+AuthResolver = Callable[[Request], tuple[str | None, Response | None]]
 WorkspaceResolver = Callable[[str], str | Path]
 DatabaseResolver = Callable[[], str | None]
+MAX_REQUEST_BYTES = 1024 * 1024
 
 
-def create_automation_blueprint(
+def _error(code: str, status_code: int, message: str | None = None) -> JSONResponse:
+    body: dict[str, Any] = {"status": "error", "code": code}
+    if message:
+        body["message"] = message
+    return JSONResponse(body, status_code=status_code)
+
+
+async def _principal(request: Request, auth_resolver: AuthResolver):
+    try:
+        principal, error = auth_resolver(request)
+    except Exception:
+        logger.exception("Automation Fabric authentication resolver failed")
+        return None, _error("authentication_unavailable", 503)
+    if error is not None:
+        if isinstance(error, Response):
+            return None, error
+        return None, _error("authentication_unavailable", 503)
+    if not isinstance(principal, str) or not principal:
+        return None, _error("authentication_required", 401)
+    return principal, None
+
+
+async def _body(request: Request) -> tuple[dict[str, Any], Response | None]:
+    """Read a bounded JSON object; malformed bodies retain the empty-object contract."""
+    content_length = request.headers.get("content-length", "").strip()
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BYTES:
+                return {}, _error("request_too_large", 413, "Request body exceeds the 1 MiB limit.")
+        except ValueError:
+            return {}, _error("invalid_content_length", 400, "Content-Length must be an integer.")
+    try:
+        raw = await request.body()
+    except Exception:
+        return {}, None
+    if len(raw) > MAX_REQUEST_BYTES:
+        return {}, _error("request_too_large", 413, "Request body exceeds the 1 MiB limit.")
+    if not raw:
+        return {}, None
+    try:
+        import json
+        value = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return {}, None
+    return (value if isinstance(value, dict) else {}), None
+
+
+def create_automation_router(
     name: str,
     *,
     auth_resolver: AuthResolver,
     workspace_resolver: WorkspaceResolver,
     database_resolver: DatabaseResolver,
     local_mode: bool,
-) -> Blueprint:
-    bp = Blueprint(name, __name__)
-
-    def _principal():
-        try:
-            principal, error = auth_resolver()
-        except Exception:
-            logger.exception("Automation Fabric authentication resolver failed")
-            return None, (jsonify(status="error", code="authentication_unavailable"), 503)
-        if error is not None:
-            return None, error
-        if not isinstance(principal, str) or not principal:
-            return None, (jsonify(status="error", code="authentication_required"), 401)
-        return principal, None
+) -> APIRouter:
+    """Create an isolated native APIRouter without Flask application/request globals."""
+    router = APIRouter(tags=["Automation Fabric"])
 
     def _db() -> str | None:
         return database_resolver()
@@ -53,11 +92,15 @@ def create_automation_blueprint(
     def _workspace(principal: str) -> Path:
         root = Path(workspace_resolver(principal)).expanduser().resolve()
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            root.chmod(0o700)
+        except OSError:
+            pass
         return root
 
-    @bp.get("/health")
-    def health():
-        return jsonify({
+    @router.get("/health", name=f"{name}_health")
+    async def health():
+        return {
             "status": "ok",
             "module": "revelaai-automation-fabric",
             "version": "1.0.0",
@@ -67,141 +110,164 @@ def create_automation_blueprint(
             "shell_execution": False,
             "generated_code_autorun": False,
             "hardware_actuation": False,
-        }), 200
+        }
 
-    @bp.get("/tools")
-    def tools():
-        principal, error = _principal()
+    @router.get("/tools", name=f"{name}_tools")
+    async def tools(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        return jsonify({
+        consent = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
+        return {
             "status": "ok",
             "tools": tool_catalog(),
-            "consent": store.list_scopes(principal, db_path=_db()),
+            "consent": consent,
             "runtime": "local-device" if local_mode else "hosted-workspace",
             "note": "A hosted workspace is isolated from the user's personal device. Device-only tools require the separately installed local agent.",
-        }), 200
+        }
 
-    @bp.get("/consent")
-    def get_consent():
-        principal, error = _principal()
+    @router.get("/consent", name=f"{name}_get_consent")
+    async def get_consent(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        return jsonify({"status": "ok", "scopes": store.list_scopes(principal, db_path=_db())}), 200
+        scopes = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
+        return {"status": "ok", "scopes": scopes}
 
-    @bp.post("/consent")
-    def grant_consent():
-        principal, error = _principal()
+    @router.post("/consent", name=f"{name}_grant_consent")
+    async def grant_consent(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        body = request.get_json(silent=True) or {}
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         if body.get("accepted") is not True:
-            return jsonify(status="error", code="explicit_consent_required",
-                           message="Set accepted=true only after reviewing the requested permission scopes."), 400
+            return _error(
+                "explicit_consent_required", 400,
+                "Set accepted=true only after reviewing the requested permission scopes.",
+            )
         try:
             scopes = normalize_scopes(body.get("scopes"))
             ttl = body.get("ttl_seconds", DEFAULT_CONSENT_TTL_SECONDS)
-            if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 60 or ttl > MAX_CONSENT_TTL_SECONDS:
+            if isinstance(ttl, bool) or not isinstance(ttl, int) or not 60 <= ttl <= MAX_CONSENT_TTL_SECONDS:
                 raise ValueError("ttl_seconds must be an integer from 60 to 86400")
             reason = body.get("reason", "")
             if not isinstance(reason, str) or len(reason) > 240:
                 raise ValueError("reason must be a string of at most 240 characters")
-            grants = store.grant_scopes(principal, scopes, reason=reason.strip(), ttl_seconds=ttl, db_path=_db())
-            return jsonify({"status": "ok", "granted": scopes, "scopes": grants, "expires_in_seconds": ttl}), 201
+            grants = await run_in_threadpool(
+                store.grant_scopes, principal, scopes,
+                reason=reason.strip(), ttl_seconds=ttl, db_path=_db(),
+            )
+            return JSONResponse(
+                {"status": "ok", "granted": scopes, "scopes": grants, "expires_in_seconds": ttl},
+                status_code=201,
+            )
         except ValueError as exc:
-            return jsonify(status="error", code="invalid_consent", message=str(exc)), 400
+            return _error("invalid_consent", 400, str(exc))
         except Exception:
             logger.exception("Automation Fabric could not persist consent")
-            return jsonify(status="error", code="consent_storage_unavailable"), 503
+            return _error("consent_storage_unavailable", 503)
 
-    @bp.post("/consent/revoke")
-    def revoke_consent():
-        principal, error = _principal()
+    @router.post("/consent/revoke", name=f"{name}_revoke_consent")
+    async def revoke_consent(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        body = request.get_json(silent=True) or {}
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         try:
             scopes = normalize_scopes(body.get("scopes"))
-            revoked = store.revoke_scopes(principal, scopes, db_path=_db())
-            return jsonify({"status": "ok", "revoked": revoked, "scopes": store.list_scopes(principal, db_path=_db())}), 200
+            revoked = await run_in_threadpool(store.revoke_scopes, principal, scopes, db_path=_db())
+            current = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
+            return {"status": "ok", "revoked": revoked, "scopes": current}
         except ValueError as exc:
-            return jsonify(status="error", code="invalid_consent", message=str(exc)), 400
+            return _error("invalid_consent", 400, str(exc))
         except Exception:
             logger.exception("Automation Fabric could not revoke consent")
-            return jsonify(status="error", code="consent_storage_unavailable"), 503
+            return _error("consent_storage_unavailable", 503)
 
-    @bp.post("/plan")
-    def plan():
-        principal, error = _principal()
+    @router.post("/plan", name=f"{name}_plan")
+    async def plan(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        body = request.get_json(silent=True) or {}
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         try:
-            result = create_plan(
-                principal, body.get("steps"), _workspace(principal),
+            result = await run_in_threadpool(
+                create_plan, principal, body.get("steps"), _workspace(principal),
                 db_path=_db(), local_mode=local_mode,
             )
-            return jsonify({"status": "planned", "plan": result}), 201
+            return JSONResponse({"status": "planned", "plan": result}, status_code=201)
         except AutomationError as exc:
-            return jsonify(status="error", code=exc.code, message=exc.message), exc.status_code
+            return _error(exc.code, exc.status_code, exc.message)
         except ValueError as exc:
-            return jsonify(status="error", code="invalid_plan", message=str(exc)), 400
+            return _error("invalid_plan", 400, str(exc))
         except Exception:
             logger.exception("Automation Fabric failed to create a plan")
-            return jsonify(status="error", code="planning_unavailable"), 503
+            return _error("planning_unavailable", 503)
 
-    @bp.get("/plans/<plan_id>")
-    def plan_status(plan_id: str):
-        principal, error = _principal()
+    @router.get("/plans/{plan_id}", name=f"{name}_plan_status")
+    async def plan_status(plan_id: str, request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        record = store.get_plan(principal, plan_id, db_path=_db())
+        record = await run_in_threadpool(store.get_plan, principal, plan_id, db_path=_db())
         if record is None:
-            return jsonify(status="error", code="plan_not_found"), 404
-        return jsonify({"status": "ok", "record": record}), 200
+            return _error("plan_not_found", 404)
+        return {"status": "ok", "record": record}
 
-    @bp.post("/execute")
-    def execute():
-        principal, error = _principal()
+    @router.post("/execute", name=f"{name}_execute")
+    async def execute(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        body = request.get_json(silent=True) or {}
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         plan_id = body.get("plan_id")
         plan_hash = body.get("plan_hash")
         if not isinstance(plan_id, str) or not isinstance(plan_hash, str):
-            return jsonify(status="error", code="invalid_execution_request",
-                           message="plan_id and plan_hash are required"), 400
+            return _error("invalid_execution_request", 400, "plan_id and plan_hash are required")
         try:
-            result = execute_plan(
-                principal, plan_id, plan_hash,
+            result = await run_in_threadpool(
+                execute_plan, principal, plan_id, plan_hash,
                 approved=body.get("approved") is True,
-                workspace=_workspace(principal),
-                db_path=_db(),
-                local_mode=local_mode,
+                workspace=_workspace(principal), db_path=_db(), local_mode=local_mode,
             )
-            return jsonify({"status": "ok", "execution": result}), 200
+            return {"status": "ok", "execution": result}
         except AutomationError as exc:
-            return jsonify(status="error", code=exc.code, message=exc.message), exc.status_code
+            return _error(exc.code, exc.status_code, exc.message)
         except Exception:
             logger.exception("Automation Fabric execution stopped unexpectedly")
-            return jsonify(status="error", code="execution_unavailable",
-                           message="Execution stopped safely. Check the audit log and plan status."), 503
+            return _error(
+                "execution_unavailable", 503,
+                "Execution stopped safely. Check the audit log and plan status.",
+            )
 
-    @bp.get("/audit")
-    def audit():
-        principal, error = _principal()
+    @router.get("/audit", name=f"{name}_audit")
+    async def audit(request: Request, limit: str = "50"):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
         try:
-            limit = request.args.get("limit", default="50")
             if not str(limit).isdigit():
                 raise ValueError("limit must be an integer")
-            entries = store.read_audit(principal, int(limit), db_path=_db())
-            return jsonify({"status": "ok", "entries": entries, "hash_chained": True}), 200
+            entries = await run_in_threadpool(store.read_audit, principal, int(limit), db_path=_db())
+            return {"status": "ok", "entries": entries, "hash_chained": True}
         except ValueError as exc:
-            return jsonify(status="error", code="invalid_limit", message=str(exc)), 400
+            return _error("invalid_limit", 400, str(exc))
         except Exception:
             logger.exception("Automation Fabric audit log unavailable")
-            return jsonify(status="error", code="audit_unavailable"), 503
+            return _error("audit_unavailable", 503)
 
-    return bp
+    return router
+
+
+# The legacy symbol name is retained for imports only; it now returns an APIRouter.
+create_automation_blueprint = create_automation_router
+
+__all__ = ["create_automation_router", "create_automation_blueprint"]

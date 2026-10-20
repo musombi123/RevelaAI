@@ -6,7 +6,7 @@ from revelai.core.agi_manifest import (
     get_self_description_answer,
     get_status_summary,
 )
-from revelai.routers.agi_router import agi_router
+from fastapi_routes.agi import router as agi_router
 
 
 class AGIManifestTests(unittest.TestCase):
@@ -87,7 +87,7 @@ class AGIManifestTests(unittest.TestCase):
         self.assertEqual(status["modules_checked"], len(status["modules"]))
 
     def test_router_declares_routes(self):
-        self.assertGreaterEqual(len(agi_router.deferred_functions), 2)
+        self.assertGreaterEqual(len(agi_router.routes), 2)
 
     def test_capabilities_question_uses_manifest_answer(self):
         answer = get_self_description_answer("What are your capabilities?")
