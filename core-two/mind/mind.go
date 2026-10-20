@@ -738,11 +738,11 @@ func (s *Service) metricForTool(name string) ToolMetrics {
 	)
 
 	if mindRegularFileWithinRoot(s.OneRoot, filepath.Join("guardian", "blocked.log")) {
-		count, countErr := countLogLines(
+		count, countOK := countLogLines(
 			filepath.Join(s.OneRoot, "guardian", "blocked.log"),
 			"",
 		)
-		if countErr == nil {
+		if countOK {
 			m.GuardianBlockCount = count
 			m.GuardianLogObserved = true
 		}
@@ -752,11 +752,11 @@ func (s *Service) metricForTool(name string) ToolMetrics {
 		s.ZeroRoot,
 		filepath.Join("audit_log", "events.jsonl"),
 	) {
-		count, countErr := countLogLines(
+		count, countOK := countLogLines(
 			filepath.Join(s.ZeroRoot, "audit_log", "events.jsonl"),
 			"heal|recovery|restore",
 		)
-		if countErr == nil {
+		if countOK {
 			m.ZeroHealingEvents = count
 			m.ZeroHealingEvidenceObserved = true
 		}
