@@ -38,9 +38,8 @@ type SandboxEvidence struct {
 type sandboxCommandRunner func(context.Context, string, ...string) ([]byte, error)
 
 // RunCandidateSandbox builds and tests a candidate in a no-network, resource-
-// limited jail. Docker is preferred; Bubblewrap is attempted only if Docker
-// cannot start or its daemon/image is unavailable. If neither jail can enforce
-// its requested constraints, the candidate fails closed and is never signed.
+// limited Docker container. If Docker or the preloaded image is unavailable,
+// the candidate fails closed and is never signed.
 func RunCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest) (SandboxEvidence, error) {
 	return runCandidateSandboxWithValidator(ctx, candidateDir, evidenceDir, manifest, runSandboxCommand, nil)
 }
@@ -103,34 +102,6 @@ func dockerSandboxArgs(candidateDir string, manifest ToolManifest) []string {
 	return args
 }
 
-func bubblewrapSandboxArgs(candidateDir string, manifest ToolManifest) []string {
-	// Root filesystem is mounted read-only; /tmp is the only writable tree;
-	// network is unshared; environment is cleared; the child runs with a
-	// non-root UID inside a user namespace. Failure to create namespaces is fatal.
-	args := []string{
-		"--die-with-parent", "--new-session",
-		"--unshare-net", "--unshare-user", "--uid", "65534", "--gid", "65534",
-		"--ro-bind-try", "/usr", "/usr",
-		"--ro-bind-try", "/bin", "/bin",
-		"--ro-bind-try", "/sbin", "/sbin",
-		"--ro-bind-try", "/lib", "/lib",
-		"--ro-bind-try", "/lib64", "/lib64",
-		"--dir", "/etc",
-		"--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
-		"--ro-bind-try", "/etc/passwd", "/etc/passwd",
-		"--ro-bind-try", "/etc/group", "/etc/group",
-		"--ro-bind-try", "/etc/ssl/certs", "/etc/ssl/certs",
-		"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
-		"--ro-bind", candidateDir, "/candidate",
-		"--chdir", "/tmp", "--clearenv",
-		"--setenv", "PATH", "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
-		"--setenv", "HOME", "/tmp", "--setenv", "TMPDIR", "/tmp",
-		"--setenv", "GOTOOLCHAIN", "local",
-		"--", "/bin/sh", "-lc", candidateBuildScript(manifest.Language, maxInt(1, manifest.TimeoutMillis/1000), manifest.MemoryBytes),
-	}
-	return args
-}
-
 func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, manifest ToolManifest, runner sandboxCommandRunner) (SandboxEvidence, error) {
 	return runCandidateSandboxWithValidator(ctx, candidateDir, evidenceDir, manifest, runner, nil)
 }
@@ -188,16 +159,8 @@ func runCandidateSandboxWithValidator(
 	started := time.Now().UTC()
 	log, runErr := runner(ctx, "docker", dockerSandboxArgs(sourceDir, manifest)...)
 	isolation := "docker_constraints_requested_host_enforcement_unverified"
-
-	if runnerNeedsFallback(log, runErr) {
-		fallbackLog, fallbackErr := runner(ctx, "bwrap", bubblewrapSandboxArgs(sourceDir, manifest)...)
-		log = append(append([]byte{}, log...), []byte("\n--- Bubblewrap fallback ---\n")...)
-		log = append(log, fallbackLog...)
-		runErr = fallbackErr
-		isolation = "bubblewrap_constraints_requested_host_enforcement_unverified"
-		if fallbackErr != nil {
-			isolation = "unavailable_fail_closed"
-		}
+	if runErr != nil && dockerUnavailable(log, runErr) {
+		isolation = "docker_unavailable_fail_closed"
 	}
 	finished := time.Now().UTC()
 	if len(log) > maxSandboxLogBytes {
@@ -221,7 +184,7 @@ func runCandidateSandboxWithValidator(
 		if errors.As(runErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
-		if isolation == "unavailable_fail_closed" {
+		if isolation == "docker_unavailable_fail_closed" {
 			errorClass = "sandbox_unavailable"
 		}
 	}
@@ -393,7 +356,7 @@ func validateSandboxCandidate(root string, manifest ToolManifest) error {
 	return nil
 }
 
-func runnerNeedsFallback(output []byte, err error) bool {
+func dockerUnavailable(output []byte, err error) bool {
 	if err == nil {
 		return false
 	}
