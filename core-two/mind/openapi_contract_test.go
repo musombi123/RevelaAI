@@ -63,4 +63,16 @@ func TestOpenAPIPathKeysAreUnique(t *testing.T) {
 	if len(seen) == 0 {
 		t.Fatal("OpenAPI contract declares no path entries")
 	}
+	requiredPaths := []string{
+		"/v1/mind/health", "/v1/mind/metrics", "/v1/mind/evolve",
+		"/v1/mind/evolutions", "/v1/mind/learning", "/v1/mind/feedback",
+		"/v1/mind/stream", "/v1/mind/key", "/v1/mind/tools/{name}/improvement",
+		"/v1/mind/telemetry/events", "/v1/mind/candidates",
+		"/v1/zero/health", "/v1/genesis/health", "/v1/rvx/compile",
+	}
+	for _, required := range requiredPaths {
+		if _, ok := seen[required]; !ok {
+			t.Errorf("OpenAPI contract is missing required path %q", required)
+		}
+	}
 }
