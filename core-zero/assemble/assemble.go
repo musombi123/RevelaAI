@@ -696,7 +696,7 @@ func Generate(target, outDir string) (Result, error) {
 // physical hardware is not accessed, and existing files are never overwritten.
 func GenerateVersion(target, version, outDir string) (Result, error) {
 	name := strings.ToLower(strings.TrimSpace(target))
-	ver := strings.TrimSpace(version)
+	ver := version
 
 	if len(name) > maxTargetBytes || !idPattern.MatchString(name) {
 		return Result{
@@ -707,7 +707,9 @@ func GenerateVersion(target, version, outDir string) (Result, error) {
 	}
 
 	if ver != "" &&
-		(len(ver) > maxVersionBytes || !versionPattern.MatchString(ver)) {
+		(strings.TrimSpace(ver) != ver ||
+			len(ver) > maxVersionBytes ||
+			!versionPattern.MatchString(ver)) {
 
 		return Result{
 			Target:              name,
