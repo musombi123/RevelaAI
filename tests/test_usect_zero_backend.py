@@ -172,8 +172,8 @@ def test_post_body_is_bounded_and_must_be_json(monkeypatch, test_client):
 
     response = test_client.post(
         "/api/usect-zero/keys/request",
-        data="not-json",
-        content_type="text/plain",
+        content="not-json",
+        headers={"content-type": "text/plain"},
     )
     assert response.status_code == 415
     assert response.json()["code"] == "json_required"
