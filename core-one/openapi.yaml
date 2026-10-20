@@ -1018,7 +1018,7 @@ components:
       required: [schema_version, name, version, language, entrypoint, input_schema, output_schema, risk_tier, permissions, timeout_ms, memory_bytes]
       properties:
         schema_version: { const: genesis.tool-manifest.v1 }
-        name: { type: string, pattern: "^[a-zA-Z0-9_-]{1,64}$" }
+        name: { type: string, pattern: "^[a-z0-9_-]{1,64}$" }
         version: { type: string, maxLength: 64 }
         language: { enum: [python, go] }
         entrypoint: { type: string, minLength: 1, maxLength: 240 }
