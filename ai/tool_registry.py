@@ -22,6 +22,31 @@ _MAX_INPUT_BYTES = 64_000
 _MAX_RESULT_BYTES = 32_000
 _TIMEOUT_SECONDS = 8.0
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_VERSION_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")
+_ARTIFACT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_SIGNATURE_RE = re.compile(r"^ed25519:[0-9a-f]{128}$")
+_RUNTIME_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "maxLength": 2000},
+        "inputs": {"type": "object", "additionalProperties": {"type": "string", "maxLength": 4000}},
+        "consent": {"type": "boolean"},
+    },
+    "required": ["action"],
+    "additionalProperties": False,
+}
+_RUNTIME_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string"},
+        "tool": {"type": "string"},
+        "summary": {"type": "string"},
+        "created_at": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["status", "tool", "summary"],
+    "additionalProperties": False,
+}
 
 
 class GenesisToolRegistryError(RuntimeError):
@@ -146,6 +171,20 @@ def list_active_tools(*, refresh: bool = False) -> list[dict[str, Any]]:
         manifest = item.get("manifest")
         if not isinstance(manifest, dict) or not _valid_manifest_shape(manifest):
             continue
+        name = manifest["name"]
+        version = manifest["version"]
+        artifact_hash = item.get("artifact_hash")
+        evidence = item.get("sandbox_evidence")
+        if (
+            item.get("name") != name
+            or item.get("version") != version
+            or item.get("risk_tier") != manifest.get("risk_tier")
+            or not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or ""))
+            or not _SIGNATURE_RE.fullmatch(str(item.get("signature") or ""))
+            or not isinstance(evidence, dict)
+            or evidence.get("passed") is not True
+        ):
+            continue
         active.append(item)
     return active
 
@@ -156,17 +195,47 @@ def _valid_manifest_shape(manifest: dict[str, Any]) -> bool:
         return False
     if manifest.get("schema_version") != "genesis.tool-manifest.v1":
         return False
-    if manifest.get("language") not in {"go", "python"}:
+    version = str(manifest.get("version") or "")
+    if not _VERSION_RE.fullmatch(version):
         return False
-    if manifest.get("risk_tier") not in {0, 1, 2}:
+    language = manifest.get("language")
+    if language not in {"go", "python"}:
+        return False
+    entrypoint = manifest.get("entrypoint")
+    if not isinstance(entrypoint, str) or not entrypoint or len(entrypoint) > 240:
+        return False
+    if (
+        entrypoint.startswith("/")
+        or "\\" in entrypoint
+        or any(part in {"", ".", ".."} for part in entrypoint.split("/"))
+        or ":" in entrypoint
+        or (language == "go" and entrypoint != "code.go")
+        or (language == "python" and not entrypoint.endswith(".py"))
+    ):
+        return False
+    tier = manifest.get("risk_tier")
+    if type(tier) is not int or tier not in {0, 1, 2}:
         return False
     permissions = manifest.get("permissions")
-    if not isinstance(permissions, dict):
+    required_permissions = {"network", "filesystem", "secrets", "hardware"}
+    if not isinstance(permissions, dict) or set(permissions) != required_permissions:
         return False
-    derived = 2 if permissions.get("hardware") is True else 1 if any(
-        permissions.get(key) is True for key in ("network", "filesystem", "secrets")
+    if any(type(permissions.get(key)) is not bool for key in required_permissions):
+        return False
+    derived = 2 if permissions["hardware"] else 1 if any(
+        permissions[key] for key in ("network", "filesystem", "secrets")
     ) else 0
-    return derived == manifest.get("risk_tier")
+    timeout_ms = manifest.get("timeout_ms")
+    memory_bytes = manifest.get("memory_bytes")
+    if type(timeout_ms) is not int or not 1 <= timeout_ms <= 120000:
+        return False
+    if type(memory_bytes) is not int or not 16 * 1024 * 1024 <= memory_bytes <= 512 * 1024 * 1024:
+        return False
+    return (
+        derived == tier
+        and manifest.get("input_schema") == _RUNTIME_INPUT_SCHEMA
+        and manifest.get("output_schema") == _RUNTIME_OUTPUT_SCHEMA
+    )
 
 
 def gemini_function_declarations(tools: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
