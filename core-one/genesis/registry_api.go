@@ -1,6 +1,7 @@
 package genesis
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"net/http"
