@@ -5,8 +5,6 @@ on:
     paths:
       - "core-zero/**"
       - "routes/usect_zero_routes.py"
-      - "fastapi_routes/usect_zero.py"
-      - "requirements.txt"
       - "services/usect_zero_client.py"
       - "ai/usect_zero_tools.py"
       - "services/ai_service.py"
