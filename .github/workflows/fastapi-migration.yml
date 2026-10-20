@@ -48,6 +48,7 @@ jobs:
       - name: Reject Flask and WSGI runtime dependencies
         run: |
           python - <<'PY'
+          import ast
           from pathlib import Path
           import re
 
@@ -58,11 +59,27 @@ jobs:
           assert "from asgi import app" in app_source
           assert "WSGIMiddleware" not in asgi_source
           assert "legacy_flask_app" not in asgi_source
-          assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", asgi_source, re.M)
-          assert not re.search(r"^\s*(?:from|import)\s+flask(?:\\.|\s)", app_source, re.M)
-          for dependency in ("flask", "flask-cors", "a2wsgi"):
-              assert not re.search(rf"^\s*{re.escape(dependency)}(?:[<=>~!;\\[]|\s|$)", requirements, re.M), dependency
           assert not Path("legacy_flask_app.py").exists()
+
+          for filename, source in (("app.py", app_source), ("asgi.py", asgi_source)):
+              tree = ast.parse(source, filename=filename)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      assert all(alias.name.split(".")[0].lower() != "flask" for alias in node.names), filename
+                  elif isinstance(node, ast.ImportFrom):
+                      module = (node.module or "").lower()
+                      assert module != "flask" and not module.startswith("flask."), filename
+
+          forbidden = {"flask", "flask-cors", "a2wsgi"}
+          for line in requirements.splitlines():
+              stripped = line.strip()
+              if not stripped or stripped.startswith("#"):
+                  continue
+              match = re.match(r"^([a-zA-Z0-9_.-]+)", stripped)
+              if match:
+                  package = match.group(1).replace("_", "-").lower()
+                  assert package not in forbidden, package
+
           print("FastAPI-only runtime contract verified.")
           PY
       - name: Run FastAPI gateway regression tests
