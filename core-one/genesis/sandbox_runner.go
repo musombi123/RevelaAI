@@ -71,7 +71,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 
 func candidateBuildScript(language string, timeoutSeconds int, memoryBytes int64) string {
-	limits := fmt.Sprintf("ulimit -t %d; ulimit -f 65536; ulimit -u 64; ", timeoutSeconds, memoryBytes/1024)
+	limits := fmt.Sprintf("ulimit -t %d; ulimit -f 65536; ulimit -u 64; ", timeoutSeconds)
 	if language == "python" {
 		return "set -eu; " + limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
 	}
