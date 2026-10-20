@@ -76,7 +76,7 @@ jobs:
                       module = (node.module or "").lower()
                       assert module != "flask" and not module.startswith("flask."), filename
 
-          forbidden = {"flask", "flask-cors", "a2wsgi"}
+          forbidden = {"flask", "flask-cors", "a2wsgi", "werkzeug"}
           for line in requirements.splitlines():
               stripped = line.strip()
               if not stripped or stripped.startswith("#"):
