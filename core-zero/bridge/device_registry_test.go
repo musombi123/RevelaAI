@@ -92,7 +92,7 @@ func TestGlobalKillSwitchRevokesTierOneAndTwoButKeepsTierZero(t *testing.T) {
 
 func TestTierTwoActuatorRequiresPerActionConfirmation(t *testing.T) {
 	device := Device{Tier: 2, Scopes: []string{"device:read", "device:act"}}
-	action := DeviceAction{Name: "set_gpio", Pin: 2, Value: 1}
+	action := DeviceAction{Name: "set_gpio", Pin: 23, Value: 1}
 	if err := validateDeviceAction(device, action); err == nil {
 		t.Fatal("Tier 2 action must require explicit confirmation")
 	}
