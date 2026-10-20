@@ -193,7 +193,7 @@ def request_core(
 
     supplied_device_token = (device_token or "").strip()
     if supplied_device_token:
-        if len(supplied_device_token) > 256 or "\\r" in supplied_device_token or "\\n" in supplied_device_token:
+        if len(supplied_device_token) > 256 or "\r" in supplied_device_token or "\n" in supplied_device_token:
             raise USECTZeroConfigurationError("Invalid enrolled-device token header.")
         headers["X-Device-Token"] = supplied_device_token
 
