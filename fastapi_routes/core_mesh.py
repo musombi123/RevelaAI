@@ -119,7 +119,15 @@ def _core_mesh_dashboard(authorization: str, refresh: str):
             },
             status_code=503,
         )
-    return {"status": "success", "data": snapshot}
+    cores = snapshot.get("cores") if isinstance(snapshot, dict) else {}
+    mind = cores.get("two") if isinstance(cores, dict) else {}
+    mind_available = isinstance(mind, dict) and mind.get("reachable") is True
+    return {
+        "status": "success",
+        "data": snapshot,
+        "mind_status": "online" if mind_available else "mind_unavailable",
+        "chat_available": True,
+    }
 
 
 def _proposal(authorization: str, body: Any, kind: str):
