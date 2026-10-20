@@ -317,9 +317,13 @@ func screenCandidateForPublication(engine *Engine, candidateDir string, manifest
 	if engine == nil {
 		return errors.New("Genesis engine is unavailable")
 	}
-	// Re-screen at publish time because an invention directory can be edited
-	// after Forge initially reviewed it. Never trust old Guardian approval as
-	// approval for modified source files.
+	rootInfo, err := os.Lstat(candidateDir)
+	if err != nil || rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return errors.New("candidate root is unsafe or unavailable")
+	}
+
+	// The manifest can be edited after Forge's original Guardian pass, so
+	// always screen its current canonical representation at publication time.
 	manifestRaw, err := json.Marshal(manifest)
 	if err != nil {
 		return errors.New("candidate manifest could not be encoded")
@@ -328,34 +332,40 @@ func screenCandidateForPublication(engine *Engine, candidateDir string, manifest
 		_ = engine.Guardian.LogBlocked("tool_manifest_publish", string(manifestRaw), decision.Reason)
 		return errors.New("Guardian blocked the tool manifest at publication")
 	}
-	relativeFiles := []string{manifest.Entrypoint}
-	if manifest.Language == "go" {
-		relativeFiles = append(relativeFiles, "code.go", "library.go", "test.go")
-	} else {
-		err := filepath.WalkDir(candidateDir, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.Type()&os.ModeSymlink != 0 {
-				return errors.New("candidate symlinks are forbidden")
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			if entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), "test") && strings.HasSuffix(entry.Name(), ".py") {
-				relative, err := filepath.Rel(candidateDir, path)
-				if err != nil {
-					return err
-				}
-				relativeFiles = append(relativeFiles, filepath.ToSlash(relative))
-			}
-			return nil
-		})
-		if err != nil {
-			return errors.New("candidate Python test discovery failed")
-		}
+
+	sourceExt := ".go"
+	if manifest.Language == "python" {
+		sourceExt = ".py"
 	}
-	seen := make(map[string]struct{})
+	relativeFiles := []string{filepath.ToSlash(manifest.Entrypoint)}
+	err = filepath.WalkDir(candidateDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("candidate symlinks are forbidden")
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if filepath.Ext(entry.Name()) != sourceExt {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return errors.New("source entry is not a regular file")
+		}
+		relative, err := filepath.Rel(candidateDir, path)
+		if err != nil {
+			return err
+		}
+		relativeFiles = append(relativeFiles, filepath.ToSlash(relative))
+		return nil
+	})
+	if err != nil {
+		return errors.New("candidate source discovery failed")
+	}
+
+	seen := make(map[string]struct{}, len(relativeFiles))
 	for _, relative := range relativeFiles {
 		if _, ok := seen[relative]; ok {
 			continue
