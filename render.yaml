@@ -41,6 +41,17 @@ services:
           type: pserv
           name: genesis-core-one
           envVarKey: GENESIS_ADMIN_TOKEN
+      # These server-only credentials are used only by authenticated operator routes.
+      - key: GENESIS_OWNER_APPROVAL_TOKEN
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          envVarKey: GENESIS_OWNER_APPROVAL_TOKEN
+      - key: GENESIS_ACTION_APPROVAL_TOKEN
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          envVarKey: GENESIS_ACTION_APPROVAL_TOKEN
       - key: MIND_BASE_URL
         fromService:
           type: pserv
