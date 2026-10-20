@@ -32,6 +32,17 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
+  /v1/diagnostics:
+    get:
+      tags: [system]
+      operationId: getDiagnostics
+      summary: Run bounded, read-only repository diagnostics
+      security: [{ApiKey: []}]
+      x-required-scope: scan:read
+      responses:
+        '200': {description: Diagnostic evidence and repository baseline status.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -60,6 +71,22 @@ paths:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/keys/issued:
+    get:
+      tags: [forge]
+      operationId: listIssuedApiKeys
+      summary: List issued-key metadata without exposing key material
+      security: [{AdminToken: []}]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [active, revoked, expired]}
+      responses:
+        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
