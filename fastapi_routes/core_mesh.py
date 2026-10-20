@@ -401,6 +401,9 @@ async def core_mesh_genesis_proposal_api(name: str, request: Request):
     user_id = _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
     try:
         result = await run_in_threadpool(get_genesis_proposal, name)
     except CoreMeshError as exc:
@@ -415,6 +418,9 @@ async def core_mesh_genesis_hardware_guide_api(
     user_id = _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
     try:
         result = await run_in_threadpool(get_genesis_hardware_guide, name, country, lang)
     except CoreMeshError as exc:
@@ -427,6 +433,9 @@ async def core_mesh_genesis_capability_plan_api(name: str, request: Request):
     user_id = _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
     try:
         result = await run_in_threadpool(get_genesis_capability_plan, name)
     except CoreMeshError as exc:
@@ -518,6 +527,9 @@ async def core_mesh_genesis_events_api(request: Request, limit: int = 100):
     user_id = _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
     if not 1 <= limit <= 250:
         return JSONResponse(
             {"status": "error", "error": {"code": "invalid_event_limit", "message": "limit must be between 1 and 250."}},
