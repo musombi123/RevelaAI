@@ -227,7 +227,7 @@ func applyCORS(w http.ResponseWriter, r *http.Request) bool {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set(
 			"Access-Control-Allow-Headers",
-			"Authorization, Content-Type, X-Admin-Token, X-API-Key",
+			"Authorization, Content-Type, X-Admin-Token, X-API-Key, X-Device-Token",
 		)
 		w.Header().Set(
 			"Access-Control-Allow-Methods",
@@ -672,6 +672,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "explicit_confirmation_required", Message: "Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION for each action."})
 			return
 		}
+		if err := k.Audit("device_action_requested", "human-operator", id, "pending", map[string]any{"action": action.Name, "tier": device.Tier}); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "audit_unavailable", Message: "The action was not executed because the audit log could not be verified."})
+			return
+		}
 		adapter := bridge.NewESP32USBAdapter(s.Devices)
 		if err := adapter.Connect(id, token); err != nil {
 			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "device_unavailable", Message: "The enrolled ESP32 serial adapter could not connect."})
@@ -682,7 +686,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			replyJSON(w, http.StatusConflict, apiError{Status: "error", Code: "device_action_rejected", Message: "The action was rejected, not acknowledged, or failed its approval checks."})
 			return
 		}
-		_ = k.Audit("device_action", "enrolled-device", id, "acknowledged", map[string]any{"action": action.Name, "tier": device.Tier})
+		if err := k.Audit("device_action", "human-operator", id, "acknowledged", map[string]any{"action": action.Name, "tier": device.Tier}); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "audit_unavailable_after_action", Message: "The ESP32 acknowledged the action, but its completion audit record failed."})
+			return
+		}
 		replyJSON(w, http.StatusOK, map[string]any{"status": "action_acknowledged", "device_id": id, "human_confirmation_required": device.Tier == 2})
 		return
 	}
