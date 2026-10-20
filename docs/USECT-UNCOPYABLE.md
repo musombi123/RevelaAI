@@ -35,13 +35,14 @@ When `REVELA_MESH_REQUIRE_LICENSE=true` (or strict mode is enabled), every `rvx_
 1. **Recipe:** validates the 4096-bit root key, private file permissions, and optional externally pinned digest.
 2. **License:** Ed25519-signed JWT verification, expiry, plan entitlements, optional hardware fingerprint, and factory allow-list. Enterprise tokens include factory, seed, evolve, migrate, robot and DNA restore entitlements; the factory and seed endpoints reject non-enterprise claims.
 3. **Hardware:** creates a hashed fingerprint from available machine identity signals. This is not TPM attestation; high-assurance deployments should add a TPM-backed enrollment agent.
-4. **RVX dialect:** `python -m core_uncopyable.rvx_evolver --reason scheduled_rotation` creates a fresh encrypted dialect artifact. `verify_dialect()` rejects artifacts whose date is obsolete or whose authenticated encryption fails. Schedule this command in the trusted owner environment; it is not automatically run by Git pull.
+4. **RVX dialect:** `python -m core_uncopyable.rvx_evolver --reason scheduled_rotation` creates a fresh encrypted dialect artifact. The admin-only `/v1/uncopyable/rotate-dialect` endpoint can rotate immediately after a confirmed event. `verify_dialect()` rejects artifacts whose date is obsolete or whose authenticated encryption fails. Schedule this command in the trusted owner environment; it is not automatically run by Git pull.
 5. **DNA and provenance:** every new Foundry build must create an Ed25519-signed watermark before it is committed. `GET /v1/verify/{tool_id}` checks the watermark. DNA restoration requires both the matching master key and a fresh founder signature over the exact vault digest, timestamp and nonce.
 
 ## API
 
 - `GET /v1/verify/{tool_id}` — public provenance verification; missing or invalid signatures return `valid: false`.
 - `GET /v1/uncopyable/status` — admin-only, redacted lock status. Requires `X-Organ-Admin-Token`.
+- `POST /v1/uncopyable/rotate-dialect` — admin-only immediate dialect rotation, useful after a confirmed twin or key-compromise event.
 - `POST /v1/uncopyable/restore` — admin-only encrypted DNA restore, also requiring a fresh Ed25519 founder signature over canonical JSON.
 
 The restore payload uses `encrypted_blob_b64`, `signature_payload`, and `founder_signature_b64`. The signed payload must be exactly:
