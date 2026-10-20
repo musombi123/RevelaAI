@@ -81,7 +81,14 @@ services:
     envVars:
       - key: GENESIS_ADMIN_TOKEN
         generateValue: true
+      # Render terminates public TLS at the platform proxy; this is a private service.
+      - key: GENESIS_TRUST_PROXY_TLS
+        value: "true"
       - key: GENESIS_SIGNING_KEY
+        sync: false
+      - key: GENESIS_OWNER_APPROVAL_TOKEN
+        sync: false
+      - key: GENESIS_ACTION_APPROVAL_TOKEN
         sync: false
       - key: GENESIS_MODEL_BASE_URL
         sync: false
