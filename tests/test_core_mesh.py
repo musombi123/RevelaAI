@@ -206,3 +206,35 @@ def test_genesis_stream_fails_with_explicit_unavailable_status_when_unconfigured
     with pytest.raises(core_mesh.CoreMeshError) as error:
         next(core_mesh.iter_genesis_events(max_events=1))
     assert error.value.code in {"core_service_not_configured", "genesis_unavailable"}
+
+
+def test_genesis_gateway_routes_are_registered():
+    from fastapi_routes.core_mesh import router
+
+    methods_by_path = {
+        route.path: set(route.methods or set())
+        for route in router.routes
+        if getattr(route, "methods", None)
+    }
+    expected = {
+        "/api/core-mesh/genesis/status": {"GET"},
+        "/api/core-mesh/genesis/proposals": {"GET"},
+        "/api/core-mesh/genesis/proposals/{name}": {"GET"},
+        "/api/core-mesh/genesis/tools/{name}/hardware-guide": {"GET"},
+        "/api/core-mesh/genesis/tools/{name}/capability-plan": {"GET"},
+        "/api/core-mesh/genesis/queue": {"POST"},
+        "/api/core-mesh/genesis/key": {"GET"},
+        "/api/core-mesh/genesis/key/request": {"POST"},
+        "/api/core-mesh/genesis/rvx/compile": {"POST"},
+        "/api/core-mesh/genesis/events": {"GET"},
+        "/api/core-mesh/tools": {"GET"},
+        "/api/core-mesh/tools/registry": {"GET"},
+        "/api/core-mesh/tools/execute": {"POST"},
+        "/api/core-mesh/tools/{name}/publish": {"POST"},
+        "/api/core-mesh/tools/{name}/{version}/{artifact_hash}/activate": {"POST"},
+        "/api/core-mesh/tools/{name}/{version}/{artifact_hash}/confirm": {"POST"},
+        "/api/core-mesh/tools/{name}/deactivate": {"POST"},
+        "/api/core-mesh/tools/{name}/rollback": {"POST"},
+    }
+    for path, methods in expected.items():
+        assert methods_by_path.get(path) == methods, f"route contract mismatch for {path}"
