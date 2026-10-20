@@ -298,3 +298,28 @@ def test_genesis_proposal_details_redact_raw_research_and_source(monkeypatch):
     assert "PRIVATE TOKEN" not in serialized
     assert result["automatic_execution"] is False
     assert result["automatic_merge"] is False
+
+
+def test_genesis_event_stream_decodes_byte_lines(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+
+    class FakeResponse:
+        status_code = 200
+        ok = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def iter_lines(self, decode_unicode=False):
+            assert decode_unicode is False
+            yield b"event: status"
+            yield b'data: {"status":"ok"}'
+            yield b""
+
+    monkeypatch.setattr(core_mesh.requests, "get", lambda *args, **kwargs: FakeResponse())
+    events = list(core_mesh.iter_genesis_events(max_events=1))
+    assert events == [{"status": "ok", "type": "status"}]
