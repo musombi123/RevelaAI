@@ -11,6 +11,8 @@ from core_evolve.engine import EvolutionEngine, EvolutionError
 from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest
 from core_migrate.models import DeviceEnrollment, MigrationPlanRequest, RobotBlueprintRequest
 from core_migrate.service import MigrationError, MigrationService
+from core_billing.licensing import LicenseError
+from core_uncopyable.license_lock import require_entitlement
 
 router = APIRouter(prefix="/api/usect", tags=["USECT-EVOLVE-MIGRATE"])
 
@@ -27,10 +29,19 @@ def _migrator() -> MigrationService:
 
 def _require_organ_token(token: str | None) -> None:
     expected = os.getenv("REVELA_ORGAN_ADMIN_TOKEN", "").strip()
-    if not expected:
+    if len(expected) < 32:
         raise HTTPException(status_code=503, detail="Organ administration is not configured.")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Valid organ administrator token required.")
+
+
+def _require_enterprise_license(token: str | None, entitlement: str) -> None:
+    try:
+        require_entitlement(token or "", entitlement)
+    except LicenseError as exc:
+        message = str(exc)
+        status = 503 if "not configured" in message.lower() or "unavailable" in message.lower() else 402
+        raise HTTPException(status_code=status, detail=message) from exc
 
 
 @router.get("/evolve/health")
@@ -42,8 +53,10 @@ async def evolve_health() -> dict[str, str]:
 async def create_evolution_proposal(
     body: EvolutionRequest,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
     try:
         proposal = _evolver().propose(body)
     except EvolutionError as exc:
@@ -56,8 +69,10 @@ async def recursively_improve_evolver(
     proposal_id: str,
     body: EvolutionRequest,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
     try:
         proposal = _evolver().propose(body, parent_proposal_id=proposal_id)
     except KeyError as exc:
@@ -72,8 +87,10 @@ async def evaluate_evolution_proposal(
     proposal_id: str,
     body: EvolutionEvaluationInput,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
     try:
         report = _evolver().evaluate(proposal_id, body)
     except KeyError as exc:
@@ -86,8 +103,10 @@ async def evaluate_evolution_proposal(
 @router.get("/migrate/devices")
 async def list_enrolled_devices(
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "migrate")
     return {"devices": [device.model_dump(mode="json") for device in _migrator().list_devices()]}
 
 
@@ -95,8 +114,10 @@ async def list_enrolled_devices(
 async def enroll_device(
     body: DeviceEnrollment,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "migrate")
     device = _migrator().enroll(body)
     return {"device": device.model_dump(mode="json"), "remote_access_enabled": False}
 
@@ -105,8 +126,10 @@ async def enroll_device(
 async def create_migration_plan(
     body: MigrationPlanRequest,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "migrate")
     return {"plan": _migrator().plan(body).model_dump(mode="json"), "remote_execution_performed": False}
 
 
@@ -114,8 +137,10 @@ async def create_migration_plan(
 async def create_robot_blueprint(
     body: RobotBlueprintRequest,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "robot_build")
     try:
         blueprint = _migrator().robot_blueprint(body)
     except MigrationError as exc:
