@@ -119,3 +119,8 @@ services:
           type: pserv
           name: genesis-core-one
           envVarKey: GENESIS_ADMIN_TOKEN
+      # Shared provider configuration names used by Core-One; optional for model-free Mind operation.
+      - key: REVELACODE_PROVIDER_URL
+        sync: false
+      - key: REVELACODE_PROVIDER_KEY
+        sync: false
