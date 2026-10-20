@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"reflect"
 	"regexp"
 	"strings"
 )
@@ -20,6 +21,9 @@ const (
 	MaxToolMemoryBytes        = 512 << 20
 	MinToolMemoryBytes        = 16 << 20
 )
+
+const runtimeToolInputSchemaJSON = `{"type":"object","properties":{"action":{"type":"string","maxLength":2000},"inputs":{"type":"object","additionalProperties":{"type":"string","maxLength":4000}},"consent":{"type":"boolean"}},"required":["action"],"additionalProperties":false}`
+const runtimeToolOutputSchemaJSON = `{"type":"object","properties":{"status":{"type":"string"},"tool":{"type":"string"},"summary":{"type":"string"},"created_at":{"type":"string"},"evidence":{"type":"array","items":{"type":"string"}}},"required":["status","tool","summary"],"additionalProperties":false}`
 
 // ToolPermissions are capabilities granted to a candidate at runtime.
 // Tier is validated against these permissions; a manifest cannot self-downgrade.
@@ -93,6 +97,12 @@ func ValidateToolManifest(m ToolManifest) error {
 	if err := validateLocalJSONObjectSchema(m.OutputSchema); err != nil {
 		return fmt.Errorf("invalid output schema: %w", err)
 	}
+	if err := validateRuntimeSchema(m.InputSchema, runtimeToolInputSchemaJSON); err != nil {
+		return fmt.Errorf("input schema does not match the supported tool runtime ABI: %w", err)
+	}
+	if err := validateRuntimeSchema(m.OutputSchema, runtimeToolOutputSchemaJSON); err != nil {
+		return fmt.Errorf("output schema does not match the supported tool runtime ABI: %w", err)
+	}
 	if m.TimeoutMillis < 1 || m.TimeoutMillis > MaxToolTimeoutMillis {
 		return errors.New("timeout_ms is outside the permitted range")
 	}
@@ -101,6 +111,21 @@ func ValidateToolManifest(m ToolManifest) error {
 	}
 	if m.RiskTier != DerivedRiskTier(m.Permissions) {
 		return errors.New("risk_tier does not match the derived permissions tier")
+	}
+	return nil
+}
+
+func validateRuntimeSchema(raw json.RawMessage, expected string) error {
+	var actual any
+	if err := json.Unmarshal(raw, &actual); err != nil {
+		return errors.New("schema could not be decoded")
+	}
+	var canonical any
+	if err := json.Unmarshal([]byte(expected), &canonical); err != nil {
+		return errors.New("runtime schema definition is invalid")
+	}
+	if !reflect.DeepEqual(actual, canonical) {
+		return errors.New("schema differs from the supported action/inputs/consent runtime contract")
 	}
 	return nil
 }
