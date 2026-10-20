@@ -63,6 +63,7 @@ services:
     runtime: go
     rootDir: core-zero
     plan: starter
+    healthCheckPath: /v1/health
     buildCommand: go build -o ./usect-zero ./cmd/usect-zero
     startCommand: ./usect-zero -mode serve -root .. -listen 0.0.0.0:$PORT
     disk:
