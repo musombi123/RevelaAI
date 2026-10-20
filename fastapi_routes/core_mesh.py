@@ -1,18 +1,29 @@
 """Native FastAPI routes for authenticated USECT Core Mesh and user-taught learning."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
 
 import jwt
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from ai.core_mesh import (
     CoreMeshError,
     get_core_mesh_dashboard,
+    get_genesis_capability_plan,
+    get_genesis_hardware_guide,
+    get_genesis_key_request_info,
+    get_genesis_proposal,
+    get_genesis_status,
+    iter_genesis_events,
+    list_genesis_proposals,
+    queue_genesis_demand,
+    request_genesis_provider_key,
+    compile_genesis_rvx,
     propose_genesis_invention,
     propose_mind_evolution,
 )
@@ -345,6 +356,192 @@ async def _body_or_none(request: Request):
         return await request.json()
     except Exception:
         return None
+
+
+def _core_mesh_upstream_error(exc: CoreMeshError):
+    return JSONResponse(
+        {"status": "error", "error": {"code": exc.code, "message": str(exc)}},
+        status_code=exc.status_code,
+    )
+
+
+def _authenticated_core_mesh_user(request: Request) -> str | JSONResponse:
+    user_id = _resolve_user(request.headers.get("Authorization", ""))
+    if not user_id:
+        return _auth_failure()
+    return user_id
+
+
+@router.get("/api/core-mesh/genesis/status")
+async def core_mesh_genesis_status_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    try:
+        result = await run_in_threadpool(get_genesis_status)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.get("/api/core-mesh/genesis/proposals")
+async def core_mesh_genesis_proposals_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    try:
+        result = await run_in_threadpool(list_genesis_proposals)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.get("/api/core-mesh/genesis/proposals/{name}")
+async def core_mesh_genesis_proposal_api(name: str, request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    try:
+        result = await run_in_threadpool(get_genesis_proposal, name)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.get("/api/core-mesh/genesis/tools/{name}/hardware-guide")
+async def core_mesh_genesis_hardware_guide_api(
+    name: str, request: Request, country: str = "KE", lang: str = ""
+):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    try:
+        result = await run_in_threadpool(get_genesis_hardware_guide, name, country, lang)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.get("/api/core-mesh/genesis/tools/{name}/capability-plan")
+async def core_mesh_genesis_capability_plan_api(name: str, request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    try:
+        result = await run_in_threadpool(get_genesis_capability_plan, name)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.post("/api/core-mesh/genesis/queue")
+async def core_mesh_genesis_queue_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    body = await _body_or_none(request)
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_json", "message": "Send a JSON object containing demand, country and optional language."}},
+            status_code=400,
+        )
+    try:
+        result = await run_in_threadpool(
+            queue_genesis_demand,
+            body.get("demand", ""),
+            source="revelaai-gateway",
+            country=str(body.get("country") or "KE"),
+            language=str(body.get("language") or ""),
+        )
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return JSONResponse({"status": "success", "data": result}, status_code=202)
+
+
+@router.get("/api/core-mesh/genesis/key")
+async def core_mesh_genesis_key_info_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    try:
+        result = await run_in_threadpool(get_genesis_key_request_info)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.post("/api/core-mesh/genesis/key/request")
+async def core_mesh_genesis_key_request_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    body = await _body_or_none(request)
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_json", "message": "Send client_id and reason."}},
+            status_code=400,
+        )
+    try:
+        result = await run_in_threadpool(
+            request_genesis_provider_key,
+            str(body.get("client_id") or ""),
+            str(body.get("reason") or ""),
+        )
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return JSONResponse({"status": "success", "data": result}, status_code=202)
+
+
+@router.post("/api/core-mesh/genesis/rvx/compile")
+async def core_mesh_genesis_rvx_compile_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
+    body = await _body_or_none(request)
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_json", "message": "Send an RVX source string."}},
+            status_code=400,
+        )
+    try:
+        result = await run_in_threadpool(compile_genesis_rvx, str(body.get("source") or ""))
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.get("/api/core-mesh/genesis/events")
+async def core_mesh_genesis_events_api(request: Request, limit: int = 100):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    if not 1 <= limit <= 250:
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_event_limit", "message": "limit must be between 1 and 250."}},
+            status_code=400,
+        )
+
+    def event_stream():
+        try:
+            for event in iter_genesis_events(max_events=limit):
+                if not isinstance(event, dict):
+                    continue
+                event_name = str(event.get("type") or "message").replace("\r", "").replace("\n", "")[:80] or "message"
+                yield "event: " + event_name + "\n"
+                yield "data: " + json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n\n"
+        except CoreMeshError as exc:
+            payload = json.dumps({"code": exc.code, "message": str(exc)}, ensure_ascii=False)
+            yield "event: error\n"
+            yield "data: " + payload + "\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/core-mesh/dashboard")
