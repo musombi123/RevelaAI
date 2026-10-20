@@ -73,9 +73,9 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 func candidateBuildScript(language string, timeoutSeconds int, memoryBytes int64) string {
 	limits := fmt.Sprintf("ulimit -t %d; ulimit -v %d; ulimit -f 65536; ulimit -u 64 2>/dev/null || true; ", timeoutSeconds, memoryBytes/1024)
 	if language == "python" {
-		return limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
+		return "set -eu; " + limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
 	}
-	return limits + "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
+	return "set -eu; " + limits + "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
 }
 
 func dockerSandboxArgs(candidateDir string, manifest ToolManifest) []string {
@@ -109,7 +109,16 @@ func bubblewrapSandboxArgs(candidateDir string, manifest ToolManifest) []string 
 	args := []string{
 		"--die-with-parent", "--new-session",
 		"--unshare-net", "--unshare-user", "--uid", "65534", "--gid", "65534",
-		"--ro-bind", "/", "/",
+		"--ro-bind-try", "/usr", "/usr",
+		"--ro-bind-try", "/bin", "/bin",
+		"--ro-bind-try", "/sbin", "/sbin",
+		"--ro-bind-try", "/lib", "/lib",
+		"--ro-bind-try", "/lib64", "/lib64",
+		"--dir", "/etc",
+		"--ro-bind-try", "/etc/ld.so.cache", "/etc/ld.so.cache",
+		"--ro-bind-try", "/etc/passwd", "/etc/passwd",
+		"--ro-bind-try", "/etc/group", "/etc/group",
+		"--ro-bind-try", "/etc/ssl/certs", "/etc/ssl/certs",
 		"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
 		"--ro-bind", candidateDir, "/candidate",
 		"--chdir", "/tmp", "--clearenv",
@@ -144,14 +153,21 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 		return SandboxEvidence{}, errors.New("sandbox evidence directory is unavailable")
 	}
 
-	// Ensure the candidate cannot be reached by modifying a path after initial
-	// validation. Absolute paths are passed as data, never through a shell.
+	// Copy into a private staging directory and seal it read-only for the
+	// non-root sandbox UID. Do not bind the original repository path: its parent
+	// permissions may deny access, and the sandbox must only see the candidate.
+	sourceDir, cleanupSource, err := prepareSandboxSource(candidateDir, evidenceDir)
+	if err != nil {
+		return SandboxEvidence{}, err
+	}
+	defer cleanupSource()
+
 	started := time.Now().UTC()
-	log, runErr := runner(ctx, "docker", dockerSandboxArgs(candidateDir, manifest)...)
+	log, runErr := runner(ctx, "docker", dockerSandboxArgs(sourceDir, manifest)...)
 	isolation := "docker_constraints_requested_host_enforcement_unverified"
 
 	if runnerNeedsFallback(log, runErr) {
-		fallbackLog, fallbackErr := runner(ctx, "bwrap", bubblewrapSandboxArgs(candidateDir, manifest)...)
+		fallbackLog, fallbackErr := runner(ctx, "bwrap", bubblewrapSandboxArgs(sourceDir, manifest)...)
 		log = append(append([]byte{}, log...), []byte("\n--- Bubblewrap fallback ---\n")...)
 		log = append(log, fallbackLog...)
 		runErr = fallbackErr
@@ -208,6 +224,91 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 		return evidence, errors.New("sandbox build/test did not pass; candidate must not be signed")
 	}
 	return evidence, nil
+}
+
+func prepareSandboxSource(candidateDir, parent string) (string, func(), error) {
+	stage, err := os.MkdirTemp(parent, ".candidate-source-*")
+	if err != nil {
+		return "", func() {}, errors.New("could not create a private sandbox source directory")
+	}
+	cleanup := func() {
+		_ = makeTreeWritable(stage)
+		_ = os.RemoveAll(stage)
+	}
+	var total int64
+	fileCount := 0
+	err = filepath.WalkDir(candidateDir, func(source string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return errors.New("candidate symlinks are forbidden")
+		}
+		rel, err := filepath.Rel(candidateDir, source)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(stage, rel)
+		if entry.IsDir() {
+			if rel == "." {
+				return nil
+			}
+			return os.MkdirAll(target, 0o700)
+		}
+		if !entry.Type().IsRegular() {
+			return errors.New("candidate contains a non-regular file")
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		fileCount++
+		if total > maxRegistryBytes || fileCount > maxRegistryFiles {
+			return errors.New("candidate exceeds sandbox size limits")
+		}
+		raw, err := os.ReadFile(source)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, raw, 0o600); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		cleanup()
+		return "", func() {}, errors.New("could not stage candidate safely for sandboxing")
+	}
+	if err := sealTreeForSandbox(stage); err != nil {
+		cleanup()
+		return "", func() {}, errors.New("could not seal sandbox candidate read-only")
+	}
+	return stage, cleanup, nil
+}
+
+func sealTreeForSandbox(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0o555)
+		}
+		return os.Chmod(path, 0o444)
+	})
+}
+
+func makeTreeWritable(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0o700)
+		}
+		return os.Chmod(path, 0o600)
+	})
 }
 
 func runnerNeedsFallback(output []byte, err error) bool {
