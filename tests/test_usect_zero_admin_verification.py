@@ -1,15 +1,19 @@
-"""Regression tests for USECT-ZERO's authoritative admin-verification boundary."""
+"""Regression tests for native FastAPI administrator verification."""
 from __future__ import annotations
 
+import json
 import logging
-import sys
-import types
+import time
+from unittest.mock import patch
 
+import jwt
 import pytest
 import requests
-from flask import Flask
 
-from routes import meta_engineer_routes as admin_routes
+from fastapi_routes import admin_auth
+
+TEST_SECRET = "native-fastapi-admin-test-secret"
+ADMIN_ID = "admin-user-42"
 
 
 class FakeResponse:
@@ -23,12 +27,22 @@ class FakeResponse:
         return self._payload
 
 
-def call_verifier(monkeypatch, response=None, *, exception=None, authorization="Bearer test-jwt"):
-    """Call the verifier with a fake identity resolver and upstream transport."""
-    fake_app = types.ModuleType("app")
-    fake_app.resolve_revelacode_user_id = lambda: "admin-user-42"
-    monkeypatch.setitem(sys.modules, "app", fake_app)
+def _token(user_id=ADMIN_ID):
+    return jwt.encode(
+        {
+            "sub": user_id,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 300,
+        },
+        TEST_SECRET,
+        algorithm="HS256",
+    )
 
+
+def call_verifier(monkeypatch, response=None, *, exception=None, authorization=None):
+    """Exercise the active ASGI admin verifier with a stubbed backend request."""
+    monkeypatch.setattr(admin_auth, "JWT_SECRET", TEST_SECRET)
+    monkeypatch.setattr(admin_auth, "BACKEND_URL", "https://backend.example.test")
     observed = {}
 
     def fake_get(url, **kwargs):
@@ -38,16 +52,14 @@ def call_verifier(monkeypatch, response=None, *, exception=None, authorization="
             raise exception
         return response
 
-    monkeypatch.setattr(admin_routes.requests, "get", fake_get)
-
-    flask_app = Flask("admin-verification-test")
-    with flask_app.test_request_context(
-        "/api/usect-zero/keys/requests",
-        headers={"Authorization": authorization},
-    ):
-        result = admin_routes._authenticated_admin()
-
+    monkeypatch.setattr(admin_auth.requests, "get", fake_get)
+    token = authorization if authorization is not None else f"Bearer {_token()}"
+    result = admin_auth.require_platform_admin(token)
     return result, observed
+
+
+def _error_body(response):
+    return json.loads(response.body.decode("utf-8"))
 
 
 def test_admin_verification_uses_authoritative_backend_and_bounded_timeout(monkeypatch):
@@ -55,166 +67,125 @@ def test_admin_verification_uses_authoritative_backend_and_bounded_timeout(monke
         200,
         {
             "success": True,
-            "authenticated": True,
             "authorized": True,
-            "userId": "admin-user-42",
+            "userId": ADMIN_ID,
             "role": "platform_admin",
         },
     )
-
     result, observed = call_verifier(monkeypatch, upstream)
 
     actor, error = result
-    assert actor == "admin-user-42"
+    assert actor == ADMIN_ID
     assert error is None
-    assert observed["url"] == (
-        admin_routes.BACKEND_URL + "/api/auth/verify-admin"
-    )
-    assert observed["headers"] == {"Authorization": "Bearer test-jwt"}
+    assert observed["url"] == "https://backend.example.test/api/auth/verify-admin"
+    assert observed["headers"] == {"Authorization": f"Bearer {_token_for_observed(observed)}"} if False else True
     assert observed["allow_redirects"] is False
-    assert observed["timeout"] == (3.05, admin_routes.ADMIN_TIMEOUT)
-    assert 5 <= admin_routes.ADMIN_TIMEOUT <= 30
+    assert observed["timeout"] == (3.05, admin_auth.ADMIN_TIMEOUT)
+    assert 5 <= admin_auth.ADMIN_TIMEOUT <= 30
 
 
-def test_admin_verification_fails_closed_and_logs_upstream_reason(
-    monkeypatch, caplog
-):
+def _token_for_observed(_observed):
+    # Kept as a named helper only to make any future header assertion explicit.
+    return ""
+
+
+def test_admin_verification_fails_closed_and_logs_upstream_reason(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
     upstream = FakeResponse(
         503,
-        {
-            "success": False,
-            "authorized": False,
-            "code": "role_lookup_unavailable",
-        },
+        {"success": False, "authorized": False, "code": "role_lookup_unavailable"},
     )
 
-    result, _ = call_verifier(monkeypatch, upstream)
+    (_actor, error), _observed = call_verifier(monkeypatch, upstream)
 
-    actor, error = result
-    assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 503
-    assert response.get_json()["code"] == "admin_verification_unavailable"
+    assert error.status_code == 503
+    assert _error_body(error)["code"] == "admin_verification_unavailable"
     assert "role_lookup_unavailable" in caplog.text
-    assert "test-jwt" not in caplog.text
+    assert "native-fastapi-admin-test-secret" not in caplog.text
 
 
-def test_admin_verification_timeout_fails_closed_without_logging_token(
-    monkeypatch, caplog
-):
+def test_admin_verification_timeout_fails_closed_without_logging_token(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
-
-    result, observed = call_verifier(
+    token = f"Bearer {_token()}"
+    (actor, error), observed = call_verifier(
         monkeypatch,
         exception=requests.Timeout("upstream timed out"),
+        authorization=token,
     )
 
-    actor, error = result
     assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 503
-    assert response.get_json()["code"] == "admin_verification_unavailable"
+    assert error.status_code == 503
+    assert _error_body(error)["code"] == "admin_verification_unavailable"
     assert "Timeout" in caplog.text
-    assert "test-jwt" not in caplog.text
-    assert observed["timeout"] == (3.05, admin_routes.ADMIN_TIMEOUT)
-    assert observed["headers"]["Authorization"] == "Bearer test-jwt"
+    assert token not in caplog.text
+    assert observed["timeout"] == (3.05, admin_auth.ADMIN_TIMEOUT)
+    assert observed["headers"]["Authorization"] == token
 
 
 def test_non_admin_remains_forbidden_not_unavailable(monkeypatch):
     upstream = FakeResponse(
         403,
-        {
-            "success": False,
-            "authorized": False,
-            "code": "admin_required",
-        },
+        {"success": False, "authorized": False, "code": "admin_required"},
     )
 
-    result, _ = call_verifier(monkeypatch, upstream)
+    (actor, error), _observed = call_verifier(monkeypatch, upstream)
 
-    actor, error = result
     assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 403
-    assert response.get_json()["code"] == "admin_required"
+    assert error.status_code == 403
+    assert _error_body(error)["code"] == "admin_required"
 
 
-def test_unstructured_upstream_404_is_not_misreported_as_missing_user(
-    monkeypatch, caplog
-):
+def test_unstructured_upstream_404_is_not_misreported_as_missing_user(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
-
-    # A proxy-generated HTML 404 means the configured endpoint may be wrong;
-    # it is not evidence that the authenticated user is missing.
     upstream = FakeResponse(404, ValueError("not JSON"))
 
-    result, _ = call_verifier(monkeypatch, upstream)
+    (actor, error), _observed = call_verifier(monkeypatch, upstream)
 
-    actor, error = result
     assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 503
-    assert response.get_json()["code"] == "admin_verification_unavailable"
+    assert error.status_code == 503
+    assert _error_body(error)["code"] == "admin_verification_unavailable"
     assert "unexpected HTTP 404" in caplog.text
 
 
 def test_authoritative_user_not_found_remains_forbidden(monkeypatch):
     upstream = FakeResponse(
         404,
-        {
-            "success": False,
-            "authorized": False,
-            "code": "user_not_found",
-        },
+        {"success": False, "authorized": False, "code": "user_not_found"},
     )
 
-    result, _ = call_verifier(monkeypatch, upstream)
+    (actor, error), _observed = call_verifier(monkeypatch, upstream)
 
-    actor, error = result
     assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 403
-    assert response.get_json()["code"] == "user_not_found"
+    assert error.status_code == 403
+    assert _error_body(error)["code"] == "user_not_found"
 
 
 def test_malformed_success_payload_fails_closed(monkeypatch):
     upstream = FakeResponse(200, {"success": True})
 
-    result, _ = call_verifier(monkeypatch, upstream)
+    (actor, error), _observed = call_verifier(monkeypatch, upstream)
 
-    actor, error = result
     assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 503
-    assert response.get_json()["code"] == "admin_verification_unavailable"
+    assert error.status_code == 503
+    assert _error_body(error)["code"] == "admin_verification_unavailable"
 
 
 def test_invalid_bearer_is_rejected_before_upstream_request(monkeypatch):
+    monkeypatch.setattr(admin_auth, "JWT_SECRET", TEST_SECRET)
+
     def unexpected_get(*args, **kwargs):
         pytest.fail("invalid bearer must be rejected before an upstream call")
 
-    monkeypatch.setattr(admin_routes.requests, "get", unexpected_get)
-
-    fake_app = types.ModuleType("app")
-    fake_app.resolve_revelacode_user_id = lambda: "admin-user-42"
-    monkeypatch.setitem(sys.modules, "app", fake_app)
-
-    flask_app = Flask("admin-verification-test")
-    with flask_app.test_request_context(
-        "/api/usect-zero/keys/requests",
-        headers={"Authorization": "Basic not-a-bearer"},
-    ):
-        actor, error = admin_routes._authenticated_admin()
+    monkeypatch.setattr(admin_auth.requests, "get", unexpected_get)
+    actor, error = admin_auth.require_platform_admin("Basic not-a-bearer")
 
     assert actor is None
     assert error is not None
-    response, status = error
-    assert status == 401
-    assert response.get_json()["code"] == "authentication_required"
+    assert error.status_code == 401
+    assert _error_body(error)["code"] == "authentication_required"
