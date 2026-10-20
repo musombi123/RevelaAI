@@ -41,6 +41,9 @@ services:
           type: pserv
           name: genesis-core-one
           envVarKey: GENESIS_ADMIN_TOKEN
+      # User IDs authorized to explicitly approve Tier 1-2 Genesis activation/rollback.
+      - key: GENESIS_OWNER_USER_IDS
+        sync: false
       # These server-only credentials are used only by authenticated operator routes.
       - key: GENESIS_OWNER_APPROVAL_TOKEN
         fromService:
