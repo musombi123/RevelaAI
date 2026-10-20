@@ -636,7 +636,7 @@ paths:
         The runner requests non-root execution, a read-only root filesystem,
         CPU/memory/PID/time limits and a temporary writable filesystem. Evidence
         records the requested isolation level; host enforcement is not independently attested.
-        If Docker is unavailable, the operation fails closed and no signature is issued.
+        Docker is the only supported build/test runner. If the daemon, permissions, or preloaded image is unavailable, the operation fails closed and no signature is issued.
       parameters:
         - $ref: "#/components/parameters/ToolName"
       responses:
