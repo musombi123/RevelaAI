@@ -200,3 +200,14 @@ def test_genesis_url_rejects_credentials_and_paths(monkeypatch):
         except tool_registry.GenesisToolRegistryError:
             continue
         raise AssertionError(f"unsafe Genesis URL must be rejected: {value}")
+
+
+def test_public_ipv6_http_genesis_url_is_rejected(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "http://[2001:db8::1]:8781")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    try:
+        tool_registry._configuration()
+    except tool_registry.GenesisToolRegistryError as exc:
+        assert exc.code == "genesis_url_tls_required"
+    else:
+        raise AssertionError("public IPv6 Genesis URLs must use HTTPS")
