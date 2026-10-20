@@ -187,7 +187,7 @@ def _public_evolution(item: dict) -> dict:
 
 def _dashboard_snapshot() -> dict:
     zero_base = _base_url("USECT_ZERO_BASE_URL", "http://127.0.0.1:8780")
-    one_base = _base_url("GENESIS_BASE_URL", "http://127.0.0.1:8781")
+    one_base = _base_url("GENESIS_BASE_URL", "")
     mind_base = _base_url("MIND_BASE_URL", "http://127.0.0.1:8782")
     genesis_headers = _upstream_headers(include_genesis=True)
 
@@ -197,8 +197,8 @@ def _dashboard_snapshot() -> dict:
         "zero_health": (zero_base, "/v1/health", None),
         "zero_detail": (mind_base, "/v1/zero/status", None),
         "one_health": (one_base, "/v1/genesis/health", None),
-        "one_status": (mind_base, "/v1/genesis/status", genesis_headers),
-        "one_tools": (mind_base, "/v1/genesis/tools", genesis_headers),
+        "one_status": (one_base, "/v1/genesis/status", genesis_headers),
+        "one_tools": (one_base, "/v1/genesis/tools", genesis_headers),
         "two_health": (mind_base, "/v1/mind/health", None),
         "two_metrics": (mind_base, "/v1/mind/metrics", None),
         "two_evolutions": (mind_base, "/v1/mind/evolutions", None),
@@ -277,6 +277,7 @@ def _dashboard_snapshot() -> dict:
                 "role": "Womb · guarded invention proposals",
                 "status": "online" if one_online else "unavailable",
                 "reachable": one_online,
+                "reason": None if one_online else "genesis_unavailable",
                 "version": one_health.get("version") or one_status.get("version"),
                 "standalone": one_health.get("standalone", one_status.get("standalone")),
                 "model_assisted": one_health.get("model_assisted", one_status.get("model_assisted")),
@@ -350,14 +351,30 @@ def propose_genesis_invention(demand: str, country: str = "KE", language: str = 
     mind_base = _base_url("MIND_BASE_URL", "http://127.0.0.1:8782")
     if not (os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")):
         raise CoreMeshError("GENESIS_ADMIN_TOKEN is not configured on the RevelaAI service.", status_code=503, code="genesis_admin_token_not_configured")
-    payload = _request_json(
-        mind_base,
-        "/v1/genesis/invent",
-        method="POST",
-        payload={"demand": demand, "country": str(country or "KE")[:80], "language": str(language or "")[:20]},
-        headers=_upstream_headers(include_genesis=True, mutation=True),
-        timeout=40.0,
-    )
+    genesis_base = _base_url("GENESIS_BASE_URL", "")
+    try:
+        payload = _request_json(
+            genesis_base,
+            "/v1/genesis/invent",
+            method="POST",
+            payload={"demand": demand, "country": str(country or "KE")[:80], "language": str(language or "")[:20]},
+            headers=_upstream_headers(include_genesis=True),
+            timeout=40.0,
+        )
+    except CoreMeshError as exc:
+        if exc.code in {
+            "core_service_not_configured",
+            "core_service_unreachable",
+            "core_service_tls_required",
+            "core_redirect_rejected",
+            "upstream_http_503",
+        }:
+            raise CoreMeshError(
+                "Genesis is unavailable. Your normal RevelaAI chat remains available; retry the invention request later.",
+                status_code=503,
+                code="genesis_unavailable",
+            ) from None
+        raise
     return _public_proposal(payload)
 
 
