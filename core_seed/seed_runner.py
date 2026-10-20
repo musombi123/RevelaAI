@@ -29,7 +29,9 @@ def seed_root() -> Path:
 
 
 def _verify_device_license(token: str, *, now: datetime | None = None) -> dict[str, Any]:
-    claims = _verify_device_license(token, now=now)
+    # Verify the signed license first; recurse only existed here by mistake and
+    # caused every Seed operation to fail with RecursionError.
+    claims = verify_license_token(token, now=now)
     if claims.get("hardware_fingerprint"):
         try:
             current = hardware_fingerprint()

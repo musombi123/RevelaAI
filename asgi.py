@@ -7,12 +7,15 @@ inside its existing services; expose HTTP handlers through fastapi_routes/.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import base64
+import json
 import logging
 import time
 import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 
@@ -155,6 +158,31 @@ async def asgi_security_and_throttle(request: Request, call_next):
             return _secure_response(response, request_id)
 
     response = await call_next(request)
+    # Normalize JSON error responses from route handlers so every failed request
+    # has a stable envelope and correlation ID, not only an X-Request-ID header.
+    if response.status_code >= 400 and "application/json" in response.headers.get("content-type", ""):
+        raw_body = b""
+        status_code = response.status_code
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        headers.pop("content-type", None)
+        try:
+            raw_body = b"".join([chunk async for chunk in response.body_iterator])
+            payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+            if isinstance(payload, dict):
+                existing_error = payload.get("error")
+                if not isinstance(existing_error, dict):
+                    code = payload.get("code") or payload.get("error_code") or f"HTTP_{status_code}"
+                    message = payload.get("message") or payload.get("detail") or "Request could not be completed."
+                    payload["error"] = {"code": str(code), "message": str(message)}
+                payload.setdefault("status", "error")
+                payload.setdefault("request_id", request_id)
+                response = JSONResponse(payload, status_code=status_code, headers=headers)
+            else:
+                response = Response(content=raw_body, status_code=status_code, headers=headers)
+        except (ValueError, UnicodeDecodeError, TypeError):
+            logger.warning("Could not normalize JSON error response | request_id=%s", request_id)
+            response = Response(content=raw_body, status_code=status_code, headers=headers)
     return _secure_response(response, request_id)
 
 
@@ -192,6 +220,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 
 @app.on_event("startup")
+def validate_gemini_models_on_startup() -> None:
+    """Log provider model availability without making optional upstream outages fatal."""
+    try:
+        from ai.ai_client import validate_gemini_models
+        validate_gemini_models()
+    except Exception as exc:
+        logger.warning("Gemini model validation skipped: %s", type(exc).__name__)
+
+
+@app.on_event("startup")
 def enforce_uncopyable_startup() -> None:
     """Enforce owner recipe trust when the deployment explicitly enables strict mode."""
     if __import__("os").getenv("REVELA_UNCOPYABLE_ENFORCE", "").strip().lower() not in {"1", "true", "yes"}:
@@ -202,10 +240,23 @@ def enforce_uncopyable_startup() -> None:
 
     try:
         verify_recipe(strict_path=True)
-        # Strict deployments must provision the verification key independently.
-        if not (__import__("os").getenv("REVELA_LICENSE_PUBLIC_KEY") or __import__("os").getenv("REVELA_LICENSE_PUBLIC_KEY_PATH")):
-            raise RuntimeError("REVELA_LICENSE_PUBLIC_KEY(_PATH) is required in strict mode.")
+        # Validate strict-mode secrets without logging or returning their values.
+        env = __import__("os").environ
+        if not (env.get("REVELA_LICENSE_PUBLIC_KEY", "").strip() or env.get("REVELA_LICENSE_PUBLIC_KEY_PATH", "").strip()):
+            raise RuntimeError("REVELA_LICENSE_PUBLIC_KEY or REVELA_LICENSE_PUBLIC_KEY_PATH is required when REVELA_UNCOPYABLE_ENFORCE=true.")
         load_public_key()
+        master_key = env.get("REVELA_MASTER_KEY_BASE64", "").strip()
+        if not master_key:
+            raise RuntimeError("REVELA_MASTER_KEY_BASE64 is required when REVELA_UNCOPYABLE_ENFORCE=true.")
+        try:
+            decoded_master_key = base64.b64decode(master_key, validate=True)
+        except Exception as key_exc:
+            raise RuntimeError("REVELA_MASTER_KEY_BASE64 must contain valid base64.") from key_exc
+        if len(decoded_master_key) < 32:
+            raise RuntimeError("REVELA_MASTER_KEY_BASE64 must decode to at least 32 bytes.")
+        jwt_secret = env.get("JWT_SECRET", "")
+        if len(jwt_secret.encode("utf-8")) < 32:
+            raise RuntimeError("JWT_SECRET must be configured with at least 32 UTF-8 bytes when REVELA_UNCOPYABLE_ENFORCE=true.")
         hardware_fingerprint()
     except (RecipeLockError, LicenseError, RuntimeError) as exc:
         logger.critical("USECT-UNCOPYABLE startup gate rejected runtime: %s", type(exc).__name__)

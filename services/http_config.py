@@ -10,6 +10,8 @@ DEFAULT_CORS_ORIGINS = (
     "https://revelacode-frontend.onrender.com",
     "https://revelacode.co.ke",
     "https://www.revelacode.co.ke",
+    "https://revelacode.com",
+    "https://www.revelacode.com",
     "https://localhost",
 )
 

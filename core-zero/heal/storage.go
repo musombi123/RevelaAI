@@ -43,11 +43,6 @@ func validProposalID(id string) bool {
 	return err == nil && len(raw) == 12
 }
 
-// gitOutput delegates to the existing guarded Git helper.
-func gitOutput(root string, args ...string) ([]byte, error) {
-	return runGit(root, args...)
-}
-
 // kWriteProposal persists one proposal in the managed state directory.
 //
 // This helper does not mark the proposal approved and does not execute it.

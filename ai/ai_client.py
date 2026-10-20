@@ -151,16 +151,21 @@ GEMINI_API_BASE_URL = (
 GEMINI_MODEL = (
     os.getenv(
         "GEMINI_MODEL",
-        "gemini-3.8-flash",
+        "gemini-3.5-flash",
     ).strip()
 )
 
 GEMINI_FALLBACK_MODEL = (
     os.getenv(
         "GEMINI_FALLBACK_MODEL",
-        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
     ).strip()
 )
+
+GEMINI_MODEL_VALIDATION: dict[str, Any] = {
+    "configured": False, "reachable": None, "model_valid": None,
+    "selected_model": None, "available_models": [],
+}
 
 GEMINI_ENABLED = (
     os.getenv(
@@ -185,7 +190,7 @@ GEMINI_CONNECT_TIMEOUT = float(
 GEMINI_READ_TIMEOUT = float(
     os.getenv(
         "GEMINI_READ_TIMEOUT",
-        "30",
+        "60",
     )
 )
 
@@ -216,10 +221,8 @@ MVI_API_URL = (
 )
 
 MVI_API_KEY = (
-    os.getenv(
-        "MVI_API_KEY",
-        "",
-    ).strip()
+    os.getenv("MVI_API_KEY", "").strip()
+    or os.getenv("MVI_API", "").strip()
 )
 
 MVI_TIMEOUT = float(
@@ -293,15 +296,17 @@ TEXT_PROVIDER_ORDER = [
     item.strip().lower()
     for item in os.getenv(
         "REVELAAI_TEXT_PROVIDERS",
-        "gemini",
+        "gemini,hf,mvi",
     ).split(",")
     if item.strip()
 ]
 
 if not TEXT_PROVIDER_ORDER:
-    TEXT_PROVIDER_ORDER = [
-        "gemini",
-    ]
+    TEXT_PROVIDER_ORDER = ["gemini", "hf", "mvi"]
+
+
+# =========================================================
+# =========================================================
 
 
 # =========================================================
@@ -593,6 +598,7 @@ def _provider_enabled(
             and GEMINI_MODEL
         )
 
+
     if provider in {
         "mvi",
         "mvi-ai",
@@ -675,6 +681,73 @@ def get_image_provider_status() -> dict[str, Any]:
     }
 
 
+
+def validate_gemini_models() -> dict[str, Any]:
+    """Query Google's ListModels endpoint and select the first configured valid model."""
+    global GEMINI_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_MODEL_VALIDATION
+    result: dict[str, Any] = {
+        "configured": bool(GEMINI_ENABLED and GEMINI_API_KEY and GEMINI_API_BASE_URL),
+        "reachable": False,
+        "model_valid": False,
+        "selected_model": None,
+        "available_models": [],
+    }
+    if not result["configured"]:
+        GEMINI_MODEL_VALIDATION = dict(result)
+        return result
+    try:
+        response = requests.get(
+            GEMINI_API_BASE_URL.rstrip("/"),
+            headers=get_gemini_headers(),
+            timeout=(GEMINI_CONNECT_TIMEOUT, min(GEMINI_READ_TIMEOUT, 10)),
+        )
+        if not response.ok:
+            print(f"GEMINI ListModels failed | status={response.status_code}")
+            result["http_status"] = response.status_code
+            GEMINI_MODEL_VALIDATION = dict(result)
+            return result
+        payload = response.json()
+        models = payload.get("models", []) if isinstance(payload, dict) else []
+        valid = set()
+        for item in models:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).removeprefix("models/")
+            methods = item.get("supportedGenerationMethods", [])
+            if name and (not methods or "generateContent" in methods):
+                valid.add(name)
+        result["reachable"] = True
+        result["available_models"] = sorted(valid)
+        candidates = []
+        for model in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
+            clean = str(model or "").strip().removeprefix("models/")
+            if clean and clean not in candidates:
+                candidates.append(clean)
+        selected = next((model for model in candidates if model in valid), None)
+        if selected:
+            GEMINI_MODEL = selected
+            GEMINI_FALLBACK_MODEL = next(
+                (model for model in candidates if model in valid and model != selected),
+                GEMINI_FALLBACK_MODEL,
+            )
+            result["model_valid"] = True
+            result["selected_model"] = selected
+        else:
+            print("GEMINI ListModels reachable, but neither configured model is available")
+        print(
+            "GEMINI ListModels | reachable=true | "
+            f"configured_models_valid={result['model_valid']} | "
+            f"selected_model={result['selected_model'] or 'none'}"
+        )
+        GEMINI_MODEL_VALIDATION = dict(result)
+        return result
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        print(f"GEMINI ListModels unavailable | error_type={type(exc).__name__}")
+        result["error_code"] = "gemini_list_models_unavailable"
+        GEMINI_MODEL_VALIDATION = dict(result)
+        return result
+
+
 def get_text_provider_status() -> dict[str, Any]:
     """
     Return safe text-provider diagnostics.
@@ -686,7 +759,9 @@ def get_text_provider_status() -> dict[str, Any]:
         "provider_order": list(
             TEXT_PROVIDER_ORDER
         ),
+        "gemini_model_validation": dict(GEMINI_MODEL_VALIDATION),
         "providers": {
+
             "gemini": {
                 "enabled": bool(
                     GEMINI_ENABLED
@@ -1436,6 +1511,34 @@ def _request_gemini(
             error_code="gemini_invalid_response",
         )
 
+    # Some thinking models can consume the output budget before emitting text.
+    # Retry once with a larger bounded budget only for MAX_TOKENS + empty output.
+    candidates = data.get("candidates", [])
+    if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+        candidate = candidates[0]
+        parts = candidate.get("content", {}).get("parts", [])
+        has_text = any(isinstance(part, dict) and str(part.get("text") or "").strip() for part in parts)
+        if candidate.get("finishReason") == "MAX_TOKENS" and not has_text:
+            generation = payload["generationConfig"]
+            current_tokens = int(generation.get("maxOutputTokens") or GEMINI_MAX_OUTPUT_TOKENS)
+            if current_tokens < 65536:
+                generation["maxOutputTokens"] = min(current_tokens * 2, 65536)
+                try:
+                    retry = requests.post(
+                        url, headers=headers, json=payload,
+                        timeout=(GEMINI_CONNECT_TIMEOUT, GEMINI_READ_TIMEOUT),
+                    )
+                    if retry.ok:
+                        retry_data = retry.json()
+                        if isinstance(retry_data, dict):
+                            data = retry_data
+                    else:
+                        print("GEMINI output-budget retry failed | "
+                              f"status={retry.status_code} | model={model}")
+                except (requests.RequestException, ValueError) as retry_exc:
+                    print("GEMINI output-budget retry failed | "
+                          f"error_type={type(retry_exc).__name__} | model={model}")
+
     return data
 
 
@@ -1588,20 +1691,14 @@ def _ask_gemini_text(
 
             last_error = exc
 
-            if exc.status_code in {
-                401,
-                403,
-            }:
-
+            if exc.status_code in {401, 403}:
                 print(
-                    "GEMINI provider authentication "
-                    "or permission failure | "
-                    f"model={model} | "
-                    f"status={exc.status_code} | "
+                    "GEMINI provider authentication/permission failure; "
+                    "trying the next configured model/provider | "
+                    f"model={model} | status={exc.status_code} | "
                     f"error_code={exc.error_code}"
                 )
-
-                break
+                continue
 
             if exc.status_code in {
                 400,
@@ -3062,14 +3159,7 @@ def generate_hf_image(
             # by retrying another model.
             # -------------------------------------------------
 
-            if exc.status_code in {
-                401,
-                402,
-                403,
-            }:
-
-                break
-
+            # Authentication/permission failures must fall through to the outer provider chain.
             continue
 
         except Exception as exc:
@@ -3787,7 +3877,10 @@ def _extract_provider_error(
     )
 
 
+
 # =========================================================
+# =========================================================
+
 # HF TEXT REQUEST
 # =========================================================
 
@@ -4068,7 +4161,7 @@ def ask_hf(
 
     Recommended production configuration:
 
-        REVELAAI_TEXT_PROVIDERS=gemini
+        REVELAAI_TEXT_PROVIDERS=gemini,hf,mvi
     """
 
     if not str(
@@ -4193,86 +4286,6 @@ def ask_hf(
 
                 continue
 
-        # =====================================================
-        # MVI
-        # =====================================================
-
-        if provider in {
-            "mvi",
-            "mvi-ai",
-            "mvi_ai",
-        }:
-
-            if not _provider_enabled(
-                "mvi"
-            ):
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": (
-                            "MVI provider "
-                            "is not configured."
-                        ),
-                        "error_code": (
-                            "mvi_not_configured"
-                        ),
-                    }
-                )
-
-                continue
-
-            started = time.time()
-
-            try:
-
-                result = _request_mvi(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    context=context,
-                    session_id=session_id,
-                )
-
-                print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=mvi | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                return result
-
-            except AIClientError as exc:
-
-                print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=mvi | "
-                    f"status={exc.status_code} | "
-                    f"error_code={exc.error_code} | "
-                    f"time={time.time() - started:.2f}s"
-                )
-
-                provider_errors.append(
-                    {
-                        "provider": "mvi",
-                        "error": str(
-                            exc
-                        ),
-                        "error_code": (
-                            exc.error_code
-                            or "mvi_error"
-                        ),
-                        "status_code": (
-                            exc.status_code
-                        ),
-                    }
-                )
-
-                continue
 
         # =====================================================
         # HUGGING FACE

@@ -19,7 +19,7 @@ from services.runtime_config import (
     cleanup_generated_files, configured_image_model, get_active_text_model,
     get_active_text_provider, get_revelaai_text_status,
 )
-from ai.ai_client import hf_configured
+from ai.ai_client import hf_configured, get_text_provider_status
 from ai.json_utils import error_response
 
 router = APIRouter(tags=["System"])
@@ -190,7 +190,23 @@ def health():
 def ready():
     provider = get_active_text_provider()
     model = get_active_text_model()
+    provider_status = get_text_provider_status()
+    configured_providers = provider_status.get("providers", {})
+    gemini_validation = provider_status.get("gemini_model_validation", {})
+    provider_checks: dict[str, Any] = {}
+    for public_name, status_name in (("gemini", "gemini"), ("hf", "huggingface"), ("mvi", "mvi")):
+        info = configured_providers.get(status_name, {}) if isinstance(configured_providers, dict) else {}
+        info = info if isinstance(info, dict) else {}
+        is_configured = bool(info.get("configured"))
+        provider_checks[public_name] = {
+            "configured": is_configured,
+            # Only Gemini currently has a startup reachability/model-list probe.
+            "reachable": gemini_validation.get("reachable") if public_name == "gemini" else (False if not is_configured else None),
+            "model_valid": gemini_validation.get("model_valid") if public_name == "gemini" else (False if not is_configured else None),
+            "model": info.get("primary_model") or info.get("model"),
+        }
     checks: dict[str, Any] = {
+        "providers": provider_checks,
         "text_provider": provider != "none",
         "text_model": bool(model),
         "huggingface": hf_configured(),
