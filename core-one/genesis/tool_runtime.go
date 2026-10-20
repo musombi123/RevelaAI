@@ -16,7 +16,7 @@ const maxToolInvocationBytes = 32 * 1024
 
 // RunSignedToolInvocation executes only a verified signed artifact through the
 // same constrained Docker boundary. No generated code runs in this process.
-func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artifactHash string, input []byte, confirmationHash string) ([]byte, error) {
+func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artifactHash string, input []byte, confirmationToken string) ([]byte, error) {
 	if len(input) == 0 || len(input) > 64*1024 || !json.Valid(input) {
 		return nil, errors.New("tool input must be valid JSON within the size limit")
 	}
@@ -32,11 +32,13 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 	if err != nil || !pointer.Active || pointer.Version != version || pointer.ArtifactHash != artifactHash {
 		return nil, errors.New("tool version is not the active signed version")
 	}
-	if record.Manifest.RiskTier == 2 && !constantTimeStringEqual(confirmationHash, artifactHash) {
-		return nil, errors.New("Tier 2 tool requires per-action confirmation bound to the active artifact hash")
-	}
 	if record.Manifest.RiskTier > 0 && !constantTimeStringEqual(pointer.OwnerApprovalHash, artifactHash) {
 		return nil, errors.New("tool version lacks owner approval bound to the active artifact hash")
+	}
+	if record.Manifest.RiskTier == 2 {
+		if err := consumeToolActionConfirmation(confirmationToken, name, version, artifactHash, input); err != nil {
+			return nil, err
+		}
 	}
 
 	artifactDir := filepath.Join(root, "versions", name, version, artifactHash, "artifact")
