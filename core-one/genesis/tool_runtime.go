@@ -99,6 +99,12 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 	if err := validateToolInvocationOutput(result); err != nil {
 		return nil, err
 	}
+	var output struct {
+		Tool string `json:"tool"`
+	}
+	if err := json.Unmarshal(result, &output); err != nil || output.Tool != name {
+		return nil, errors.New("sandboxed tool output does not match the signed tool identity")
+	}
 	return append([]byte(nil), result...), nil
 }
 
@@ -109,6 +115,33 @@ func validateToolInvocationOutput(result []byte) error {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(result, &object); err != nil || object == nil {
 		return errors.New("sandboxed tool output must be a JSON object")
+	}
+	allowed := map[string]bool{
+		"status": true, "tool": true, "summary": true, "created_at": true, "evidence": true,
+	}
+	for key := range object {
+		if !allowed[key] {
+			return errors.New("sandboxed tool output contains a field outside the declared output schema")
+		}
+	}
+	for _, required := range []string{"status", "tool", "summary"} {
+		raw, exists := object[required]
+		var value string
+		if !exists || json.Unmarshal(raw, &value) != nil {
+			return errors.New("sandboxed tool output is missing a required string field")
+		}
+	}
+	if raw, exists := object["created_at"]; exists {
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return errors.New("sandboxed tool created_at field must be a string")
+		}
+	}
+	if raw, exists := object["evidence"]; exists {
+		var value []string
+		if json.Unmarshal(raw, &value) != nil {
+			return errors.New("sandboxed tool evidence field must be an array of strings")
+		}
 	}
 	return nil
 }
