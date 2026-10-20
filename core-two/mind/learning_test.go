@@ -15,7 +15,7 @@ func TestHumanFeedbackInfluencesRankingButCannotBypassGates(t *testing.T) {
  }
  for _,item:=range fixtures{
   folder:=filepath.Join(root,"core-two","evolutions",item.version);if err:=os.MkdirAll(folder,0700);err!=nil{t.Fatal(err)}
-  evidence:=map[string]any{"version":item.version,"tool_name":item.tool,"selected_mutation":item.mutation}
+  evidence:=map[string]any{"version":item.version,"status":"await_merge","tool_name":item.tool,"selected_mutation":item.mutation}
   raw,_:=json.Marshal(evidence);if err:=os.WriteFile(filepath.Join(folder,"evidence.json"),raw,0600);err!=nil{t.Fatal(err)}
   _,err:=s.RecordFeedback(LearningFeedback{Version:item.version,ToolName:item.tool,Mutation:item.mutation,Outcome:item.outcome,Note:item.note,EvidenceRef:item.ref})
   if err!=nil{t.Fatal(err)}
@@ -36,7 +36,7 @@ func TestHumanFeedbackInfluencesRankingButCannotBypassGates(t *testing.T) {
 func TestFeedbackMustMatchExistingEvolutionAndRejectDuplicateOutcome(t *testing.T) {
  root,s:=newTestRepository(t)
  folder:=filepath.Join(root,"core-two","evolutions","v0.1.0");if err:=os.MkdirAll(folder,0700);err!=nil{t.Fatal(err)}
- evidence:=map[string]any{"version":"v0.1.0","tool_name":"offline_vault_fixture","selected_mutation":"graph-indexed"};raw,_:=json.Marshal(evidence);if err:=os.WriteFile(filepath.Join(folder,"evidence.json"),raw,0600);err!=nil{t.Fatal(err)}
+ evidence:=map[string]any{"version":"v0.1.0","status":"await_merge","tool_name":"offline_vault_fixture","selected_mutation":"graph-indexed"};raw,_:=json.Marshal(evidence);if err:=os.WriteFile(filepath.Join(folder,"evidence.json"),raw,0600);err!=nil{t.Fatal(err)}
  f:=LearningFeedback{Version:"v0.1.0",ToolName:"offline_vault_fixture",Mutation:"graph-indexed",Outcome:"rejected",Note:"Rejected by reviewer because of regression"}
  if _,err:=s.RecordFeedback(f);err!=nil{t.Fatal(err)}
  if _,err:=s.RecordFeedback(f);err==nil{t.Fatal("duplicate feedback must be rejected")}
