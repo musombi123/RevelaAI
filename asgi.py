@@ -7,6 +7,7 @@ inside its existing services; expose HTTP handlers through fastapi_routes/.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import base64
 import logging
 import time
 import uuid
@@ -212,10 +213,23 @@ def enforce_uncopyable_startup() -> None:
 
     try:
         verify_recipe(strict_path=True)
-        # Strict deployments must provision the verification key independently.
-        if not (__import__("os").getenv("REVELA_LICENSE_PUBLIC_KEY") or __import__("os").getenv("REVELA_LICENSE_PUBLIC_KEY_PATH")):
-            raise RuntimeError("REVELA_LICENSE_PUBLIC_KEY(_PATH) is required in strict mode.")
+        # Validate strict-mode secrets without logging or returning their values.
+        env = __import__("os").environ
+        if not (env.get("REVELA_LICENSE_PUBLIC_KEY", "").strip() or env.get("REVELA_LICENSE_PUBLIC_KEY_PATH", "").strip()):
+            raise RuntimeError("REVELA_LICENSE_PUBLIC_KEY or REVELA_LICENSE_PUBLIC_KEY_PATH is required when REVELA_UNCOPYABLE_ENFORCE=true.")
         load_public_key()
+        master_key = env.get("REVELA_MASTER_KEY_BASE64", "").strip()
+        if not master_key:
+            raise RuntimeError("REVELA_MASTER_KEY_BASE64 is required when REVELA_UNCOPYABLE_ENFORCE=true.")
+        try:
+            decoded_master_key = base64.b64decode(master_key, validate=True)
+        except Exception as key_exc:
+            raise RuntimeError("REVELA_MASTER_KEY_BASE64 must contain valid base64.") from key_exc
+        if len(decoded_master_key) < 32:
+            raise RuntimeError("REVELA_MASTER_KEY_BASE64 must decode to at least 32 bytes.")
+        jwt_secret = env.get("JWT_SECRET", "")
+        if len(jwt_secret.encode("utf-8")) < 32:
+            raise RuntimeError("JWT_SECRET must be configured with at least 32 UTF-8 bytes when REVELA_UNCOPYABLE_ENFORCE=true.")
         hardware_fingerprint()
     except (RecipeLockError, LicenseError, RuntimeError) as exc:
         logger.critical("USECT-UNCOPYABLE startup gate rejected runtime: %s", type(exc).__name__)
