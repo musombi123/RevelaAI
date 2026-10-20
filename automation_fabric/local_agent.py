@@ -20,7 +20,6 @@ from automation_fabric.http import create_automation_router
 from automation_fabric.store import default_db_path
 
 _CONFIG_DIR = Path.home() / ".revelaai"
-_CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
 os.environ.setdefault("REVELAAI_AUTOMATION_DB", str(_CONFIG_DIR / "automation-fabric.sqlite3"))
 os.environ.setdefault("REVELAAI_AUTOMATION_WORKSPACE", str(Path.home() / "RevelaAIWorkspace"))
 
@@ -29,6 +28,7 @@ LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "::1"})
 
 
 def _load_or_create_token() -> tuple[str, bool]:
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     if TOKEN_PATH.exists():
         try:
             token = TOKEN_PATH.read_text(encoding="utf-8").strip()
