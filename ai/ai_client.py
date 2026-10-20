@@ -162,6 +162,11 @@ GEMINI_FALLBACK_MODEL = (
     ).strip()
 )
 
+GEMINI_MODEL_VALIDATION: dict[str, Any] = {
+    "configured": False, "reachable": None, "model_valid": None,
+    "selected_model": None, "available_models": [],
+}
+
 GEMINI_ENABLED = (
     os.getenv(
         "GEMINI_ENABLED",
@@ -692,7 +697,7 @@ def get_image_provider_status() -> dict[str, Any]:
 
 def validate_gemini_models() -> dict[str, Any]:
     """Query Google's ListModels endpoint and select the first configured valid model."""
-    global GEMINI_MODEL, GEMINI_FALLBACK_MODEL
+    global GEMINI_MODEL, GEMINI_FALLBACK_MODEL, GEMINI_MODEL_VALIDATION
     result: dict[str, Any] = {
         "configured": bool(GEMINI_ENABLED and GEMINI_API_KEY and GEMINI_API_BASE_URL),
         "reachable": False,
@@ -701,6 +706,7 @@ def validate_gemini_models() -> dict[str, Any]:
         "available_models": [],
     }
     if not result["configured"]:
+        GEMINI_MODEL_VALIDATION = dict(result)
         return result
     try:
         response = requests.get(
@@ -711,6 +717,7 @@ def validate_gemini_models() -> dict[str, Any]:
         if not response.ok:
             print(f"GEMINI ListModels failed | status={response.status_code}")
             result["http_status"] = response.status_code
+            GEMINI_MODEL_VALIDATION = dict(result)
             return result
         payload = response.json()
         models = payload.get("models", []) if isinstance(payload, dict) else []
@@ -745,10 +752,12 @@ def validate_gemini_models() -> dict[str, Any]:
             f"configured_models_valid={result['model_valid']} | "
             f"selected_model={result['selected_model'] or 'none'}"
         )
+        GEMINI_MODEL_VALIDATION = dict(result)
         return result
     except (requests.RequestException, ValueError, TypeError) as exc:
         print(f"GEMINI ListModels unavailable | error_type={type(exc).__name__}")
         result["error_code"] = "gemini_list_models_unavailable"
+        GEMINI_MODEL_VALIDATION = dict(result)
         return result
 
 
@@ -763,6 +772,7 @@ def get_text_provider_status() -> dict[str, Any]:
         "provider_order": list(
             TEXT_PROVIDER_ORDER
         ),
+        "gemini_model_validation": dict(GEMINI_MODEL_VALIDATION),
         "providers": {
             "groq": {
                 "enabled": bool(GROQ_API_KEY and GROQ_API_BASE_URL and GROQ_MODEL),
