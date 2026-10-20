@@ -117,10 +117,22 @@ func (k *Kernel) auditChainHeadLocked() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
 	}
+	if err != nil {
+		return "", fmt.Errorf("open audit log: %w", err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("inspect audit log: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() > maxAuditLogBytes {
+		return "", errors.New("audit log is not a regular file or exceeds the 64 MiB verification limit")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxAuditLogBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read audit log: %w", err)
 	}
