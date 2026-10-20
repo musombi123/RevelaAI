@@ -96,3 +96,27 @@ def test_only_allowlisted_proposal_fields_are_returned():
     assert proposal["automatic_merge"] is False
     assert "source_code" not in proposal
     assert "admin_token" not in proposal
+
+
+def test_mind_unavailable_is_explicit_and_normal_chat_stays_available(monkeypatch):
+    monkeypatch.setattr(core_mesh, "_cache_value", None)
+
+    def fake_safe_fetch(base, path, *, headers=None):
+        if path == "/v1/mind/health":
+            return {"status": "unavailable", "reachable": False, "reason": "connect_error"}
+        return {"status": "ok", "reachable": True, "version": "test", "count": 0}
+
+    monkeypatch.setattr(core_mesh, "_safe_fetch", fake_safe_fetch)
+    snapshot = core_mesh._dashboard_snapshot()
+    mind = snapshot["cores"]["two"]
+
+    assert mind["status"] == "unavailable"
+    assert mind["availability"] == "mind_unavailable"
+    assert mind["reason"] == "mind_unavailable"
+    assert "chat and the other cores remain available" in mind["availability_message"]
+    assert snapshot["status"] == "degraded"
+
+    # An ordinary chat prompt must not depend on the live Mind daemon.
+    result = core_mesh.orchestrator_core_context("What is photosynthesis?")
+    assert result["selected_core"] == "orchestrator"
+    assert result["safety"]["operation_executed"] is False
