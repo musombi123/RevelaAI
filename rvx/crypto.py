@@ -52,9 +52,27 @@ def load_master_key(path: str | Path | None = None) -> bytes:
             f"Need RevelaCode Brain: owner recipe key not found at {key_path}. "
             "Generate it locally with python -m recipe.cli init."
         ) from exc
+    # Render Secret Files are text files, so deployments may provision the
+    # raw 512-byte owner key as Base64. Decode only when explicitly enabled;
+    # never guess the format, since accepting ambiguous key material is unsafe.
+    decode_base64 = os.getenv("REVELA_MASTER_KEY_BASE64", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    if decode_base64:
+        try:
+            encoded = key.decode("ascii").strip()
+            key = base64.b64decode(encoded, validate=True)
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise RecipeError(
+                f"Invalid Base64 master key at {key_path}; expected a Base64-encoded "
+                f"{ROOT_KEY_BYTES}-byte key."
+            ) from exc
+
     if len(key) != ROOT_KEY_BYTES:
+        expected_format = "Base64-encoded " if decode_base64 else ""
         raise RecipeError(
-            f"Invalid master key length at {key_path}; expected {ROOT_KEY_BYTES} random bytes."
+            f"Invalid master key length at {key_path}; expected {expected_format}"
+            f"{ROOT_KEY_BYTES} random bytes."
         )
     return key
 
