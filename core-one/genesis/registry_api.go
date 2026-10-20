@@ -160,7 +160,7 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 		return
 	}
 
-	if len(parts) == 4 && r.Method == http.MethodGet {
+	if len(parts) == 3 && r.Method == http.MethodGet {
 		record, err := loadSignedToolArtifact(s.Engine.CoreRoot, name, parts[1], parts[2])
 		if err != nil {
 			writeAPIError(w, http.StatusNotFound, "signed_artifact_not_found", "Signed tool version or signature could not be verified.")
@@ -170,7 +170,7 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 		return
 	}
 
-	if len(parts) == 5 && parts[4] == "activate" && r.Method == http.MethodPost {
+	if len(parts) == 4 && parts[3] == "activate" && r.Method == http.MethodPost {
 		if !s.allowMutation(w, r) {
 			return
 		}
