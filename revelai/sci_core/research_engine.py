@@ -6,11 +6,20 @@ from xml.etree import ElementTree
 import requests
 
 BLOCKLIST = ["how to hack", "ddos", "create virus to attack", "bypass paywall", "hack into", "make weapon", "build a weapon", "bioweapon", "ransomware", "reverse shell"]
+
+
+class ResearchPolicyViolation(Exception):
+    """Framework-neutral denial for requests outside the civilian research policy."""
+
+    code = 403
+
+
 def is_offensive_query(q):
     value = str(q or "").lower()
     if any(term in value for term in BLOCKLIST):
-        from werkzeug.exceptions import Forbidden
-        raise Forbidden("RevelaAI Sci-Core is defensive & civilian research only")
+        raise ResearchPolicyViolation(
+            "RevelaAI Sci-Core is defensive & civilian research only"
+        )
     return False
 
 def _summarize(text, limit=5):
