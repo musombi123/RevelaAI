@@ -45,7 +45,7 @@ jobs:
           BASE="${BASE_SHA:-$(git rev-parse HEAD^)}"
           git diff --check "${BASE}...HEAD"
       - name: Compile candidate modules
-        run: python -m compileall -q meta_engineer fastapi_routes/admin_auth.py fastapi_routes/sci_core.py fastapi_routes/agi.py fastapi_routes/vision.py fastapi_routes/chat.py revelai/sci_core revelai/core/agi_manifest.py revelai/core/brain_os.py tests/test_meta_engineer.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py tests/test_live_vision.py
+        run: python -m compileall -q meta_engineer routes/meta_engineer_routes.py routes/vision_routes.py revelai/sci_core revelai/routers/sci_core.py revelai/core/agi_manifest.py revelai/core/brain_os.py revelai/routers/agi_router.py tests/test_meta_engineer.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py tests/test_live_vision.py
       - name: Run isolated candidate tests
         id: tests
         shell: bash
