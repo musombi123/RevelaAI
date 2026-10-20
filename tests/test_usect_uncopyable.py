@@ -81,6 +81,7 @@ def test_dialect_is_encrypted_authenticated_and_date_scoped(tmp_path, monkeypatc
     monkeypatch.setenv("REVELA_MASTER_KEY_PATH", str(key_path))
     output = tmp_path / "dialect.json"
     now = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
+    monkeypatch.setenv("REVELA_DIALECT_PATH", str(output))
     result = evolve_dialect(output_path=output, now=now, reason="test")
     assert result["artifact_sha256"]
     assert output.read_bytes().startswith(b"RVX1.")
