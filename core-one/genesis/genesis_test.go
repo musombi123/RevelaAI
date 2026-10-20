@@ -158,6 +158,7 @@ func TestStandaloneOfflineInventionProducesFullProposal(t *testing.T) {
 		"README.md",
 		"hardware_guide.md",
 		"test.go",
+		"tool_manifest.json",
 		"evidence.json",
 		"capability_plan.json",
 		"expansion_plan.json",

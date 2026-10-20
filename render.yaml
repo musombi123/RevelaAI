@@ -43,6 +43,20 @@ services:
           type: pserv
           name: genesis-core-one
           envVarKey: GENESIS_ADMIN_TOKEN
+      # User IDs authorized to explicitly approve Tier 1-2 Genesis activation/rollback.
+      - key: GENESIS_OWNER_USER_IDS
+        sync: false
+      # These server-only credentials are used only by authenticated operator routes.
+      - key: GENESIS_OWNER_APPROVAL_TOKEN
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          envVarKey: GENESIS_OWNER_APPROVAL_TOKEN
+      - key: GENESIS_ACTION_APPROVAL_TOKEN
+        fromService:
+          type: pserv
+          name: genesis-core-one
+          envVarKey: GENESIS_ACTION_APPROVAL_TOKEN
       - key: MIND_BASE_URL
         fromService:
           type: pserv
@@ -82,11 +96,34 @@ services:
     name: genesis-core-one
     runtime: go
     plan: starter
-    buildCommand: go -C core-one build -o ./genesis ./cmd/genesis
-    startCommand: ./core-one/genesis -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
+    buildCommand: go -C core-one build -o ./genesis-server ./cmd/genesis
+    startCommand: ./core-one/genesis-server -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
+    disk:
+      name: genesis-core-one-data
+      mountPath: /var/data/genesis
+      sizeGB: 1
     envVars:
+      - key: GENESIS_REGISTRY_DIR
+        value: /var/data/genesis/tool-registry
       - key: GENESIS_ADMIN_TOKEN
         generateValue: true
+      # Render terminates public TLS at the platform proxy; this is a private service.
+      - key: GENESIS_TRUST_PROXY_TLS
+        value: "true"
+      - key: GENESIS_SIGNING_KEY
+        sync: false
+      - key: GENESIS_OWNER_APPROVAL_TOKEN
+        sync: false
+      - key: GENESIS_ACTION_APPROVAL_TOKEN
+        sync: false
+      - key: GENESIS_MODEL_BASE_URL
+        sync: false
+      - key: GENESIS_MODEL_NAME
+        sync: false
+      - key: GENESIS_MODEL_API_KEY
+        sync: false
+      - key: GENESIS_OFFLINE
+        value: "true"
 
   # Core-Two: standalone Infinite Mind service. Its sibling-module imports
   # require the full repository checkout to remain the build/runtime root.

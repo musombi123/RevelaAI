@@ -235,8 +235,10 @@ func runServer(
 	keyFile string,
 	interval time.Duration,
 ) error {
-	go engine.RunDaemon(ctx, interval)
-	go engine.RunProviderLoop(ctx)
+	serverCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go engine.RunDaemon(serverCtx, interval)
+	go engine.RunProviderLoop(serverCtx)
 
 	server := &http.Server{
 		Addr:              listen,

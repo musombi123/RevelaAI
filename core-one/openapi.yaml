@@ -570,6 +570,340 @@ paths:
               schema:
                 $ref: "#/components/schemas/APIError"
 
+  /v1/genesis/registry/tools:
+    get:
+      tags: [Tools]
+      operationId: listSignedGenesisTools
+      summary: List signed Genesis tool versions and active pointers
+      responses:
+        "200":
+          description: Signed versions; active flags are tied to exact artifact hashes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tools, count]
+                properties:
+                  tools:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, version, artifact_hash, risk_tier, manifest, active, signature]
+                      properties:
+                        name: { type: string }
+                        version: { type: string }
+                        artifact_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+                        risk_tier: { type: integer, enum: [0, 1, 2] }
+                        manifest: { $ref: "#/components/schemas/ToolManifest" }
+                        active: { type: boolean }
+                        signature: { type: string }
+                        sandbox_evidence: { type: object }
+                  count: { type: integer, minimum: 0 }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "503":
+          description: Signing configuration or registry storage is unavailable.
+
+  /v1/genesis/registry/tools/{name}:
+    get:
+      tags: [Tools]
+      operationId: listSignedGenesisToolVersions
+      summary: List immutable signed versions for one tool
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+      responses:
+        "200":
+          description: Append-only signed versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [name, versions, count]
+                properties:
+                  name: { type: string }
+                  versions: { type: array, items: { type: object } }
+                  count: { type: integer }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+
+  /v1/genesis/registry/tools/{name}/publish:
+    post:
+      tags: [Tools]
+      operationId: sandboxAndPublishGenesisTool
+      summary: Build/test a proposal in Docker and publish only passing signed artifacts
+      description: |
+        Generated code is mounted read-only in a network-disabled container.
+        The runner requests non-root execution, a read-only root filesystem,
+        CPU/memory/PID/time limits and a temporary writable filesystem. Evidence
+        records the requested isolation level; host enforcement is not independently attested.
+        Docker is the only supported build/test runner. If the daemon, permissions, or preloaded image is unavailable, the operation fails closed and no signature is issued.
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+      responses:
+        "201":
+          description: Sandbox passed and immutable signed version was published.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, artifact, auto_activated, human_approval_required]
+                properties:
+                  status: { const: signed, type: string }
+                  artifact: { type: object }
+                  auto_activated: { type: boolean }
+                  human_approval_required: { type: boolean }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "422":
+          description: Manifest validation or sandbox build/test failed; artifact was not signed.
+        "503":
+          description: Signing key or registry storage is unavailable.
+
+  /v1/genesis/registry/tools/{name}/deactivate:
+    post:
+      tags: [Tools]
+      operationId: deactivateGenesisTool
+      summary: Disable the active pointer without deleting signed versions
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+      responses:
+        "200":
+          description: Tool active pointer was marked inactive.
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "404":
+          description: No active pointer exists.
+
+  /v1/genesis/registry/tools/{name}/rollback:
+    post:
+      tags: [Tools]
+      operationId: rollbackGenesisTool
+      summary: Re-point a tool to an earlier verified signed version
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [version, artifact_hash]
+              properties:
+                version: { type: string, maxLength: 64 }
+                artifact_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+                owner_approval_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Active pointer now references the selected signed version.
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "403":
+          description: Target signature or required hash-bound approval failed validation.
+
+  /v1/genesis/registry/tools/{name}/{version}/{artifact_hash}:
+    get:
+      tags: [Tools]
+      operationId: getSignedGenesisToolVersion
+      summary: Retrieve and verify an immutable signed version
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+        - name: version
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" }
+        - name: artifact_hash
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Signed manifest, evidence and artifact identity.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [artifact]
+                properties:
+                  artifact: { type: object }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "404":
+          description: Artifact or signature verification failed.
+
+  /v1/genesis/registry/tools/{name}/{version}/{artifact_hash}/activate:
+    post:
+      tags: [Tools]
+      operationId: activateSignedGenesisTool
+      summary: Activate a verified signed version
+      description: Tier 1-2 activation requires owner_approval_hash to equal the exact artifact_hash and the separate X-Genesis-Owner-Approval credential.
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+        - name: version
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: artifact_hash
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                owner_approval_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Active pointer updated to the signed artifact.
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "403":
+          description: Signature verification or hash-bound approval failed.
+
+  /v1/genesis/registry/tools/{name}/{version}/{artifact_hash}/confirm:
+    post:
+      tags: [Tools]
+      operationId: confirmTier2GenesisToolAction
+      summary: Issue a one-use human confirmation bound to exact Tier 2 arguments
+      description: |
+        Requires the separate X-Genesis-Action-Approval credential. Genesis
+        verifies that the selected signed Tier 2 version is active and owner
+        approved, then returns a one-use token bound to the exact arguments.
+        The token expires after two minutes and is consumed by one invocation.
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+        - name: version
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: artifact_hash
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [arguments]
+              properties:
+                arguments:
+                  type: object
+                  required: [action]
+                  additionalProperties: false
+                  properties:
+                    action: { type: string, maxLength: 2000 }
+                    inputs:
+                      type: object
+                      maxProperties: 100
+                      additionalProperties: { type: string, maxLength: 4000 }
+                    consent: { type: boolean }
+      responses:
+        "201":
+          description: One-use confirmation token; treat it as a secret and do not log it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, confirmation_token, expires_at, tool, version, artifact_hash]
+                properties:
+                  status: { const: confirmed, type: string }
+                  confirmation_token: { type: string, pattern: "^[a-f0-9]{64}$" }
+                  expires_at: { type: string, format: date-time }
+                  tool: { type: string }
+                  version: { type: string }
+                  artifact_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "403":
+          description: Missing action-approval credential or target is not an active owner-approved Tier 2 version.
+
+  /v1/genesis/registry/tools/{name}/{version}/{artifact_hash}/invoke:
+    post:
+      tags: [Tools]
+      operationId: invokeSignedGenesisTool
+      summary: Invoke an active signed tool inside the sandbox runner
+      description: Tier 2 requires a one-use confirmation_token bound to the exact active artifact hash and exact JSON arguments for each invocation. Arguments and results are bounded; telemetry excludes user content.
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+        - name: version
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: artifact_hash
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [arguments]
+              properties:
+                arguments:
+                  type: object
+                  required: [action]
+                  additionalProperties: false
+                  properties:
+                    action: { type: string, maxLength: 2000 }
+                    inputs:
+                      type: object
+                      maxProperties: 100
+                      additionalProperties: { type: string, maxLength: 4000 }
+                    consent: { type: boolean }
+                confirmation_token: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Bounded result from the sandboxed tool process.
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "403":
+          description: Tool is not active, signature is invalid, or Tier 2 confirmation is missing.
+        "422":
+          description: Sandbox execution failed.
+
+  /v1/genesis/telemetry/tool-calls:
+    get:
+      tags: [Operations]
+      operationId: listGenesisToolCallTelemetry
+      summary: Read bounded content-free tool invocation telemetry
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        "200":
+          description: Tool, version hash, success, latency and error class only; no user content.
+          content:
+            application/json:
+              schema: { type: object }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+
   /v1/rvx/compile:
     post:
       tags: [RVX]
@@ -667,7 +1001,7 @@ components:
         type: string
         minLength: 1
         maxLength: 64
-        pattern: "^[a-z0-9_-]{1,64}$"
+        pattern: "^[a-z][a-z0-9_-]{0,63}$"
 
   responses:
     AuthenticationRequired:
@@ -678,6 +1012,67 @@ components:
             $ref: "#/components/schemas/APIError"
 
   schemas:
+    ToolManifest:
+      type: object
+      additionalProperties: false
+      required: [schema_version, name, version, language, entrypoint, input_schema, output_schema, risk_tier, permissions, timeout_ms, memory_bytes]
+      properties:
+        schema_version: { const: genesis.tool-manifest.v1 }
+        name: { type: string, pattern: "^[a-z][a-z0-9_-]{0,63}$" }
+        version: { type: string, maxLength: 64, pattern: "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" }
+        language: { enum: [python, go] }
+        entrypoint: { type: string, minLength: 1, maxLength: 240, pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$" }
+        input_schema:
+          const:
+            type: object
+            properties:
+              action: { type: string, maxLength: 2000 }
+              inputs:
+                type: object
+                additionalProperties: { type: string, maxLength: 4000 }
+              consent: { type: boolean }
+            required: [action]
+            additionalProperties: false
+        output_schema:
+          const:
+            type: object
+            properties:
+              status: { type: string }
+              tool: { type: string }
+              summary: { type: string }
+              created_at: { type: string }
+              evidence: { type: array, items: { type: string } }
+            required: [status, tool, summary]
+            additionalProperties: false
+        risk_tier: { type: integer, enum: [0, 1, 2] }
+        permissions:
+          type: object
+          additionalProperties: false
+          required: [network, filesystem, secrets, hardware]
+          properties:
+            network: { type: boolean }
+            filesystem: { type: boolean }
+            secrets: { type: boolean }
+            hardware: { type: boolean }
+        timeout_ms: { type: integer, minimum: 1, maximum: 120000 }
+        memory_bytes: { type: integer, minimum: 16777216, maximum: 536870912 }
+      # Keep the public contract aligned with ValidateToolManifest.
+      allOf:
+        - if:
+            properties:
+              language: { const: go }
+            required: [language]
+          then:
+            properties:
+              entrypoint: { const: code.go }
+        - if:
+            properties:
+              language: { const: python }
+            required: [language]
+          then:
+            properties:
+              entrypoint: { pattern: "\\.py$" }
+
     APIError:
       type: object
       additionalProperties: false

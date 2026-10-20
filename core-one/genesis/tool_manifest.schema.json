@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://revelacode.co.ke/schemas/genesis-tool-manifest-v1.json",
+  "title": "Genesis Tool Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "name",
+    "version",
+    "language",
+    "entrypoint",
+    "input_schema",
+    "output_schema",
+    "risk_tier",
+    "permissions",
+    "timeout_ms",
+    "memory_bytes"
+  ],
+  "properties": {
+    "schema_version": { "const": "genesis.tool-manifest.v1" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$" },
+    "version": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" },
+    "language": { "enum": ["python", "go"] },
+    "entrypoint": { "type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$" },
+    "input_schema": {
+      "const": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "maxLength": 2000 },
+          "inputs": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 4000 } },
+          "consent": { "type": "boolean" }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    },
+    "output_schema": {
+      "const": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "tool": { "type": "string" },
+          "summary": { "type": "string" },
+          "created_at": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["status", "tool", "summary"],
+        "additionalProperties": false
+      }
+    },
+    "risk_tier": { "type": "integer", "enum": [0, 1, 2] },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["network", "filesystem", "secrets", "hardware"],
+      "properties": {
+        "network": { "type": "boolean" },
+        "filesystem": { "type": "boolean" },
+        "secrets": { "type": "boolean" },
+        "hardware": { "type": "boolean" }
+      }
+    },
+    "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 120000 },
+    "memory_bytes": { "type": "integer", "minimum": 16777216, "maximum": 536870912 }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "language": { "const": "go" } }, "required": ["language"] },
+      "then": { "properties": { "entrypoint": { "const": "code.go" } } }
+    },
+    {
+      "if": { "properties": { "language": { "const": "python" } }, "required": ["language"] },
+      "then": { "properties": { "entrypoint": { "pattern": "\\.py$" } } }
+    }
+  ],
+  "x-genesis-policy": {
+    "risk_tier_is_derived": true,
+    "tier_0": "No network, filesystem, secrets, or hardware permission",
+    "tier_1": "Any network, filesystem, or secrets permission",
+    "tier_2": "Any hardware permission; per-action confirmation required"
+  }
+}
