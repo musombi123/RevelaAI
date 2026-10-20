@@ -372,6 +372,27 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/v1/audit/verify" && r.Method == http.MethodGet {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		report, err := k.VerifyAudit()
+		if err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{
+				Status: "error",
+				Code: "audit_verification_unavailable",
+				Message: "The audit log could not be verified safely.",
+			})
+			return
+		}
+		status := http.StatusOK
+		if !report.ChainValid {
+			status = http.StatusConflict
+		}
+		replyJSON(w, status, report)
+		return
+	}
+
 	if r.URL.Path == "/v1/heal/global-classify" && r.Method == http.MethodPost {
 		if _, ok := s.requireScope(w, r, "scan:read"); !ok {
 			return
