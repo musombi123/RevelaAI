@@ -308,16 +308,6 @@ if not TEXT_PROVIDER_ORDER:
 # =========================================================
 # =========================================================
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
-GROQ_API_BASE_URL = (
-    os.getenv("GROQ_API_BASE_URL", "https://api.groq.com/openai/v1").strip()
-    or "https://api.groq.com/openai/v1"
-)
-GROQ_MODEL = (
-    os.getenv("GROQ_MODEL", "openai/gpt-oss-120b").strip()
-    or "openai/gpt-oss-120b"
-)
-
 
 # =========================================================
 # POLLINATIONS IMAGE CONFIGURATION
@@ -3891,67 +3881,6 @@ def _extract_provider_error(
 # =========================================================
 # =========================================================
 
-def _request_groq(*, model: str, messages: list[dict[str, str]]) -> dict[str, Any]:
-    if not GROQ_API_KEY:
-        raise AIClientError("GROQ_API_KEY is not configured.", provider="groq",
-                            error_code="groq_api_key_missing")
-    if not model:
-        raise AIClientError("GROQ_MODEL is not configured.", provider="groq",
-                            error_code="groq_model_missing")
-    try:
-        response = requests.post(
-            f"{GROQ_API_BASE_URL.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}",
-                     "Content-Type": "application/json", "Accept": "application/json",
-                     "User-Agent": REQUEST_USER_AGENT},
-            json={"model": model, "messages": messages, "temperature": 0.7,
-                  "max_tokens": HF_MAX_TOKENS},
-            timeout=(10, GEMINI_READ_TIMEOUT),
-        )
-    except requests.Timeout as exc:
-        raise AIClientError("Groq request timed out.", provider="groq",
-                            error_code="groq_timeout") from exc
-    except requests.RequestException as exc:
-        raise AIClientError("Groq request could not reach the provider.",
-                            provider="groq", error_code="groq_connection_error") from exc
-    if not response.ok:
-        message, error_code = "Groq request failed.", "groq_provider_error"
-        try:
-            payload = response.json()
-            err = payload.get("error", {}) if isinstance(payload, dict) else {}
-            if isinstance(err, dict):
-                message = str(err.get("message") or message)
-                error_code = str(err.get("code") or err.get("type") or error_code)
-            elif err:
-                message = str(err)
-        except ValueError:
-            pass
-        raise AIClientError(message, provider="groq",
-                            status_code=response.status_code, error_code=error_code)
-    try:
-        return response.json()
-    except ValueError as exc:
-        raise AIClientError("Groq returned invalid JSON.", provider="groq",
-                            status_code=response.status_code,
-                            error_code="groq_invalid_json") from exc
-
-
-def _ask_groq_text(*, text: str, system_prompt: str = "",
-                   session_id: str | None = None,
-                   context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    messages = build_messages(text=str(text), system_prompt=str(system_prompt or ""),
-                              context=context)
-    data = _request_groq(model=GROQ_MODEL, messages=messages)
-    response_text = _extract_hf_response(data)
-    if not response_text:
-        raise AIClientError("Groq returned empty text.", provider="groq",
-                            error_code="groq_empty_text")
-    return {"success": True, "response": response_text, "provider": "groq",
-            "model": GROQ_MODEL, "session_id": session_id,
-            "usage": data.get("usage", {})}
-
-
-# =========================================================
 # HF TEXT REQUEST
 # =========================================================
 
