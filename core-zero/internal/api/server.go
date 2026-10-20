@@ -379,6 +379,43 @@ func extractRouteID(path, prefix, suffix string) (string, bool) {
 	return id, true
 }
 
+func probeDependency(raw, path string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]any{"status": "not_configured", "healthy": false}
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return map[string]any{"status": "misconfigured", "healthy": false}
+	}
+	parsed.Path = path
+	parsed.RawPath = ""
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	req, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return map[string]any{"status": "misconfigured", "healthy": false}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return map[string]any{"status": "unavailable", "healthy": false}
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	_ = resp.Body.Close()
+	healthy := resp.StatusCode >= 200 && resp.StatusCode < 300
+	status := "unhealthy"
+	if healthy {
+		status = "ok"
+	}
+	return map[string]any{"status": status, "healthy": healthy, "http_status": resp.StatusCode}
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	setSecurityHeaders(w)
 
@@ -451,6 +488,202 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		}
 		replyJSON(w, status, report)
+		return
+	}
+
+	if r.URL.Path == "/v1/supervisor/status" && r.Method == http.MethodGet {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		killSwitch, err := s.Devices.KillSwitchActive()
+		if err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "supervisor_state_unavailable", Message: "Supervisor state is unavailable."})
+			return
+		}
+		replyJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"gateway": probeDependency(os.Getenv("USECT_ZERO_GATEWAY_URL"), "/v1/platform/health"),
+			"core_one": probeDependency(os.Getenv("GENESIS_BASE_URL"), "/v1/health"),
+			"core_two": probeDependency(os.Getenv("MIND_BASE_URL"), "/v1/mind/health"),
+			"kill_switch_active": killSwitch,
+			"health_checks_are_advisory": true,
+		})
+		return
+	}
+
+	if r.URL.Path == "/v1/supervisor/kill-switch" && r.Method == http.MethodPost {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		var in struct {
+			Enabled bool   `json:"enabled"`
+			Confirmation string `json:"confirmation"`
+		}
+		if err := decodeJSON(w, r, &in); err != nil {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_json", Message: "Send enabled and an explicit confirmation phrase."})
+			return
+		}
+		expected := "DEACTIVATE_GLOBAL_KILL_SWITCH"
+		if in.Enabled {
+			expected = "ACTIVATE_GLOBAL_KILL_SWITCH"
+		}
+		if in.Confirmation != expected {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "explicit_confirmation_required", Message: "The global kill-switch confirmation phrase does not match the requested state."})
+			return
+		}
+		if err := s.Devices.SetKillSwitch(in.Enabled); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "kill_switch_update_failed", Message: "The global kill switch could not be persisted."})
+			return
+		}
+		outcome := "disabled"
+		if in.Enabled {
+			outcome = "enabled_and_tier_1_2_revoked"
+		}
+		if err := k.Audit("global_device_kill_switch", "human-operator", "device-registry", outcome, map[string]any{"enabled": in.Enabled}); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "audit_unavailable", Message: "The kill-switch state changed, but the audit log could not be verified; inspect supervisor state before further actions."})
+			return
+		}
+		replyJSON(w, http.StatusOK, map[string]any{"status": outcome, "kill_switch_active": in.Enabled, "tier_1_2_permissions_revoked": in.Enabled})
+		return
+	}
+
+	if r.URL.Path == "/v1/devices" && r.Method == http.MethodGet {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		devices, err := s.Devices.List()
+		if err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "device_registry_unavailable", Message: "The enrolled-device registry is unavailable."})
+			return
+		}
+		replyJSON(w, http.StatusOK, map[string]any{"status": "ok", "devices": devices, "count": len(devices)})
+		return
+	}
+
+	if r.URL.Path == "/v1/devices/enroll" && r.Method == http.MethodPost {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		var in struct {
+			Name string `json:"name"`
+			SerialPort string `json:"serial_port"`
+			Scopes []string `json:"scopes"`
+			Tier int `json:"tier"`
+			TTLHours int `json:"ttl_hours"`
+			Confirmation string `json:"confirmation"`
+		}
+		if err := decodeJSON(w, r, &in); err != nil {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_json", Message: "Send a valid enrollment object."})
+			return
+		}
+		if in.Confirmation != "ENROLL_DEVICE" {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "explicit_confirmation_required", Message: "Provide confirmation=ENROLL_DEVICE after reviewing the device port, scopes, and tier."})
+			return
+		}
+		if in.TTLHours < 1 || in.TTLHours > 2160 {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_device_ttl", Message: "ttl_hours must be between 1 and 2160."})
+			return
+		}
+		device, token, err := s.Devices.Enroll(in.Name, in.SerialPort, in.Scopes, in.Tier, time.Duration(in.TTLHours)*time.Hour)
+		if err != nil {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "device_enrollment_rejected", Message: err.Error()})
+			return
+		}
+		if err := k.Audit("device_enrolled", "human-operator", device.ID, "approved", map[string]any{"tier": device.Tier, "scopes": device.Scopes}); err != nil {
+			_, _ = s.Devices.Revoke(device.ID)
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "audit_unavailable", Message: "Enrollment was revoked because the audit log could not be verified."})
+			return
+		}
+		replyJSON(w, http.StatusCreated, map[string]any{"status": "enrolled", "device": device, "device_token": token, "shown_once": true, "note": "Only the token hash is stored. Copy this token now; it cannot be retrieved again."})
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/v1/devices/") && strings.HasSuffix(r.URL.Path, "/revoke") && r.Method == http.MethodPost {
+		if !s.requireAdmin(w, r) {
+			return
+		}
+		id, ok := extractRouteID(r.URL.Path, "/v1/devices/", "/revoke")
+		if !ok {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_device_id", Message: "The device identifier is invalid."})
+			return
+		}
+		var in struct { Confirmation string `json:"confirmation"` }
+		if err := decodeJSON(w, r, &in); err != nil || in.Confirmation != "REVOKE_DEVICE" {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "explicit_confirmation_required", Message: "Provide confirmation=REVOKE_DEVICE."})
+			return
+		}
+		device, err := s.Devices.Revoke(id)
+		if err != nil {
+			replyJSON(w, http.StatusConflict, apiError{Status: "error", Code: "device_revocation_failed", Message: "The device could not be revoked."})
+			return
+		}
+		if err := k.Audit("device_revoked", "human-operator", device.ID, "revoked", map[string]any{"tier": device.Tier}); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "audit_unavailable", Message: "The device is revoked, but audit verification failed."})
+			return
+		}
+		replyJSON(w, http.StatusOK, map[string]any{"status": "revoked", "device_id": device.ID, "revoked_at": device.RevokedAt})
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/v1/devices/") && strings.HasSuffix(r.URL.Path, "/read") && r.Method == http.MethodGet {
+		id, ok := extractRouteID(r.URL.Path, "/v1/devices/", "/read")
+		if !ok {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_device_id", Message: "The device identifier is invalid."})
+			return
+		}
+		token := strings.TrimSpace(r.Header.Get("X-Device-Token"))
+		if _, err := s.Devices.Authorize(id, token, "device:read", 0); err != nil {
+			replyJSON(w, http.StatusUnauthorized, apiError{Status: "error", Code: "device_authorization_failed", Message: "The device token is expired, revoked, or lacks read permission."})
+			return
+		}
+		adapter := bridge.NewESP32USBAdapter(s.Devices)
+		if err := adapter.Connect(id, token); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "device_unavailable", Message: "The enrolled ESP32 serial adapter could not connect."})
+			return
+		}
+		defer func() { _ = adapter.Disconnect(id, token) }()
+		data, err := adapter.Read(id, token)
+		if err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "device_read_failed", Message: "The enrolled device read failed."})
+			return
+		}
+		replyJSON(w, http.StatusOK, map[string]any{"status": "ok", "device_id": id, "response": string(data)})
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/v1/devices/") && strings.HasSuffix(r.URL.Path, "/act") && r.Method == http.MethodPost {
+		id, ok := extractRouteID(r.URL.Path, "/v1/devices/", "/act")
+		if !ok {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_device_id", Message: "The device identifier is invalid."})
+			return
+		}
+		var action bridge.DeviceAction
+		if err := decodeJSON(w, r, &action); err != nil {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "invalid_json", Message: "Send a valid, bounded ESP32 action."})
+			return
+		}
+		token := strings.TrimSpace(r.Header.Get("X-Device-Token"))
+		device, err := s.Devices.Authorize(id, token, "device:act", 1)
+		if err != nil {
+			replyJSON(w, http.StatusUnauthorized, apiError{Status: "error", Code: "device_authorization_failed", Message: "The device token is expired, revoked, or lacks act permission."})
+			return
+		}
+		if device.Tier == 2 && action.Confirmation != "CONFIRM_DEVICE_ACTION" {
+			replyJSON(w, http.StatusBadRequest, apiError{Status: "error", Code: "explicit_confirmation_required", Message: "Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION for each action."})
+			return
+		}
+		adapter := bridge.NewESP32USBAdapter(s.Devices)
+		if err := adapter.Connect(id, token); err != nil {
+			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "device_unavailable", Message: "The enrolled ESP32 serial adapter could not connect."})
+			return
+		}
+		defer func() { _ = adapter.Disconnect(id, token) }()
+		if err := adapter.Act(id, token, action); err != nil {
+			replyJSON(w, http.StatusConflict, apiError{Status: "error", Code: "device_action_rejected", Message: "The action was rejected, not acknowledged, or failed its approval checks."})
+			return
+		}
+		_ = k.Audit("device_action", "enrolled-device", id, "acknowledged", map[string]any{"action": action.Name, "tier": device.Tier})
+		replyJSON(w, http.StatusOK, map[string]any{"status": "action_acknowledged", "device_id": id, "human_confirmation_required": device.Tier == 2})
 		return
 	}
 
