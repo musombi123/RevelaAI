@@ -1,6 +1,7 @@
 package genesis
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/subtle"
 	"crypto/sha256"
@@ -52,6 +53,21 @@ func PublishSignedToolArtifact(coreRoot, candidateDir string, manifest ToolManif
 	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		return SignedToolArtifact{}, errors.New("tool manifest could not be encoded")
+	}
+	// Require the manifest file inside the exact artifact tree to match the
+	// manifest being signed. This prevents a changed embedded manifest from
+	// being published under a different approved manifest identity.
+	embeddedRaw, err := readRegularFileLimited(filepath.Join(candidateDir, "tool_manifest.json"), 256*1024)
+	if err != nil {
+		return SignedToolArtifact{}, errors.New("candidate must contain a safe tool_manifest.json")
+	}
+	embeddedManifest, err := DecodeToolManifest(embeddedRaw)
+	if err != nil {
+		return SignedToolArtifact{}, errors.New("embedded candidate manifest is invalid")
+	}
+	embeddedJSON, err := json.Marshal(embeddedManifest)
+	if err != nil || !bytes.Equal(embeddedJSON, manifestJSON) {
+		return SignedToolArtifact{}, errors.New("embedded candidate manifest does not match the manifest being signed")
 	}
 	manifestDigest := sha256.Sum256(manifestJSON)
 	if !evidence.Passed || evidence.ToolName != manifest.Name ||
