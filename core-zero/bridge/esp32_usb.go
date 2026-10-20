@@ -136,11 +136,12 @@ func (a *ESP32USBAdapter) Act(deviceID, token string, action DeviceAction) error
 		return errors.New("device is not connected")
 	}
 	// Revalidate immediately before the state-changing serial write.
-	if _, err := a.registry.Authorize(deviceID, token, "device:act", 1); err != nil {
+	current, err := a.registry.Authorize(deviceID, token, "device:act", 1)
+	if err != nil {
 		return err
 	}
-	if device.Tier == 2 && action.Confirmation != deviceConfirmation {
-		return errors.New("Tier 2 action confirmation is required")
+	if err := validateDeviceAction(current, action); err != nil {
+		return err
 	}
 	if err := writeDeviceFrame(a.port, map[string]any{
 		"op": "gpio", "pin": action.Pin, "value": action.Value,
