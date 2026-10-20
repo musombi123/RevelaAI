@@ -78,12 +78,13 @@ func PublishSignedToolArtifact(coreRoot, candidateDir string, manifest ToolManif
 	if err != nil {
 		return SignedToolArtifact{}, err
 	}
-	versionDir := filepath.Join(root, "versions", manifest.Name, manifest.Version, hash)
-	if _, err := os.Lstat(versionDir); err == nil {
-		return SignedToolArtifact{}, errors.New("registry versions are append-only; this artifact version already exists")
+	versionBase := filepath.Join(root, "versions", manifest.Name, manifest.Version)
+	if _, err := os.Lstat(versionBase); err == nil {
+		return SignedToolArtifact{}, errors.New("registry versions are append-only; this tool version already exists")
 	} else if !os.IsNotExist(err) {
 		return SignedToolArtifact{}, errors.New("could not inspect registry version path")
 	}
+	versionDir := filepath.Join(versionBase, hash)
 	if err := os.MkdirAll(filepath.Dir(versionDir), 0o700); err != nil {
 		return SignedToolArtifact{}, errors.New("could not create registry version directory")
 	}
