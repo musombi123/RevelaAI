@@ -260,4 +260,3 @@ def test_live_brain_prompt_receives_mind_to_core_one_target_and_safety_rules():
     assert "must not edit Core-One" in prompt
     assert "never forward candidate source code or secrets" in prompt
     assert "Never claim an invention, mutation, repair, deployment, or merge occurred" in prompt
-
