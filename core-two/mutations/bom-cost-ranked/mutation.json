@@ -1,7 +1,8 @@
+
 {
   "id": "bom-cost-ranked",
   "category": "bom_search",
-  "purpose": "Compare already supplied local quotes by total cost and stock status",
+  "purpose": "Rank already supplied local supplier quotes by stock availability and overflow-safe combined unit and transport costs. Offline comparison only; no supplier discovery, external execution, or purchasing actions.",
   "status": "candidate_for_human_review",
   "source_core": "core-one",
   "fixture_only": true,
