@@ -94,7 +94,7 @@ func CanonicalMapJSON(v map[string]string) ([]byte, error) {
 		if len(value) > maxDemandBytes {
 			return nil, errors.New("map value exceeds the permitted size")
 		}
-		if containsUnsupportedControl(key, true) || containsUnsupportedControl(value, false) {
+		if containsUnsupportedControl(key, false) || containsUnsupportedControl(value, true) {
 			return nil, errors.New("map contains unsupported control characters")
 		}
 		normalized[key] = value
