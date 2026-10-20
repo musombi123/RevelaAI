@@ -12,13 +12,16 @@ import (
 	"time"
 )
 
-func registryEvidenceForTest(t *testing.T, manifest ToolManifest, passed bool) SandboxEvidence {
+func registryEvidenceForTest(t *testing.T, manifest ToolManifest, passed bool, candidateDir string) SandboxEvidence {
 	t.Helper()
 	raw, err := json.Marshal(manifest)
 	if err != nil { t.Fatal(err) }
 	digest := sha256.Sum256(raw)
+	candidateHash, err := hashArtifactTree(candidateDir)
+	if err != nil { t.Fatal(err) }
 	return SandboxEvidence{
 		ToolName: manifest.Name,
+		CandidateHash: candidateHash,
 		ManifestHash: hex.EncodeToString(digest[:]),
 		Passed: passed,
 		IsolationLevel: "test-fixture_not_a_real_sandbox",
@@ -37,7 +40,7 @@ func TestFailedSandboxEvidenceCannotBeSigned(t *testing.T) {
 	t.Setenv("GENESIS_SIGNING_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
 	coreRoot := t.TempDir()
 	manifest := validManifestForTest()
-	_, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, false))
+	_, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, false, writeRegistryCandidate(t, "package candidate\n")))
 	if err == nil {
 		t.Fatal("candidate with failing tests must never be signed")
 	}
@@ -54,9 +57,9 @@ func TestApprovalForHashACannotActivateHashB(t *testing.T) {
 	manifestA.RiskTier = 1
 	manifestB := manifestA
 	manifestB.Version = "1.0.1"
-	recordA, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n// version A\n"), manifestA, registryEvidenceForTest(t, manifestA, true))
+	recordA, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n// version A\n"), manifestA, registryEvidenceForTest(t, manifestA, true, candidateA))
 	if err != nil { t.Fatal(err) }
-	recordB, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n// version B\n"), manifestB, registryEvidenceForTest(t, manifestB, true))
+	recordB, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n// version B\n"), manifestB, registryEvidenceForTest(t, manifestB, true, candidateB))
 	if err != nil { t.Fatal(err) }
 	if _, err := ActivateSignedToolVersion(coreRoot, manifestB.Name, manifestB.Version, recordB.ArtifactHash, recordA.ArtifactHash); err == nil {
 		t.Fatal("approval for hash A must not activate hash B")
@@ -94,7 +97,7 @@ func TestTierTwoInvocationRequiresHashBoundPerActionConfirmation(t *testing.T) {
 	manifest := validManifestForTest()
 	manifest.Permissions.Hardware = true
 	manifest.RiskTier = 2
-	record, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, true))
+	record, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, true, candidate))
 	if err != nil { t.Fatal(err) }
 	if _, err := ActivateSignedToolVersion(coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, record.ArtifactHash); err != nil { t.Fatal(err) }
 	_, err = RunSignedToolInvocation(context.Background(), coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, []byte(`{"action":"plan"}`), "")
