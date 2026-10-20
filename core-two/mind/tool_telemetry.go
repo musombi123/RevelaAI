@@ -40,7 +40,8 @@ type ToolTelemetryEvent struct {
 	LatencyMS   int64     `json:"latency_ms"`
 	ErrorClass  string    `json:"error_class,omitempty"`
 	Timestamp   time.Time `json:"timestamp"`
-	SampleKind  string    `json:"sample_kind,omitempty"`
+	SampleKind     string    `json:"sample_kind,omitempty"`
+	EvidenceOrigin string    `json:"evidence_origin"`
 }
 
 type ToolVersionMetrics struct {
@@ -69,6 +70,8 @@ type CanaryStats struct {
 	ErrorRate      float64   `json:"error_rate"`
 	P95LatencyMS   float64   `json:"p95_latency_ms"`
 	LastEventAt    time.Time `json:"last_event_at"`
+	SyntheticFixture bool    `json:"synthetic_fixture"`
+	ProductionVerified bool `json:"production_verified"`
 }
 
 type CanaryDecision struct {
@@ -156,6 +159,11 @@ func validateToolTelemetryEvent(event ToolTelemetryEvent, rejectFuture bool) err
 	kind := event.SampleKind
 	if kind == "" { kind = "runtime" }
 	if kind != "runtime" && kind != "replay" { return errors.New("sample_kind must be runtime or replay") }
+	if event.EvidenceOrigin != "tool_runner" && event.EvidenceOrigin != "replay_harness" && event.EvidenceOrigin != "synthetic_fixture" {
+		return errors.New("evidence_origin must be tool_runner, replay_harness, or synthetic_fixture")
+	}
+	if kind == "runtime" && event.EvidenceOrigin == "replay_harness" { return errors.New("runtime samples cannot claim replay_harness provenance") }
+	if kind == "replay" && event.EvidenceOrigin == "tool_runner" { return errors.New("replay samples cannot claim tool_runner provenance") }
 	if event.Success {
 		if strings.TrimSpace(event.ErrorClass) != "" { return errors.New("successful events must not include an error_class") }
 	} else if !errorClassPattern.MatchString(event.ErrorClass) {
@@ -277,11 +285,18 @@ func aggregateToolTelemetry(events []ToolTelemetryEvent) []ToolVersionMetrics {
 			SampleCount: stats.SampleCount, RuntimeSamples: stats.RuntimeSamples, ReplaySamples: stats.ReplaySamples,
 			SuccessCount: stats.SuccessCount, FailureCount: stats.FailureCount,
 			ErrorRate: stats.ErrorRate, P95LatencyMS: stats.P95LatencyMS, LastEventAt: stats.LastEventAt,
-			Provenance: "recorded_tool_runner_events", SyntheticFixture: false, ProductionVerified: false,
+			Provenance: telemetryProvenance(group), SyntheticFixture: stats.SyntheticFixture, ProductionVerified: false,
 		})
 	}
 	sort.Slice(result, func(i,j int) bool { if result[i].ToolName == result[j].ToolName { return result[i].VersionHash < result[j].VersionHash }; return result[i].ToolName < result[j].ToolName })
 	return result
+}
+
+func telemetryProvenance(events []ToolTelemetryEvent) string {
+	for _, event := range events {
+		if event.EvidenceOrigin == "synthetic_fixture" { return "synthetic_fixture" }
+	}
+	return "declared_tool_runner_and_replay_harness"
 }
 
 func summarizeTelemetry(events []ToolTelemetryEvent) CanaryStats {
@@ -291,8 +306,10 @@ func summarizeTelemetry(events []ToolTelemetryEvent) CanaryStats {
 		if stats.VersionHash == "" { stats.VersionHash = event.VersionHash }
 		stats.SampleCount++
 		if event.SampleKind == "replay" { stats.ReplaySamples++ } else { stats.RuntimeSamples++ }
+		if event.EvidenceOrigin == "synthetic_fixture" { stats.SyntheticFixture = true }
 		if event.Success { stats.SuccessCount++ } else { stats.FailureCount++ }
 		if event.Timestamp.After(stats.LastEventAt) { stats.LastEventAt = event.Timestamp }
+		if event.EvidenceOrigin == "synthetic_fixture" { stats.SyntheticFixture = true }
 		latencies = append(latencies, int(event.LatencyMS))
 	}
 	if stats.SampleCount > 0 { stats.ErrorRate = float64(stats.FailureCount)/float64(stats.SampleCount) }
@@ -315,7 +332,7 @@ func evaluateCanary(baselineEvents, candidateEvents []ToolTelemetryEvent, minSam
 	out := CanaryDecision{
 		Decision: "hold", Reason: "Insufficient evidence for a canary decision.",
 		MinimumSampleSize: minSamples, Baseline: base, Candidate: candidate, RiskTier: riskTier,
-		AutomaticMerge: false, AutoPromotionRecommended: false, ProductionVerified: false, SyntheticFixture: false,
+		AutomaticMerge: false, AutoPromotionRecommended: false, ProductionVerified: false, SyntheticFixture: base.SyntheticFixture || candidate.SyntheticFixture,
 	}
 	out.ScoreAvailable = base.SampleCount >= minSamples && candidate.SampleCount >= minSamples
 	if out.ScoreAvailable {
@@ -337,6 +354,8 @@ func evaluateCanary(baselineEvents, candidateEvents []ToolTelemetryEvent, minSam
 		out.Reason = "Promotion is held until recorded replay telemetry exists for both baseline and candidate."
 	case riskTier >= 2:
 		out.Reason = "Tier 2 changes are never recommended for automatic promotion and require explicit human review."
+	case out.SyntheticFixture:
+		out.Reason = "Canary decision is held because one or more samples are explicitly synthetic fixtures, not deployment evidence."
 	default:
 		out.Decision = "promote"
 		out.Reason = "Sample size is sufficient; error rate and p95 latency did not regress; runtime and replay telemetry are present."
