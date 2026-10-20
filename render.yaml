@@ -54,6 +54,9 @@ services:
           name: infinite-mind-core
           envVarKey: MIND_ADMIN_TOKEN
 
+  # Optional supervisor probe targets may be configured in the Render dashboard:
+  # USECT_ZERO_GATEWAY_URL, GENESIS_BASE_URL, MIND_BASE_URL.
+  # They are intentionally not required at service startup.
   # Core-Zero: model-free diagnostics, bounded tools, and human-gated recovery.
   - type: pserv
     name: usect-zero-core
@@ -71,15 +74,6 @@ services:
         value: /var/data/usect-zero
       - key: USECT_ZERO_ADMIN_TOKEN
         generateValue: true
-      # Optional supervisor targets are explicitly configured by the owner.
-      # Do not create cyclic fromService references between ZERO and TWO.
-      - key: USECT_ZERO_GATEWAY_URL
-        sync: false
-      - key: GENESIS_BASE_URL
-        sync: false
-      - key: MIND_BASE_URL
-        sync: false
-
   # Core-One: standalone Genesis service. Build from the repository root so
   # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
   - type: pserv
