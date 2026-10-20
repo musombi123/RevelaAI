@@ -67,6 +67,18 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 		"--env", "GOTOOLCHAIN=local",
 		image, "sh", "-lc", script,
 	}
+	containerName, err := newDockerContainerName("genesis-tool")
+	if err != nil {
+		return nil, err
+	}
+	args, err = dockerRunArgsWithName(args, containerName)
+	if err != nil {
+		return nil, err
+	}
+	// On timeout, killing the Docker CLI is not proof that its child container
+	// stopped. Always make a separately bounded best-effort removal attempt.
+	defer cleanupDockerContainer(containerName, runSandboxCommand)
+
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=/tmp", "TMPDIR=/tmp"}
 	cmd.Stdin = bytes.NewReader(input)
