@@ -2,6 +2,7 @@ package genesis
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -90,5 +91,49 @@ func TestSandboxFailureCannotPassCandidate(t *testing.T) {
 	}
 	if result.IsolationLevel != "unavailable_fail_closed" {
 		t.Fatalf("missing Docker must be reported as unavailable: %#v", result)
+	}
+}
+
+
+func TestStagedSnapshotGuardianRunsBeforeSandboxRunner(t *testing.T) {
+	root := t.TempDir()
+	candidate := filepath.Join(root, "candidate")
+	evidence := filepath.Join(root, "evidence")
+	if err := os.Mkdir(candidate, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(candidate, "code.go"), []byte("package candidate // BLOCKED_PAYLOAD\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(candidate, "test.go"), []byte("package candidate\nimport \"testing\"\nfunc TestCandidate(t *testing.T) {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest := validManifestForTest()
+	runnerCalled := false
+	_, err := runCandidateSandboxWithValidator(
+		context.Background(),
+		candidate,
+		evidence,
+		manifest,
+		func(context.Context, string, ...string) ([]byte, error) {
+			runnerCalled = true
+			return []byte("should not run"), nil
+		},
+		func(staged string) error {
+			raw, readErr := os.ReadFile(filepath.Join(staged, "code.go"))
+			if readErr != nil {
+				return readErr
+			}
+			if strings.Contains(string(raw), "BLOCKED_PAYLOAD") {
+				return errors.New("Guardian test rule blocked this payload")
+			}
+			return nil
+		},
+	)
+	if err == nil {
+		t.Fatal("candidate rejected by staged-snapshot Guardian check must fail closed")
+	}
+	if runnerCalled {
+		t.Fatal("sandbox runner started before staged-snapshot Guardian review completed")
 	}
 }
