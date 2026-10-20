@@ -636,6 +636,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			replyJSON(w, http.StatusUnauthorized, apiError{Status: "error", Code: "device_authorization_failed", Message: "The device token is expired, revoked, or lacks read permission."})
 			return
 		}
+		if !s.allowScopeRate("device:"+id, "device:read") {
+			w.Header().Set("Retry-After", "60")
+			replyJSON(w, http.StatusTooManyRequests, apiError{Status: "error", Code: "scope_rate_limit_exceeded", Message: "The device exceeded its read-scope request limit."})
+			return
+		}
 		adapter := bridge.NewESP32USBAdapter(s.Devices)
 		if err := adapter.Connect(id, token); err != nil {
 			replyJSON(w, http.StatusServiceUnavailable, apiError{Status: "error", Code: "device_unavailable", Message: "The enrolled ESP32 serial adapter could not connect."})
@@ -666,6 +671,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		device, err := s.Devices.Authorize(id, token, "device:act", 1)
 		if err != nil {
 			replyJSON(w, http.StatusUnauthorized, apiError{Status: "error", Code: "device_authorization_failed", Message: "The device token is expired, revoked, or lacks act permission."})
+			return
+		}
+		if !s.allowScopeRate("device:"+id, "device:act") {
+			w.Header().Set("Retry-After", "60")
+			replyJSON(w, http.StatusTooManyRequests, apiError{Status: "error", Code: "scope_rate_limit_exceeded", Message: "The device exceeded its act-scope request limit."})
 			return
 		}
 		if device.Tier == 2 && action.Confirmation != "CONFIRM_DEVICE_ACTION" {
