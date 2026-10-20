@@ -15,7 +15,7 @@ DEFAULT_CORS_ORIGINS = (
 
 
 def parse_cors_origins() -> list[str]:
-    """Read trusted frontend origins; configured values extend safe defaults."""
+    """Read trusted frontend origins; configured values extend the safe defaults."""
     configured = os.getenv("CORS_ORIGINS", "")
     origins: list[str] = []
     for item in (*DEFAULT_CORS_ORIGINS, *configured.split(",")):

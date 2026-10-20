@@ -50,7 +50,7 @@ def test_public_key_request_stays_pending_and_needs_no_platform_admin(monkeypatc
 def test_admin_key_list_fails_closed_before_calling_core(monkeypatch, test_client):
     called = False
 
-    def deny_admin(authorization=""):
+    def deny_admin(_authorization):
         nonlocal called
         return None, JSONResponse({"status": "error", "code": "admin_required"}, status_code=403)
 
@@ -70,7 +70,7 @@ def test_admin_key_list_fails_closed_before_calling_core(monkeypatch, test_clien
 
 def test_admin_approval_uses_internal_admin_channel(monkeypatch, test_client):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setattr(routes, "require_platform_admin", lambda authorization="": ("admin-user-42", None))
+    monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user-42", None))
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -172,15 +172,15 @@ def test_post_body_is_bounded_and_must_be_json(monkeypatch, test_client):
 
     response = test_client.post(
         "/api/usect-zero/keys/request",
-        data="not-json",
-        content_type="text/plain",
+        content="not-json",
+        headers={"content-type": "text/plain"},
     )
     assert response.status_code == 415
     assert response.json()["code"] == "json_required"
 
 
 def test_invalid_admin_resource_identifier_is_rejected(monkeypatch, test_client):
-    monkeypatch.setattr(routes, "require_platform_admin", lambda authorization="": ("admin-user", None))
+    monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user", None))
     monkeypatch.setattr(
         routes,
         "request_core",
@@ -240,7 +240,7 @@ def test_health_response_does_not_expose_repository_path(monkeypatch, test_clien
     assert payload["model_free"] is True
     assert payload["offline_mode"] is True
     assert "repository_root" not in payload
-    assert "/srv/private/repository" not in response.get_data(as_text=True)
+    assert "/srv/private/repository" not in response.text
 
 
 def test_health_when_disabled_does_not_call_core(monkeypatch, test_client):
@@ -289,7 +289,7 @@ def test_client_uses_server_side_admin_token_without_forwarding_authorization(mo
 
 def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypatch, test_client):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setattr(routes, "require_platform_admin", lambda authorization="": ("admin-user-42", None))
+    monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user-42", None))
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -315,7 +315,7 @@ def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypa
 
     assert response.status_code == 200
     assert response.json()["keys"][0]["id"] == "key_123"
-    assert "key_hash" not in response.get_data(as_text=True).lower()
+    assert "key_hash" not in response.text.lower()
     assert observed["method"] == "GET"
     assert observed["path"] == "/v1/keys/issued"
     assert observed["query"] == {"status": "active"}

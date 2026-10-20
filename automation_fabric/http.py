@@ -1,4 +1,4 @@
-"""Framework-neutral FastAPI router factory for Automation Fabric runtimes."""
+"""Native FastAPI router factory for cloud and loopback-local Automation Fabric."""
 from __future__ import annotations
 
 import json
@@ -9,6 +9,7 @@ from typing import Any, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
 
 from . import store
 from .engine import AutomationError, create_plan, execute_plan
@@ -20,42 +21,70 @@ from .policy import (
 from .registry import tool_catalog
 
 logger = logging.getLogger("revelaai.automation_fabric")
-MAX_BODY_BYTES = 1024 * 1024
-AuthResolver = Callable[[Request], tuple[str | None, JSONResponse | None]]
+
+AuthResolver = Callable[[Request], tuple[str | None, Response | None]]
 WorkspaceResolver = Callable[[str], str | Path]
 DatabaseResolver = Callable[[], str | None]
+MAX_REQUEST_BYTES = 1024 * 1024
 
 
-def _error(code: str, status: int, message: str | None = None) -> JSONResponse:
-    payload: dict[str, Any] = {"status": "error", "code": code}
+def _error(code: str, status_code: int, message: str | None = None) -> JSONResponse:
+    body: dict[str, Any] = {"status": "error", "code": code}
     if message:
-        payload["message"] = message
-    return JSONResponse(payload, status_code=status)
+        body["message"] = message
+    return JSONResponse(body, status_code=status_code)
+
+
+async def _principal(request: Request, auth_resolver: AuthResolver):
+    try:
+        principal, error = auth_resolver(request)
+    except Exception:
+        logger.exception("Automation Fabric authentication resolver failed")
+        return None, _error("authentication_unavailable", 503)
+    if error is not None:
+        if isinstance(error, Response):
+            return None, error
+        return None, _error("authentication_unavailable", 503)
+    if not isinstance(principal, str) or not principal:
+        return None, _error("authentication_required", 401)
+    return principal, None
+
+
+async def _body(request: Request) -> tuple[dict[str, Any], Response | None]:
+    """Read a bounded JSON object; malformed bodies retain the empty-object contract."""
+    content_length = request.headers.get("content-length", "").strip()
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BYTES:
+                return {}, _error("request_too_large", 413, "Request body exceeds the 1 MiB limit.")
+        except ValueError:
+            return {}, _error("invalid_content_length", 400, "Content-Length must be an integer.")
+    try:
+        raw = await request.body()
+    except Exception:
+        return {}, None
+    if len(raw) > MAX_REQUEST_BYTES:
+        return {}, _error("request_too_large", 413, "Request body exceeds the 1 MiB limit.")
+    if not raw:
+        return {}, None
+    try:
+        import json
+        value = json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        return {}, None
+    return (value if isinstance(value, dict) else {}), None
 
 
 def create_automation_router(
-    name: str = "automation_fabric",
+    name: str,
     *,
     auth_resolver: AuthResolver,
     workspace_resolver: WorkspaceResolver,
     database_resolver: DatabaseResolver,
-    local_mode: bool = False,
-    prefix: str = "",
+    local_mode: bool,
 ) -> APIRouter:
-    """Create an ASGI router with explicit auth, workspace, and database boundaries."""
-    router = APIRouter(prefix=prefix, tags=["Automation Fabric"])
-
-    def _principal(request: Request):
-        try:
-            principal, error = auth_resolver(request)
-        except Exception:
-            logger.exception("Automation Fabric authentication resolver failed")
-            return None, _error("authentication_unavailable", 503)
-        if error is not None:
-            return None, error
-        if not isinstance(principal, str) or not principal:
-            return None, _error("authentication_required", 401)
-        return principal, None
+    """Create an isolated native APIRouter without Flask application/request globals."""
+    router = APIRouter(tags=["Automation Fabric"])
 
     def _db() -> str | None:
         return database_resolver()
@@ -69,24 +98,7 @@ def create_automation_router(
             pass
         return root
 
-    async def _payload(request: Request):
-        raw = await request.body()
-        if len(raw) > MAX_BODY_BYTES:
-            return None, _error("request_too_large", 413, "Request body exceeds the 1 MiB limit.")
-        if not raw:
-            return {}, None
-        media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-        if media_type != "application/json":
-            return None, _error("json_required", 415, "Request body must use application/json.")
-        try:
-            body = json.loads(raw)
-        except (ValueError, UnicodeDecodeError):
-            return None, _error("invalid_json", 400, "Request body must contain valid JSON.")
-        if not isinstance(body, dict):
-            return None, _error("invalid_json", 400, "Request body must be one JSON object.")
-        return body, None
-
-    @router.get("/health")
+    @router.get("/health", name=f"{name}_health")
     async def health():
         return {
             "status": "ok",
@@ -100,43 +112,36 @@ def create_automation_router(
             "hardware_actuation": False,
         }
 
-    @router.get("/tools")
-    async def list_tools(request: Request):
-        principal, error = _principal(request)
+    @router.get("/tools", name=f"{name}_tools")
+    async def tools(request: Request):
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        return await run_in_threadpool(
-            lambda: {
-                "status": "ok",
-                "tools": tool_catalog(),
-                "consent": store.list_scopes(principal, db_path=_db()),
-                "runtime": "local-device" if local_mode else "hosted-workspace",
-                "note": (
-                    "This local agent runs on the installed device."
-                    if local_mode else
-                    "A hosted workspace is isolated from the user's personal device; "
-                    "device-only tools require the separately installed local agent."
-                ),
-            }
-        )
+        consent = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
+        return {
+            "status": "ok",
+            "tools": tool_catalog(),
+            "consent": consent,
+            "runtime": "local-device" if local_mode else "hosted-workspace",
+            "note": "A hosted workspace is isolated from the user's personal device. Device-only tools require the separately installed local agent.",
+        }
 
-    @router.get("/consent")
+    @router.get("/consent", name=f"{name}_get_consent")
     async def get_consent(request: Request):
-        principal, error = _principal(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        return await run_in_threadpool(
-            lambda: {"status": "ok", "scopes": store.list_scopes(principal, db_path=_db())}
-        )
+        scopes = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
+        return {"status": "ok", "scopes": scopes}
 
-    @router.post("/consent")
+    @router.post("/consent", name=f"{name}_grant_consent")
     async def grant_consent(request: Request):
-        body, error = await _payload(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        principal, error = _principal(request)
-        if error:
-            return error
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         if body.get("accepted") is not True:
             return _error(
                 "explicit_consent_required", 400,
@@ -164,35 +169,33 @@ def create_automation_router(
             logger.exception("Automation Fabric could not persist consent")
             return _error("consent_storage_unavailable", 503)
 
-    @router.post("/consent/revoke")
+    @router.post("/consent/revoke", name=f"{name}_revoke_consent")
     async def revoke_consent(request: Request):
-        body, error = await _payload(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        principal, error = _principal(request)
-        if error:
-            return error
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         try:
             scopes = normalize_scopes(body.get("scopes"))
-            revoked = await run_in_threadpool(
-                store.revoke_scopes, principal, scopes, db_path=_db()
-            )
-            remaining = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
-            return {"status": "ok", "revoked": revoked, "scopes": remaining}
+            revoked = await run_in_threadpool(store.revoke_scopes, principal, scopes, db_path=_db())
+            current = await run_in_threadpool(store.list_scopes, principal, db_path=_db())
+            return {"status": "ok", "revoked": revoked, "scopes": current}
         except ValueError as exc:
             return _error("invalid_consent", 400, str(exc))
         except Exception:
             logger.exception("Automation Fabric could not revoke consent")
             return _error("consent_storage_unavailable", 503)
 
-    @router.post("/plan")
+    @router.post("/plan", name=f"{name}_plan")
     async def plan(request: Request):
-        body, error = await _payload(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        principal, error = _principal(request)
-        if error:
-            return error
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
         try:
             result = await run_in_threadpool(
                 create_plan, principal, body.get("steps"), _workspace(principal),
@@ -207,9 +210,9 @@ def create_automation_router(
             logger.exception("Automation Fabric failed to create a plan")
             return _error("planning_unavailable", 503)
 
-    @router.get("/plans/{plan_id}")
+    @router.get("/plans/{plan_id}", name=f"{name}_plan_status")
     async def plan_status(plan_id: str, request: Request):
-        principal, error = _principal(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
         record = await run_in_threadpool(store.get_plan, principal, plan_id, db_path=_db())
@@ -217,15 +220,16 @@ def create_automation_router(
             return _error("plan_not_found", 404)
         return {"status": "ok", "record": record}
 
-    @router.post("/execute")
+    @router.post("/execute", name=f"{name}_execute")
     async def execute(request: Request):
-        body, error = await _payload(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
-        principal, error = _principal(request)
-        if error:
-            return error
-        plan_id, plan_hash = body.get("plan_id"), body.get("plan_hash")
+        body, body_error = await _body(request)
+        if body_error:
+            return body_error
+        plan_id = body.get("plan_id")
+        plan_hash = body.get("plan_hash")
         if not isinstance(plan_id, str) or not isinstance(plan_hash, str):
             return _error("invalid_execution_request", 400, "plan_id and plan_hash are required")
         try:
@@ -244,9 +248,9 @@ def create_automation_router(
                 "Execution stopped safely. Check the audit log and plan status.",
             )
 
-    @router.get("/audit")
+    @router.get("/audit", name=f"{name}_audit")
     async def audit(request: Request, limit: str = "50"):
-        principal, error = _principal(request)
+        principal, error = await _principal(request, auth_resolver)
         if error:
             return error
         try:
@@ -263,6 +267,7 @@ def create_automation_router(
     return router
 
 
-# The old factory name is deliberately retained as a Python-level alias only.
-# It now returns a FastAPI APIRouter and never constructs Flask/WSGI objects.
+# The legacy symbol name is retained for imports only; it now returns an APIRouter.
 create_automation_blueprint = create_automation_router
+
+__all__ = ["create_automation_router", "create_automation_blueprint"]

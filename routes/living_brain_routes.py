@@ -1,5 +1,5 @@
-"""Framework-neutral import path for the native Living Brain router."""
+"""Compatibility import path for the native Living Brain FastAPI router."""
 from fastapi_routes.living_brain import router
-from ai.living_brain import describe_vision, respond_local
 
-__all__ = ["router", "describe_vision", "respond_local"]
+living_brain_bp = router
+__all__ = ["router", "living_brain_bp"]

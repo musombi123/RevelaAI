@@ -1,4 +1,5 @@
-"""Framework-neutral import path for the native USECT-ZERO router."""
+"""Compatibility import path for the native USECT-ZERO FastAPI router."""
 from fastapi_routes.usect_zero import router
 
-__all__ = ["router"]
+usect_zero_bp = router
+__all__ = ["router", "usect_zero_bp"]

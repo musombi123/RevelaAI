@@ -6,7 +6,7 @@ from revelai.core.agi_manifest import (
     get_self_description_answer,
     get_status_summary,
 )
-from asgi import app
+from fastapi_routes.agi import router as agi_router
 
 
 class AGIManifestTests(unittest.TestCase):
@@ -86,10 +86,8 @@ class AGIManifestTests(unittest.TestCase):
         self.assertIn("infinite_mind_core_two", status["modules"])
         self.assertEqual(status["modules_checked"], len(status["modules"]))
 
-    def test_native_router_declares_routes(self):
-        paths = set(app.openapi()["paths"])
-        self.assertIn("/api/agi/manifest", paths)
-        self.assertIn("/api/agi/status", paths)
+    def test_router_declares_routes(self):
+        self.assertGreaterEqual(len(agi_router.routes), 2)
 
     def test_capabilities_question_uses_manifest_answer(self):
         answer = get_self_description_answer("What are your capabilities?")

@@ -26,7 +26,7 @@ huggingface_hub>=1.26.0
 Pillow>=10.0.0
 PyJWT>=2.8.0
 
-# Crypto and validation
+# Crypto / request validation
 pydantic>=2.7,<3
 cryptography>=42,<47
 

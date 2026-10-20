@@ -1,4 +1,5 @@
-"""Framework-neutral import path for the prototype-users router."""
-from fastapi_routes.users import router, USERS
+"""Compatibility import path for the native prototype-users FastAPI router."""
+from fastapi_routes.users import router
 
-__all__ = ["router", "USERS"]
+users_bp = router
+__all__ = ["router", "users_bp"]

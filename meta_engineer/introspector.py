@@ -1,4 +1,4 @@
-"""Read-only architecture scanner for the native RevelaAI FastAPI repository."""
+"""Read-only architecture scanner for the native FastAPI RevelaAI runtime."""
 from __future__ import annotations
 import ast, json, re
 from pathlib import Path
@@ -40,8 +40,9 @@ def scan_architecture() -> dict[str, Any]:
             except OSError: continue
             names = sorted(set(re.findall(r"""["'](conversations|memories|ideas|bestThings|learnings)["']""", source)))
             if names: schemas["collections:" + rel] = {"database": "revelai", "collections": names}
-    route_root = ROOT / "fastapi_routes"
-    free_slots = [str((route_root / n).relative_to(ROOT)) for n in ("meta_engineer.py", "feature_routes.py", "health_routes.py") if not (route_root / n).exists()] if route_root.is_dir() else ["routes/meta_engineer_routes.py"]
-    return {"structure": structure, "dependencies": dependencies, "schemas": schemas, "free_slots": free_slots or ["No obvious free route slot; review an existing blueprint"], "protected_paths": PROTECTED, "read_only": True, "framework": "FastAPI/ASGI (native routers; no Flask runtime)"}
+    route_root = ROOT / "routes"
+    if not route_root.is_dir(): route_root = ROOT / "revelai" / "routers"
+    free_slots = [str((route_root / n).relative_to(ROOT)) for n in ("meta_engineer_routes.py", "feature_routes.py", "health_routes.py") if not (route_root / n).exists()] if route_root.is_dir() else ["routes/meta_engineer_routes.py"]
+    return {"structure": structure, "dependencies": dependencies, "schemas": schemas, "free_slots": free_slots or ["No obvious free route slot; review an existing blueprint"], "protected_paths": PROTECTED, "read_only": True, "framework": "FastAPI runtime; dormant legacy Flask route source is excluded from the active gateway"}
 
 if __name__ == "__main__": print(json.dumps(scan_architecture(), indent=2, default=str))

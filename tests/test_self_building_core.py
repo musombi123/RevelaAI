@@ -4,13 +4,15 @@ import pytest
 from meta_engineer.generator import generate_feature
 
 
-def test_backend_target_builds_a_flask_route_not_fastapi():
+def test_backend_target_builds_a_native_fastapi_route_proposal():
     result = generate_feature("Add endpoint GET /api/health/meta that returns module status", target="backend")
     assert result["target"] == "backend"
-    assert result["kind"] == "python_flask_route_proposal"
+    assert result["kind"] == "python_fastapi_route_proposal"
     assert result["code_path"].endswith(".py")
     assert '@router.get("/api/health/meta")' in result["code"]
-    assert "Blueprint" in result["code"]
+    assert "from fastapi import APIRouter, Request" in result["code"]
+    assert "router = APIRouter()" in result["code"]
+    assert "from flask import" not in result["code"]
     assert "proposal_only" in result["code"]
     assert result["files"][0]["role"] == "backend_route"
     assert result["runtime_integration"] == "disabled_until_human_approval"

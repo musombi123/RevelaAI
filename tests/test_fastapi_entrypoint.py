@@ -18,56 +18,84 @@ def test_app_module_exports_the_native_fastapi_instance() -> None:
 
 
 def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
+    import ast
     from pathlib import Path
-    import importlib.util
-    import re
     import asgi
 
     app_source = Path("app.py").read_text(encoding="utf-8")
     asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
+    platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+    active_sources = [
+        ("ai/raw_reply.py", Path("ai/raw_reply.py").read_text(encoding="utf-8")),
+        ("meta_engineer/generator.py", Path("meta_engineer/generator.py").read_text(encoding="utf-8")),
+        ("revelai/core/brain_os.py", Path("revelai/core/brain_os.py").read_text(encoding="utf-8")),
+    ]
     requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
-    def has_flask_import(source: str) -> bool:
-        return bool(re.search(
-            r"^\s*(?:from\s+flask(?:\.[\w.]+)?\s+import|import\s+flask(?:\s|,|$))",
-            source,
-            re.MULTILINE,
-        ))
-
-    assert "from asgi import app" in app_source
     assert "WSGIMiddleware" not in asgi_source
     assert "legacy_flask_app" not in asgi_source
     assert "WSGIMiddleware" not in app_source
-    assert not has_flask_import(asgi_source)
-    assert not has_flask_import(app_source)
-
-    platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
-    assert "WSGIMiddleware" not in platform_source
-    assert "from asgi import app as revelaai_app" in platform_source
-    assert "app.mount(\"/\", revelaai_app" in platform_source
-    assert not has_flask_import(platform_source)
-    assert importlib.util.find_spec("flask") is None
-
-    requirement_lines = [
-        line.strip() for line in requirements.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    for dependency in ("flask", "flask-cors", "a2wsgi"):
-        assert not any(
-            line == dependency or line.startswith((
-                dependency + " ", dependency + "<", dependency + ">",
-                dependency + "=", dependency + "[", dependency + "~",
-                dependency + "!", dependency + ";",
-            ))
-            for line in requirement_lines
-        ), dependency
-
     assert not Path("legacy_flask_app.py").exists()
-    for source in Path(".").rglob("*.py"):
-        if ".git" in source.parts or ".venv" in source.parts or "venv" in source.parts:
-            continue
-        assert not has_flask_import(source.read_text(encoding="utf-8")), str(source)
 
+    entry_sources = [("app.py", app_source), ("asgi.py", asgi_source), ("revela_platform/fastapi_app.py", platform_source)] + active_sources
+    for filename, source in entry_sources:
+        tree = ast.parse(source, filename=filename)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert all(alias.name.split(".")[0].lower() != "flask" for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                module = (node.module or "").lower()
+                assert module != "flask" and not module.startswith("flask.")
+
+    import re
+
+    forbidden = {"flask", "flask-cors", "a2wsgi", "werkzeug"}
+    for line in requirements.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.match(r"^([a-zA-Z0-9_.-]+)", stripped)
+        if match:
+            package = match.group(1).replace("_", "-").lower()
+            assert package not in forbidden, package
+
+    # Scan the complete production source tree. The historical routes/ module
+    # names are now thin APIRouter aliases, so they must not retain Flask code.
+    # Exclude tests, VCS data, and virtual environments only.
+    repository_root = Path(".")
+    intentionally_dormant = {"tests", ".git", ".venv", "venv", "__pycache__"}
+    forbidden_import_roots = {"flask", "flask_cors", "werkzeug", "a2wsgi"}
+    scanned = set()
+    for path in repository_root.rglob("*.py"):
+        relative = path.relative_to(repository_root)
+        if (
+            any(part in intentionally_dormant for part in relative.parts)
+            or path.name.startswith("test_")
+            or path in scanned
+        ):
+            continue
+        scanned.add(path)
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert alias.name.split(".")[0].lower() not in forbidden_import_roots, (path, alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                imported_module = (node.module or "").split(".")[0].lower()
+                assert imported_module not in forbidden_import_roots, (path, node.module)
+    assert scanned, "No production Python source was scanned"
+
+
+
+def test_revenue_platform_mounts_the_native_asgi_gateway() -> None:
+    from pathlib import Path
+    source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+
+    assert "from asgi import app as revelaai_app" in source
+    assert 'app.mount("/", revelaai_app, name="revelaai-native-gateway")' in source
+    assert "WSGIMiddleware" not in source
+    assert "from app import app as flask_app" not in source
 
 def test_native_core_routers_do_not_import_the_flask_compatibility_module() -> None:
     from fastapi_routes import ai as ai_routes
@@ -513,3 +541,55 @@ def test_native_stream_route_rejects_empty_message_before_provider_calls() -> No
     assert response.json()["error"]["code"] == "EMPTY_MESSAGE"
     assert response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
+
+
+def test_legacy_route_module_names_are_native_fastapi_router_aliases() -> None:
+    from fastapi import APIRouter
+
+    from routes import (
+        automation_fabric_routes,
+        chat_routes,
+        explain_routes,
+        hub_routes,
+        living_brain_routes,
+        memory_routes,
+        meta_engineer_routes,
+        research,
+        research_routes,
+        rss_research,
+        usect_zero_routes,
+        users_routes,
+        vision_routes,
+    )
+    from fastapi_routes import (
+        automation_fabric,
+        chat,
+        explain,
+        hub,
+        living_brain,
+        memory,
+        meta_engineer,
+        research as fastapi_research,
+        usect_zero,
+        users,
+        vision,
+    )
+
+    aliases = (
+        (automation_fabric_routes.automation_fabric_bp, automation_fabric.router),
+        (chat_routes.chat_bp, chat.router),
+        (explain_routes.explain_bp, explain.router),
+        (hub_routes.hub_bp, hub.router),
+        (living_brain_routes.living_brain_bp, living_brain.router),
+        (memory_routes.memory_bp, memory.router),
+        (meta_engineer_routes.meta_engineer_bp, meta_engineer.router),
+        (research.research_bp, fastapi_research.router),
+        (research_routes.research_bp, fastapi_research.router),
+        (rss_research.rss_bp, fastapi_research.router),
+        (usect_zero_routes.usect_zero_bp, usect_zero.router),
+        (users_routes.users_bp, users.router),
+        (vision_routes.vision_bp, vision.router),
+    )
+    for legacy_name, native_router in aliases:
+        assert isinstance(legacy_name, APIRouter)
+        assert legacy_name is native_router

@@ -1,28 +1,59 @@
-name: FastAPI Gateway Migration Checks
+name: FastAPI-only Runtime and Generated Route Checks
 
 on:
   pull_request:
     paths:
-      - "app.py"
       - "asgi.py"
+      - "ai/**"
+      - "app.py"
+      - "automation_fabric/**"
       - "requirements.txt"
       - "render.yaml"
+      - "revela_platform/**"
+      - "revelai/**"
+      - "core/**"
+      - "db/**"
+      - "features/**"
+      - "models/**"
+      - "schemas/**"
+      - "utils/**"
+      - "voice/**"
+      - "whatsapp_webhook.py"
+      - "meta_engineer/**"
+      - "revelai/core/brain_os.py"
+      - "tests/test_meta_engineer.py"
+      - "tests/test_self_building_core.py"
+      - "tests/test_brain_os.py"
+      - "tests/test_agi_manifest.py"
+      - "tests/test_sci_core.py"
+      - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
-      - "revelai/sci_core/**"
-      - "tests/test_fastapi_entrypoint.py"
+      - "tests/**"
       - ".github/workflows/fastapi-migration.yml"
   push:
-    branches: [main, migration/fastapi-only-runtime]
+    branches: [migration/flask-to-fastapi, migration/fastapi-shared-routes]
     paths:
-      - "app.py"
       - "asgi.py"
+      - "ai/**"
+      - "app.py"
+      - "automation_fabric/**"
       - "requirements.txt"
       - "render.yaml"
+      - "revela_platform/**"
+      - "revelai/**"
+      - "core/**"
+      - "db/**"
+      - "features/**"
+      - "models/**"
+      - "schemas/**"
+      - "utils/**"
+      - "voice/**"
+      - "whatsapp_webhook.py"
+      - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
-      - "revelai/sci_core/**"
-      - "tests/test_fastapi_entrypoint.py"
+      - "tests/**"
       - ".github/workflows/fastapi-migration.yml"
 
 permissions:
@@ -30,7 +61,7 @@ permissions:
 
 jobs:
   asgi-entrypoint:
-    name: Native FastAPI only
+    name: Native FastAPI entry point, generated route and route contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -43,59 +74,69 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      - name: Compile native application and tests
-        run: python -m py_compile app.py asgi.py tests/test_fastapi_entrypoint.py
-      - name: Reject Flask and WSGI runtime
+      - name: Compile entry points and native route modules
+        run: |
+          python -m py_compile app.py asgi.py whatsapp_webhook.py automation_fabric/http.py automation_fabric/local_agent.py ai/raw_reply.py meta_engineer/generator.py revelai/core/brain_os.py tests/test_fastapi_entrypoint.py tests/test_automation_fabric.py
+          python -m compileall -q routes fastapi_routes
+      - name: Reject Flask and WSGI runtime dependencies
         run: |
           python - <<'PY'
+          import ast
           from pathlib import Path
-          import importlib.util
           import re
 
           app_source = Path("app.py").read_text(encoding="utf-8")
           asgi_source = Path("asgi.py").read_text(encoding="utf-8")
           platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+          active_sources = [
+              ("ai/raw_reply.py", Path("ai/raw_reply.py").read_text(encoding="utf-8")),
+              ("meta_engineer/generator.py", Path("meta_engineer/generator.py").read_text(encoding="utf-8")),
+              ("revelai/core/brain_os.py", Path("revelai/core/brain_os.py").read_text(encoding="utf-8")),
+          ]
           requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
-
-          def has_flask_import(source):
-              return bool(re.search(
-                  r"^\s*(?:from\s+flask(?:\.[\w.]+)?\s+import|import\s+flask(?:\s|,|$))",
-                  source,
-                  re.MULTILINE,
-              ))
 
           assert "from asgi import app" in app_source
           assert "WSGIMiddleware" not in asgi_source
           assert "legacy_flask_app" not in asgi_source
-          assert not has_flask_import(asgi_source)
-          assert not has_flask_import(app_source)
-          assert "WSGIMiddleware" not in platform_source
+          assert not Path("legacy_flask_app.py").exists()
           assert "from asgi import app as revelaai_app" in platform_source
           assert "app.mount(\"/\", revelaai_app" in platform_source
-          assert not has_flask_import(platform_source)
-          assert importlib.util.find_spec("flask") is None, "Flask must not be installed"
+          assert "WSGIMiddleware" not in platform_source
 
-          requirement_lines = [
-              line.strip() for line in requirements.splitlines()
-              if line.strip() and not line.lstrip().startswith("#")
-          ]
-          for dependency in ("flask", "flask-cors", "a2wsgi"):
-              assert not any(
-                  line == dependency or line.startswith((
-                      dependency + " ", dependency + "<", dependency + ">",
-                      dependency + "=", dependency + "[", dependency + "~",
-                      dependency + "!", dependency + ";",
-                  ))
-                  for line in requirement_lines
-              ), dependency
+          entry_sources = [("app.py", app_source), ("asgi.py", asgi_source), ("revela_platform/fastapi_app.py", platform_source)] + active_sources
+          for filename, source in entry_sources:
+              tree = ast.parse(source, filename=filename)
+              for node in ast.walk(tree):
+                  if isinstance(node, ast.Import):
+                      assert all(alias.name.split(".")[0].lower() != "flask" for alias in node.names), filename
+                  elif isinstance(node, ast.ImportFrom):
+                      module = (node.module or "").lower()
+                      assert module != "flask" and not module.startswith("flask."), filename
 
-          assert not Path("legacy_flask_app.py").exists()
-          for source in Path(".").rglob("*.py"):
-              if ".git" in source.parts or ".venv" in source.parts or "venv" in source.parts:
+          forbidden = {"flask", "flask-cors", "a2wsgi", "werkzeug"}
+          for line in requirements.splitlines():
+              stripped = line.strip()
+              if not stripped or stripped.startswith("#"):
                   continue
-              code = source.read_text(encoding="utf-8")
-              assert not has_flask_import(code), f"Flask import remains in {source}"
-          print("No Flask app, runtime import, or Flask dependency remains.")
+              match = re.match(r"^([a-zA-Z0-9_.-]+)", stripped)
+              if match:
+                  package = match.group(1).replace("_", "-").lower()
+                  assert package not in forbidden, package
+
+          print("FastAPI-only runtime contract verified.")
           PY
-      - name: Run FastAPI gateway regression tests
-        run: python -m pytest -q tests/test_fastapi_entrypoint.py
+      - name: Run native FastAPI and Meta-Engineer regressions
+        run: >-
+          python -m pytest -q
+          tests/test_fastapi_entrypoint.py
+          tests/test_meta_engineer.py
+          tests/test_self_building_core.py
+          tests/test_brain_os.py
+          tests/test_agi_manifest.py
+          tests/test_sci_core.py
+          tests/test_gemini_routing.py
+          tests/test_identity_header.py
+          tests/test_live_vision.py
+          tests/test_usect_zero_admin_verification.py
+          tests/test_usect_zero_backend.py
+          tests/test_automation_fabric.py

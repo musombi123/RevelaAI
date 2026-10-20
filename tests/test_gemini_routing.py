@@ -55,10 +55,9 @@ class GeminiRoutingTests(unittest.TestCase):
 
     def test_brain_os_telemetry_failure_does_not_break_successful_chat(self):
         from fastapi.testclient import TestClient
-        from fastapi_routes import chat as chat_routes
         from asgi import app
+        from fastapi_routes import chat as chat_routes
 
-        client = TestClient(app)
         interaction = {
             "hubRequested": "auto",
             "hub": "coding",
@@ -99,7 +98,7 @@ class GeminiRoutingTests(unittest.TestCase):
                 side_effect=RuntimeError("telemetry unavailable"),
             ),
         ):
-            response = client.post(
+            response = TestClient(app).post(
                 "/api/chat",
                 json={"message": "Check the feature", "hub": "auto", "userId": "user-test"},
             )

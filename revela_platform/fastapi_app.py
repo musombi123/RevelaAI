@@ -1,7 +1,7 @@
 """Native FastAPI revenue gateway for licenses, usage, marketplace and platform tools.
 
-Published tools are license-gated before dispatch. RevelaAI is mounted as a native
-FastAPI subapplication; no Flask or WSGI runtime is used.
+Published tools are license-gated before dispatch. RevelaAI's API is mounted as
+a FastAPI ASGI subapplication; no Flask or WSGI runtime is used.
 """
 from __future__ import annotations
 
@@ -946,8 +946,18 @@ def list_audit_events(limit: int = Query(default=50, ge=1, le=250),
 
 
 # Tool licensing guard for registered tool routes and unknown single-segment /v1 paths.
-# Explicit FastAPI routes are allowed to reach their own handlers. The dynamic
-# /v1/{tool_id} handler validates publication and authorization before dispatch.
+# Only explicitly registered static FastAPI endpoints bypass the marketplace-tool gate.
+def _legacy_static_route_exists(path: str, method: str) -> bool:
+    for route in app.router.routes:
+        route_path = getattr(route, "path", "")
+        if route_path != path or "{" in route_path or "}" in route_path:
+            continue
+        methods = set(getattr(route, "methods", set()) or set())
+        if method.upper() in methods:
+            return True
+    return False
+
+
 def _record_usage_safely(*, user_id: str, tool_id: str, country: str,
                          latency_ms: float, success: bool, cost_saved_usd: float = 0.0) -> None:
     import logging
@@ -985,7 +995,12 @@ async def licensed_tool_guard(request: Request, call_next):
         return JSONResponse(status_code=503, content={"error": "License registry unavailable; tool calls fail closed."})
 
     if tracked_tool is None:
-        return await call_next(request)
+        if _legacy_static_route_exists(path, method):
+            return await call_next(request)
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Tool route is not registered or published in RevelaCode."},
+        )
 
     try:
         identity = str(_claims_from_bearer(request.headers.get("Authorization"))["sub"])
@@ -1047,7 +1062,8 @@ async def licensed_tool_guard(request: Request, call_next):
     return response
 
 
-# Mount the native ASGI API. No WSGI or Flask compatibility bridge is permitted.
+# Mount RevelaAI's actual ASGI application after the platform routes above.
+# The platform endpoints win by routing order; unresolved paths dispatch to FastAPI.
 from asgi import app as revelaai_app  # noqa: E402
 from mesh.rvx_mesh import MeshCallError, rvx_call  # noqa: E402
 
