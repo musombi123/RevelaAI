@@ -58,12 +58,13 @@ services:
   # USECT_ZERO_GATEWAY_URL, GENESIS_BASE_URL, MIND_BASE_URL.
   # They are intentionally not required at service startup.
   # Core-Zero: model-free diagnostics, bounded tools, and human-gated recovery.
+  # Render private services use TCP health checks; /v1/health remains available
+  # to authenticated internal probes and the optional supervisor.
   - type: pserv
     name: usect-zero-core
     runtime: go
     rootDir: core-zero
     plan: starter
-    healthCheckPath: /v1/health
     buildCommand: go build -o ./usect-zero ./cmd/usect-zero
     startCommand: ./usect-zero -mode serve -root .. -listen 0.0.0.0:$PORT
     disk:
