@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey,
 
 from core_billing.licensing import LicenseError, load_private_key, load_public_key
 from rvx.crypto import RecipeError, load_master_key, open_blob, seal_blob
+
+
+_RESTORE_NONCE_LOCK = threading.Lock()
+_RESTORE_NONCES: set[str] = set()
 
 
 class DnaVaultError(RuntimeError):
@@ -121,6 +126,10 @@ def restore_dna_vault(
         nonce = str(expected["nonce"] or "")
         if len(nonce) < 24 or len(nonce) > 200:
             raise DnaVaultError("Restore nonce is invalid.")
+        nonce = str(expected["nonce"])
+        with _RESTORE_NONCE_LOCK:
+            if nonce in _RESTORE_NONCES:
+                raise DnaVaultError("Founder restore authorization nonce has already been used.")
         signature = _unb64(signature_b64)
         load_public_key().verify(signature, canonical_json(signature_payload))
     except (ValueError, TypeError, InvalidSignature, LicenseError) as exc:
@@ -141,4 +150,6 @@ def restore_dna_vault(
     except OSError:
         pass
     temporary.replace(target)
+    with _RESTORE_NONCE_LOCK:
+        _RESTORE_NONCES.add(str(expected["nonce"]))
     return {"restored": True, "path": str(target), "records": len(document["records"]), "vault_sha256": digest}
