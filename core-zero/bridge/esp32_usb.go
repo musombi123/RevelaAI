@@ -64,6 +64,9 @@ func (a *ESP32USBAdapter) Connect(deviceID, token string) error {
 	if runtime.GOOS != "linux" {
 		return errors.New("ESP32 USB serial access is supported only by the local Linux adapter host")
 	}
+	if !devicePortPattern.MatchString(device.SerialPort) {
+		return errors.New("stored device serial path is not an allowed enrolled USB serial port")
+	}
 	info, err := os.Lstat(device.SerialPort)
 	if err != nil {
 		return fmt.Errorf("inspect enrolled serial port: %w", err)
@@ -123,11 +126,8 @@ func (a *ESP32USBAdapter) Act(deviceID, token string, action DeviceAction) error
 	if err != nil {
 		return err
 	}
-	if device.Tier == 2 && action.Confirmation != deviceConfirmation {
-		return errors.New("Tier 2 action requires confirmation=CONFIRM_DEVICE_ACTION for this action")
-	}
-	if action.Name != "set_gpio" || action.Pin < 0 || action.Pin > 39 || (action.Value != 0 && action.Value != 1) {
-		return errors.New("unsupported ESP32 action; only set_gpio with pin 0-39 and value 0 or 1 is permitted")
+	if err := validateDeviceAction(device, action); err != nil {
+		return err
 	}
 
 	a.mu.Lock()
@@ -184,6 +184,19 @@ func (a *ESP32USBAdapter) Disconnect(deviceID, token string) error {
 	// Closing is always performed even if authorization was revoked, so
 	// revocation cannot strand an open hardware handle.
 	return authErr
+}
+
+func validateDeviceAction(device Device, action DeviceAction) error {
+	if device.Tier < 1 || !containsScope(device.Scopes, "device:act") {
+		return errors.New("device token lacks device:act scope or tier")
+	}
+	if device.Tier == 2 && action.Confirmation != deviceConfirmation {
+		return errors.New("Tier 2 action requires confirmation=CONFIRM_DEVICE_ACTION for this action")
+	}
+	if action.Name != "set_gpio" || action.Pin < 0 || action.Pin > 39 || (action.Value != 0 && action.Value != 1) {
+		return errors.New("unsupported ESP32 action; only set_gpio with pin 0-39 and value 0 or 1 is permitted")
+	}
+	return nil
 }
 
 func writeDeviceFrame(w io.Writer, value any) error {
