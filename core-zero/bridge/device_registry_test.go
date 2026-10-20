@@ -100,4 +100,8 @@ func TestTierTwoActuatorRequiresPerActionConfirmation(t *testing.T) {
 	if err := validateDeviceAction(device, action); err != nil {
 		t.Fatalf("confirmed Tier 2 action should pass the confirmation gate: %v", err)
 	}
+	action.Pin = 6
+	if err := validateDeviceAction(device, action); err == nil {
+		t.Fatal("ESP32 flash-reserved GPIO must not be accepted as an actuator output")
+	}
 }
