@@ -114,6 +114,23 @@ def open_blob(blob: bytes, root_key: bytes) -> bytes:
         raise RecipeError("RVX blob authentication/decryption failed; wrong recipe or damaged data.") from exc
 
 
+def _dialect_generation(root_key: bytes, day: str) -> str:
+    """Read the authenticated active dialect generation, or use date-only legacy mode."""
+    path = Path(os.getenv("REVELA_DIALECT_PATH", str(Path(__file__).with_name("dialect.json")))).expanduser()
+    if not path.is_file():
+        return day
+    try:
+        document = json.loads(open_blob(path.read_bytes(), root_key))
+    except (OSError, ValueError, RecipeError) as exc:
+        raise RecipeError("RVX dialect artifact is missing, corrupt, or cannot be authenticated.") from exc
+    if document.get("day") != day:
+        raise StalePacketError("Dialect obsolete - Pull new.")
+    generation = document.get("generation")
+    if not isinstance(generation, (str, int)) or not str(generation):
+        raise RecipeError("RVX dialect artifact has no valid generation.")
+    return str(generation)
+
+
 def _mesh_secret() -> bytes:
     configured = os.getenv("REVELA_RVX_MESH_SECRET", "").strip()
     if configured:
@@ -144,8 +161,9 @@ def seal_packet(payload: Any, *, route: str, secret: bytes | None = None,
     day = utc.strftime("%Y-%m-%d")
     window = utc.strftime("%Y-%m-%dT%H")
     root = secret if secret is not None else _mesh_secret()
+    generation = _dialect_generation(root, day)
     # The daily dialect nests an hourly derived mesh key: packets expire within
-    # one hour, while daily labels still evolve once every UTC day.
+    # one hour, while signed dialect generations can also be rotated immediately.
     key = _derive_key(root, salt=window.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
     nonce = secrets.token_bytes(12)
     message_id = secrets.token_urlsafe(18)
@@ -155,6 +173,7 @@ def seal_packet(payload: Any, *, route: str, secret: bytes | None = None,
     return {
         "protocol": "RVXP1",
         "dialect": "v" + day.replace("-", ".") + "_α",
+        "generation": generation,
         "day": day,
         "window": window,
         "route": route,
@@ -184,6 +203,9 @@ def open_packet(envelope: dict[str, Any], *, route: str, secret: bytes | None = 
         raise StalePacketError("Stale RVX packet: its hourly mesh key window has expired.")
     root = secret if secret is not None else _mesh_secret()
     try:
+        expected_generation = _dialect_generation(root, today)
+        if str(envelope.get("generation", today)) != expected_generation:
+            raise StalePacketError("Dialect obsolete - Pull new.")
         key = _derive_key(root, salt=current_window.encode(), info=("revela-rvx-mesh-v1:" + route).encode())
         message_id = envelope.get("message_id")
         if not isinstance(message_id, str) or len(message_id) < 16 or len(message_id) > 100:
