@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
-	"time"
 )
 
 const (
@@ -121,7 +121,7 @@ func DecodeToolManifest(raw []byte) (ToolManifest, error) {
 	if err := decoder.Decode(&manifest); err != nil {
 		return ToolManifest{}, fmt.Errorf("decode tool manifest: %w", err)
 	}
-	if err := decoder.Decode(new(any)); err == nil {
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		return ToolManifest{}, errors.New("manifest must contain exactly one JSON value")
 	}
 	if err := ValidateToolManifest(manifest); err != nil {
@@ -175,11 +175,3 @@ func validateGeneratedToolManifest(spec ToolSpec) (ToolManifest, error) {
 	return manifest, nil
 }
 
-// ManifestLimits returns the effective limits in a stable machine-readable form.
-func (m ToolManifest) ManifestLimits() map[string]any {
-	return map[string]any{
-		"timeout_ms": m.TimeoutMillis,
-		"memory_bytes": m.MemoryBytes,
-		"evidence_generated_at": time.Now().UTC(),
-	}
-}
