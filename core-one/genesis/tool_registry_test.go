@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func registryEvidenceForTest(t *testing.T, manifest ToolManifest, passed bool) SandboxEvidence {
@@ -99,5 +100,38 @@ func TestTierTwoInvocationRequiresHashBoundPerActionConfirmation(t *testing.T) {
 	_, err = RunSignedToolInvocation(context.Background(), coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, []byte(`{"action":"plan"}`), "")
 	if err == nil {
 		t.Fatal("Tier 2 tool invocation must be refused without per-action confirmation")
+	}
+}
+
+
+func TestTierTwoConfirmationIsBoundToExactArgumentsAndConsumedOnce(t *testing.T) {
+	t.Setenv("GENESIS_SIGNING_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
+	coreRoot := t.TempDir()
+	manifest := validManifestForTest()
+	manifest.Permissions.Hardware = true
+	manifest.RiskTier = 2
+	record, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, true))
+	if err != nil { t.Fatal(err) }
+	if _, err := ActivateSignedToolVersion(coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, record.ArtifactHash); err != nil { t.Fatal(err) }
+
+	input := []byte("{\"action\":\"switch\",\"inputs\":{\"device\":\"pump-1\"}}")
+	token, expires, err := IssueToolActionConfirmation(coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, input)
+	if err != nil { t.Fatal(err) }
+	if !expires.After(time.Now()) { t.Fatal("confirmation token expiry must be in the future") }
+	changedInput := []byte("{\"action\":\"switch\",\"inputs\":{\"device\":\"pump-2\"}}")
+	if err := consumeToolActionConfirmation(token, manifest.Name, manifest.Version, record.ArtifactHash, changedInput); err == nil {
+		t.Fatal("confirmation for one action must not authorize different arguments")
+	}
+	if err := consumeToolActionConfirmation(token, manifest.Name, manifest.Version, record.ArtifactHash, input); err == nil {
+		t.Fatal("a mismatched confirmation attempt must consume the one-use token")
+	}
+
+	token, _, err = IssueToolActionConfirmation(coreRoot, manifest.Name, manifest.Version, record.ArtifactHash, input)
+	if err != nil { t.Fatal(err) }
+	if err := consumeToolActionConfirmation(token, manifest.Name, manifest.Version, record.ArtifactHash, input); err != nil {
+		t.Fatalf("exact confirmed action should be authorized once: %v", err)
+	}
+	if err := consumeToolActionConfirmation(token, manifest.Name, manifest.Version, record.ArtifactHash, input); err == nil {
+		t.Fatal("the same confirmation token must not be reusable")
 	}
 }
