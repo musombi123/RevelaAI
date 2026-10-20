@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"log"
@@ -19,6 +20,9 @@ import (
 )
 
 func main() {
+	if err := verifyOwnerRecipe(); err != nil {
+		log.Fatal(err)
+	}
 	repoRoot := flag.String("repo-root", "..", "repository root containing core-zero, core-one, and core-two")
 	listen := flag.String("listen", "127.0.0.1:8782", "Mind HTTP listener; loopback is the safe default")
 	daemon := flag.Bool("daemon", false, "run the 24-hour Mirror → Mutator → Judge cycle")
@@ -44,4 +48,35 @@ func main() {
 	fmt.Fprintf(os.Stderr,"USECT-TWO %s listening on %s; model_free=true; daemon=%t; auto_merge=false\n",mind.Version,*listen,*daemon)
 	fmt.Fprintln(os.Stderr,"Evolutions are review-only. Set MIND_ADMIN_TOKEN for authenticated mutations; keep public exposure behind TLS and rate limits.")
 	if err:=server.ListenAndServe();err!=nil&&err!=http.ErrServerClosed{log.Fatal(err)}
+}
+
+
+func verifyOwnerRecipe() error {
+    mode := strings.ToLower(strings.TrimSpace(os.Getenv("REVELA_UNCOPYABLE_ENFORCE")))
+    if mode != "1" && mode != "true" && mode != "yes" && mode != "on" {
+        return nil
+    }
+    path := strings.TrimSpace(os.Getenv("REVELA_MASTER_KEY_PATH"))
+    if path == "" {
+        home, err := os.UserHomeDir()
+        if err != nil {
+            return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner home is unavailable")
+        }
+        path = filepath.Join(home, ".revela_recipe", "master.key")
+    }
+    key, err := os.ReadFile(path)
+    if err != nil {
+        return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe is unavailable")
+    }
+    if len(key) != 512 {
+        return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe length is invalid")
+    }
+    expected := strings.TrimSpace(os.Getenv("REVELA_RECIPE_EXPECTED_SHA256"))
+    if expected != "" {
+        digest := sha256.Sum256(key)
+        if !strings.EqualFold(fmt.Sprintf("%x", digest), expected) {
+            return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe fingerprint mismatch")
+        }
+    }
+    return nil
 }
