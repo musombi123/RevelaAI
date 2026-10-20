@@ -237,3 +237,27 @@ def test_mind_evolution_proposal_is_explicitly_targeted_at_core_one(monkeypatch)
     assert result["automatic_merge"] is False
     assert result["automatic_execution"] is False
 
+def test_live_brain_prompt_receives_mind_to_core_one_target_and_safety_rules():
+    from services.ai_service import build_grounded_system_prompt
+
+    prompt = build_grounded_system_prompt(
+        "BASE PROMPT",
+        {
+            "core_mesh": {
+                "selected_core": "core-two",
+                "target_core": "core-one",
+                "operation_kind": "core_one_improvement_proposal",
+                "route_reason": "Infinite Mind stages Core-One improvements for review.",
+                "mesh_status": "online",
+                "cores": {},
+            }
+        },
+    )
+
+    assert "- Selected core: core-two" in prompt
+    assert "- Target core: core-one" in prompt
+    assert "- Operation kind: core_one_improvement_proposal" in prompt
+    assert "must not edit Core-One" in prompt
+    assert "never forward candidate source code or secrets" in prompt
+    assert "Never claim an invention, mutation, repair, deployment, or merge occurred" in prompt
+
