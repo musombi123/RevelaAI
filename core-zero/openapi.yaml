@@ -133,6 +133,8 @@ paths:
         '200': {description: Bounded response from the enrolled ESP32 protocol.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/devices/{device_id}/act:
     post:
       tags: [bridge]
@@ -156,6 +158,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/health:
     get:
       tags: [system]
@@ -178,6 +182,8 @@ paths:
         '200': {description: Diagnostic evidence and repository baseline status.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/scan:
     get:
       tags: [system]
@@ -193,6 +199,8 @@ paths:
               schema: {$ref: '#/components/schemas/ScanEvidence'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/keys/requests:
     get:
       tags: [forge]
@@ -332,6 +340,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '422':
           description: Invalid country/language or diagnostic library unavailable; fail closed.
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/heal/baseline:
     post:
       tags: [heal]
@@ -355,6 +365,8 @@ paths:
         '201': {description: Proposal and sandbox evidence created.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/heal/proposals/{proposal_id}/approve:
     post:
       tags: [heal]
@@ -406,6 +418,8 @@ paths:
                   hardware_verified: {type: boolean, const: false}
                   human_review_required: {type: boolean, const: true}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/assemble/templates:
     get:
       tags: [assemble]
@@ -431,6 +445,8 @@ paths:
                   count: {type: integer, minimum: 0}
                   human_review_required: {type: boolean, const: true}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/assemble:
     post:
       tags: [assemble]
@@ -452,6 +468,8 @@ paths:
         '201': {description: Validated, versioned artifacts generated for human review; no hardware touched.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '422': {description: No curated template exists for the requested target.}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/radar/compare:
     post:
       tags: [radar]
@@ -473,6 +491,8 @@ paths:
         '200': {description: Deterministic comparison and human-review recommendation; no network used.}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/bridge/plan:
     post:
       tags: [bridge]
@@ -493,6 +513,8 @@ paths:
         '200': {description: Review plan; no external device or network access.}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/mind/compile:
     post:
       tags: [mind]
@@ -513,6 +535,8 @@ paths:
         '200': {description: Plan generated, not executed.}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/mind/ide:
     get:
       tags: [mind]
