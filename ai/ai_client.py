@@ -689,6 +689,69 @@ def get_image_provider_status() -> dict[str, Any]:
     }
 
 
+
+def validate_gemini_models() -> dict[str, Any]:
+    """Query Google's ListModels endpoint and select the first configured valid model."""
+    global GEMINI_MODEL, GEMINI_FALLBACK_MODEL
+    result: dict[str, Any] = {
+        "configured": bool(GEMINI_ENABLED and GEMINI_API_KEY and GEMINI_API_BASE_URL),
+        "reachable": False,
+        "model_valid": False,
+        "selected_model": None,
+        "available_models": [],
+    }
+    if not result["configured"]:
+        return result
+    try:
+        response = requests.get(
+            GEMINI_API_BASE_URL.rstrip("/"),
+            headers=get_gemini_headers(),
+            timeout=(GEMINI_CONNECT_TIMEOUT, min(GEMINI_READ_TIMEOUT, 10)),
+        )
+        if not response.ok:
+            print(f"GEMINI ListModels failed | status={response.status_code}")
+            result["http_status"] = response.status_code
+            return result
+        payload = response.json()
+        models = payload.get("models", []) if isinstance(payload, dict) else []
+        valid = set()
+        for item in models:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).removeprefix("models/")
+            methods = item.get("supportedGenerationMethods", [])
+            if name and (not methods or "generateContent" in methods):
+                valid.add(name)
+        result["reachable"] = True
+        result["available_models"] = sorted(valid)
+        candidates = []
+        for model in (GEMINI_MODEL, GEMINI_FALLBACK_MODEL):
+            clean = str(model or "").strip().removeprefix("models/")
+            if clean and clean not in candidates:
+                candidates.append(clean)
+        selected = next((model for model in candidates if model in valid), None)
+        if selected:
+            GEMINI_MODEL = selected
+            GEMINI_FALLBACK_MODEL = next(
+                (model for model in candidates if model in valid and model != selected),
+                GEMINI_FALLBACK_MODEL,
+            )
+            result["model_valid"] = True
+            result["selected_model"] = selected
+        else:
+            print("GEMINI ListModels reachable, but neither configured model is available")
+        print(
+            "GEMINI ListModels | reachable=true | "
+            f"configured_models_valid={result['model_valid']} | "
+            f"selected_model={result['selected_model'] or 'none'}"
+        )
+        return result
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        print(f"GEMINI ListModels unavailable | error_type={type(exc).__name__}")
+        result["error_code"] = "gemini_list_models_unavailable"
+        return result
+
+
 def get_text_provider_status() -> dict[str, Any]:
     """
     Return safe text-provider diagnostics.
