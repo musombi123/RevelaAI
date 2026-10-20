@@ -45,6 +45,7 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 	image := "golang:1.23-alpine"
 	script := goToolInvocationScript
 	if record.Manifest.Language == "python" {
+		image = "python:3.12-alpine"
 		entrypoint := record.Manifest.Entrypoint
 		script = "exec python /candidate/" + shellQuote(entrypoint)
 	}
@@ -63,9 +64,6 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 		"--env", "HOME=/tmp", "--env", "TMPDIR=/tmp",
 		"--env", "GOTOOLCHAIN=local",
 		image, "sh", "-lc", script,
-	}
-	if record.Manifest.Language == "python" {
-		args[len(args)-5] = "python:3.12-alpine"
 	}
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=/tmp", "TMPDIR=/tmp"}
