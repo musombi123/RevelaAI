@@ -22,6 +22,7 @@ from fastapi_routes.automation_fabric import router as automation_fabric_router
 from fastapi_routes.chat import router as chat_router
 from fastapi_routes.core_mesh import router as core_mesh_router
 from fastapi_routes.explain import router as explain_router
+from fastapi_routes.evolve_migrate import router as evolve_migrate_router
 from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
@@ -219,6 +220,7 @@ app.include_router(chat_router)
 app.include_router(research_router)
 app.include_router(users_router)
 app.include_router(explain_router)
+app.include_router(evolve_migrate_router)
 app.include_router(fastapi_hub_router)
 app.include_router(living_brain_router)
 app.include_router(vision_router)
