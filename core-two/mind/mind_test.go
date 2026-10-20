@@ -91,7 +91,7 @@ func TestRepositoryScanFindsHubsOpenAPIChangelogAndAudit(t *testing.T) {
 func TestUnknownProductionMetricsRemainNull(t *testing.T) {
  root,s:=newTestRepository(t);if _,err:=s.Scan(context.Background());err!=nil{t.Fatal(err)}
  raw,err:=os.ReadFile(filepath.Join(root,"core-two","research_evidence.json"));if err!=nil{t.Fatal(err)};var obj map[string]any;if err=json.Unmarshal(raw,&obj);err!=nil{t.Fatal(err)}
- if obj["production_invention_count"]!=float64(0)||obj["average_time_to_invent_ms"]!=nil||obj["average_bom_cost_kes"]!=nil{t.Fatalf("unknown metrics must remain null: %+v",obj)}
+ if obj["production_invention_count"]!=nil||obj["average_time_to_invent_ms"]!=nil||obj["average_bom_cost_kes"]!=nil{t.Fatalf("unknown metrics must remain null: %+v",obj)}
 }
 func TestMindMutationAuthFailsClosed(t *testing.T) {
  _,s:=newTestRepository(t);t.Setenv("MIND_ADMIN_TOKEN","")
