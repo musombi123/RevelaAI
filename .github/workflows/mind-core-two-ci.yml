@@ -47,7 +47,7 @@ jobs:
         run: go vet ./...
 
   openapi-lint:
-    name: OpenAPI lint
+    name: OpenAPI contract lint (Core-Two, updated provenance schema)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
