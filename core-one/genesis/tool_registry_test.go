@@ -59,9 +59,21 @@ func writeRegistryCandidate(t *testing.T, text string) string {
 	return dir
 }
 
+func writeTestCandidateManifest(t *testing.T, candidate string, manifest ToolManifest) {
+	t.Helper()
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(candidate, "tool_manifest.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func publishTestArtifact(t *testing.T, coreRoot string, manifest ToolManifest, source string, passing bool) SignedToolArtifact {
 	t.Helper()
 	candidate := writeRegistryCandidate(t, source)
+	writeTestCandidateManifest(t, candidate, manifest)
 	record, err := PublishSignedToolArtifact(
 		coreRoot,
 		candidate,
@@ -79,6 +91,7 @@ func TestFailedSandboxEvidenceCannotBeSigned(t *testing.T) {
 	coreRoot := registryTestRoot(t)
 	manifest := validManifestForTest()
 	candidate := writeRegistryCandidate(t, "package candidate\n")
+	writeTestCandidateManifest(t, candidate, manifest)
 	_, err := PublishSignedToolArtifact(
 		coreRoot, candidate, manifest,
 		registryEvidenceForTest(t, manifest, false, candidate),
