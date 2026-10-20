@@ -1,8 +1,10 @@
 package genesis
 
 import (
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -70,9 +72,7 @@ func PublishSignedToolArtifact(coreRoot, candidateDir string, manifest ToolManif
 	if err != nil {
 		return SignedToolArtifact{}, err
 	}
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write(signatureInput)
-	record.Signature = "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
+	record.Signature = "ed25519:" + hex.EncodeToString(ed25519.Sign(key, signatureInput))
 
 	root, err := registryRoot(coreRoot)
 	if err != nil {
@@ -458,7 +458,7 @@ func loadSignedToolArtifact(coreRoot, name, version, artifactHash string) (Signe
 	if err != nil {
 		return SignedToolArtifact{}, err
 	}
-	signature := strings.TrimPrefix(record.Signature, "hmac-sha256:")
+	signature := strings.TrimPrefix(record.Signature, "ed25519:")
 	if signature == record.Signature {
 		return SignedToolArtifact{}, errors.New("signed artifact signature algorithm is invalid")
 	}
@@ -470,9 +470,8 @@ func loadSignedToolArtifact(coreRoot, name, version, artifactHash string) (Signe
 	if err != nil {
 		return SignedToolArtifact{}, err
 	}
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write(payload)
-	if !hmac.Equal(expected, mac.Sum(nil)) {
+	publicKey := key.Public().(ed25519.PublicKey)
+	if !ed25519.Verify(publicKey, payload, expected) {
 		return SignedToolArtifact{}, errors.New("signed artifact signature verification failed")
 	}
 	artifactDir := filepath.Join(dir, "artifact")
@@ -483,12 +482,27 @@ func loadSignedToolArtifact(coreRoot, name, version, artifactHash string) (Signe
 	return record, nil
 }
 
-func registrySigningKey() ([]byte, error) {
-	key := strings.TrimSpace(os.Getenv("GENESIS_SIGNING_KEY"))
-	if len(key) < 32 {
-		return nil, errors.New("GENESIS_SIGNING_KEY must contain at least 32 characters; signing is disabled")
+func registrySigningKey() (ed25519.PrivateKey, error) {
+	configured := strings.TrimSpace(os.Getenv("GENESIS_SIGNING_KEY"))
+	if configured == "" {
+		return nil, errors.New("GENESIS_SIGNING_KEY is not configured; signing is disabled")
 	}
-	return []byte(key), nil
+	var decoded []byte
+	var err error
+	for _, encoding := range []*base64.Encoding{base64.RawStdEncoding, base64.StdEncoding, base64.RawURLEncoding, base64.URLEncoding} {
+		decoded, err = encoding.DecodeString(configured)
+		if err == nil && (len(decoded) == ed25519.SeedSize || len(decoded) == ed25519.PrivateKeySize) {
+			break
+		}
+		decoded = nil
+	}
+	if len(decoded) == ed25519.SeedSize {
+		return ed25519.NewKeyFromSeed(decoded), nil
+	}
+	if len(decoded) == ed25519.PrivateKeySize {
+		return ed25519.PrivateKey(decoded), nil
+	}
+	return nil, errors.New("GENESIS_SIGNING_KEY must be a base64-encoded Ed25519 32-byte seed or 64-byte private key")
 }
 
 func registryRoot(coreRoot string) (string, error) {
