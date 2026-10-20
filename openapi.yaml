@@ -664,6 +664,165 @@ paths:
         '403': {description: Vault or founder signature validation failed}
         '503': {description: Administration is not configured}
 
+
+  /api/usect/evolve/health:
+    get:
+      operationId: getUsectEvolveHealth
+      summary: Check bounded evidence-driven evolution service
+      security: []
+      responses:
+        '200': {description: Evolver status}
+  /api/usect/evolve/proposals:
+    post:
+      operationId: createUsectEvolutionProposal
+      summary: Create an evidence-based evolution proposal
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Proposal created for review}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/evolve/proposals/{proposal_id}/children:
+    post:
+      operationId: recursivelyImproveEvolutionProposal
+      summary: Create a bounded child proposal
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Child proposal created}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/evolve/proposals/{proposal_id}/evaluate:
+    post:
+      operationId: evaluateUsectEvolutionProposal
+      summary: Evaluate a candidate against measured evidence and review gates
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string}
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '200': {description: Evidence-based evaluation}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/devices:
+    get:
+      operationId: listUsectEnrolledDevices
+      summary: List explicitly enrolled devices
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      responses:
+        '200': {description: Enrolled device inventory}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/devices/enroll:
+    post:
+      operationId: enrollUsectMigrationDevice
+      summary: Enroll a device and verified resource inventory
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Device enrolled}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/plans:
+    post:
+      operationId: createUsectMigrationPlan
+      summary: Plan an authorized digest-bound migration
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Migration plan; no remote execution performed}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/robot-blueprints:
+    post:
+      operationId: createUsectRobotBlueprint
+      summary: Produce a planning-only robot blueprint from verified inventory
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Blueprint; physical actuation remains disabled}
+        '402': {description: Enterprise entitlement required}
+
 components:
   securitySchemes:
     RevelaCodeBearer:
