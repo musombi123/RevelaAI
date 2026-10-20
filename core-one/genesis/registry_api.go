@@ -103,6 +103,10 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 			writeAPIError(w, http.StatusUnprocessableEntity, "tool_manifest_invalid", "The invention tool manifest failed validation.")
 			return
 		}
+		if err := screenCandidateForPublication(s.Engine, candidateDir, manifest); err != nil {
+			writeAPIError(w, http.StatusUnprocessableEntity, "guardian_blocked_candidate", "Guardian refused the candidate before sandboxing; no artifact was signed.")
+			return
+		}
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(MaxToolTimeoutMillis)*time.Millisecond)
 		defer cancel()
 		evidence, err := RunCandidateSandbox(ctx, candidateDir, filepath.Join(s.Engine.CoreRoot, "state", "sandbox-evidence", name, manifest.Version), manifest)
@@ -298,6 +302,40 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 	writeAPIError(w, http.StatusNotFound, "not_found", "Registry route not found.")
 }
 
+
+func screenCandidateForPublication(engine *Engine, candidateDir string, manifest ToolManifest) error {
+	if engine == nil {
+		return errors.New("Genesis engine is unavailable")
+	}
+	// Re-screen at publish time because an invention directory can be edited
+	// after Forge initially reviewed it. Never trust old Guardian approval as
+	// approval for modified source files.
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		return errors.New("candidate manifest could not be encoded")
+	}
+	if decision := engine.Guardian.CheckAtStage("tool_manifest_publish", string(manifestRaw)); !decision.Allowed {
+		_ = engine.Guardian.LogBlocked("tool_manifest_publish", string(manifestRaw), decision.Reason)
+		return errors.New("Guardian blocked the tool manifest at publication")
+	}
+	seen := make(map[string]struct{})
+	for _, relative := range []string{manifest.Entrypoint, "code.go", "library.go", "test.go"} {
+		if _, ok := seen[relative]; ok {
+			continue
+		}
+		seen[relative] = struct{}{}
+		path := filepath.Join(candidateDir, filepath.FromSlash(relative))
+		raw, err := readRegularFileLimited(path, maxGuardianInputBytes)
+		if err != nil {
+			return errors.New("candidate source is missing, unsafe, or too large for Guardian review")
+		}
+		if decision := engine.Guardian.CheckAtStage("tool_source_publish", string(raw)); !decision.Allowed {
+			_ = engine.Guardian.LogBlocked("tool_source_publish", string(raw), decision.Reason)
+			return errors.New("Guardian blocked candidate source at publication")
+		}
+	}
+	return nil
+}
 
 func validGeneratedToolArguments(arguments map[string]any) bool {
 	if len(arguments) == 0 || len(arguments) > 3 {
