@@ -1528,4 +1528,3 @@ func formatForgeBulletList(values []string, emptyText string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
-
