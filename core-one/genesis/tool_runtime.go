@@ -84,10 +84,21 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 		}
 		return nil, errors.New("sandboxed tool execution failed")
 	}
-	if !json.Valid(result) {
-		return nil, errors.New("sandboxed tool returned invalid JSON")
+	if err := validateToolInvocationOutput(result); err != nil {
+		return nil, err
 	}
 	return append([]byte(nil), result...), nil
+}
+
+func validateToolInvocationOutput(result []byte) error {
+	if len(result) == 0 || len(result) > maxToolInvocationBytes || !json.Valid(result) {
+		return errors.New("sandboxed tool returned invalid or oversized JSON")
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(result, &object); err != nil || object == nil {
+		return errors.New("sandboxed tool output must be a JSON object")
+	}
+	return nil
 }
 
 const goToolInvocationScript = "set -eu; mkdir -p /tmp/work/toolimpl /tmp/gocache; cp -R /candidate/. /tmp/work/toolimpl/; rm -f /tmp/work/toolimpl/test.go /tmp/work/toolimpl/*_test.go; chmod -R u+rwX /tmp/work; printf 'module genesiscandidate\\n\\ngo 1.23\\n' > /tmp/work/go.mod; cat > /tmp/work/main.go <<'GENESIS_MAIN'\npackage main\nimport (\"encoding/json\"; \"os\"; toolimpl \"genesiscandidate/toolimpl\")\nfunc main() { var in struct { Action string; Inputs map[string]string; Consent bool }; if json.NewDecoder(os.Stdin).Decode(&in) != nil { os.Exit(2) }; out, err := (toolimpl.Tool{}).Run(toolimpl.Request{Action: in.Action, Inputs: in.Inputs, Consent: in.Consent}); if err != nil { _ = json.NewEncoder(os.Stdout).Encode(map[string]string{\"status\":\"error\",\"error_class\":\"tool_rejected\"}); os.Exit(3) }; _ = json.NewEncoder(os.Stdout).Encode(map[string]any{\"status\": out.Status, \"tool\": out.Tool, \"summary\": out.Summary, \"created_at\": out.CreatedAt, \"evidence\": out.Evidence}) }\nGENESIS_MAIN\ncd /tmp/work && GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOCACHE=/tmp/gocache go run ."
