@@ -593,4 +593,3 @@ def test_legacy_route_module_names_are_native_fastapi_router_aliases() -> None:
     for legacy_name, native_router in aliases:
         assert isinstance(legacy_name, APIRouter)
         assert legacy_name is native_router
-
