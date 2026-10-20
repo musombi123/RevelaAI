@@ -557,6 +557,8 @@ def build_grounded_system_prompt(
     core_mesh_lines = [
         "CORE MESH ROUTING (advisory metadata; not proof an operation ran):",
         "- Selected core: " + str(core_mesh.get("selected_core") or "orchestrator")[:40],
+        "- Target core: " + str(core_mesh.get("target_core") or "none_declared")[:40],
+        "- Operation kind: " + str(core_mesh.get("operation_kind") or "advisory_only")[:64],
         "- Routing reason: " + str(core_mesh.get("route_reason") or "normal orchestrator routing")[:280],
         "- Mesh snapshot: " + str(core_mesh.get("mesh_status") or "not_probed")[:40],
     ]
@@ -577,6 +579,9 @@ def build_grounded_system_prompt(
         )
     core_mesh_lines.extend([
         "- All invention/evolution actions require the approved operator API.",
+        "- Infinite Mind (USECT-TWO) is the proposal-only improvement layer for Core-One (Genesis).",
+        "- For Core-One upgrade requests, target_core=core-one: Mind may assess evidence and stage a review proposal, but must not edit Core-One, activate candidates, auto-promote, rollback, or merge.",
+        "- The Mind Foundry bridge accepts bounded candidate metadata, hashes, and evidence references only; never forward candidate source code or secrets.",
         "- Never claim an invention, mutation, repair, deployment, or merge occurred from routing metadata alone.",
         "- Guardian checks remain authoritative; generated proposals require human review.",
     ])
