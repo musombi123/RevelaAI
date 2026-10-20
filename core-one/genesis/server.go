@@ -330,6 +330,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case path == "/v1/genesis/key":
 		methodNotAllowed(w, "GET, POST")
 
+	case path == "/v1/genesis/registry/tools" || strings.HasPrefix(path, "/v1/genesis/registry/tools/"):
+		s.serveRegistry(w, r, path)
+
 	case path == "/v1/rvx/compile" && r.Method == http.MethodPost:
 		if !s.allowMutation(w, r) {
 			return
