@@ -59,12 +59,11 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
             package = match.group(1).replace("_", "-").lower()
             assert package not in forbidden, package
 
-    # Scan production Python source, not just the two entrypoints: a dormant
-    # Flask import in a shared service could otherwise break FastAPI at startup.
-    # The old sector-specific blueprint sources under routes/ are deliberately
-    # outside this active runtime until their manual endpoint-by-endpoint port.
+    # Scan the complete production source tree. The historical routes/ module
+    # names are now thin APIRouter aliases, so they must not retain Flask code.
+    # Exclude tests, VCS data, and virtual environments only.
     repository_root = Path(".")
-    intentionally_dormant = {"routes", "tests", ".git", ".venv", "venv", "__pycache__"}
+    intentionally_dormant = {"tests", ".git", ".venv", "venv", "__pycache__"}
     forbidden_import_roots = {"flask", "flask_cors", "werkzeug", "a2wsgi"}
     scanned = set()
     for path in repository_root.rglob("*.py"):
