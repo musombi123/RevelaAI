@@ -40,7 +40,7 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
                 module = (node.module or "").lower()
                 assert module != "flask" and not module.startswith("flask.")
 
-    forbidden = {"flask", "flask-cors", "a2wsgi"}
+    forbidden = {"flask", "flask-cors", "a2wsgi", "werkzeug"}
     for line in requirements.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
