@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from services.core_config import core_base_url, core_admin_token
+
 MAX_REQUEST_BYTES = 1 * 1024 * 1024
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 5
@@ -69,7 +71,12 @@ def _timeout_seconds() -> int:
 
 
 def _base_url() -> str:
-    raw = os.getenv("USECT_ZERO_URL", "http://127.0.0.1:8780").strip()
+    raw = core_base_url("zero").strip()
+
+    if not raw:
+        raise USECTZeroConfigurationError(
+            "USECT_ZERO_URL or USECT_ZERO_BASE_URL is required in production."
+        )
 
     # Render Blueprints expose a service's internal host and port through
     # fromService.property=hostport (for example, "usect-zero-core:10000").
@@ -164,7 +171,7 @@ def request_core(
         headers["X-API-Key"] = supplied_key
 
     if admin:
-        admin_token = os.getenv("USECT_ZERO_ADMIN_TOKEN", "").strip()
+        admin_token = core_admin_token("zero")
         if not admin_token:
             raise USECTZeroAdminTokenMissing(
                 "The backend's USECT_ZERO_ADMIN_TOKEN is not configured."
