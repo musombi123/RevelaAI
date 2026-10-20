@@ -33,7 +33,7 @@ jobs:
           python-version: "3.11"
           cache: pip
       - name: Install focused test dependencies
-        run: python -m pip install "pydantic>=2.7,<3" "fastapi>=0.115,<1" "pytest>=8,<9"
+        run: python -m pip install "pydantic>=2.7,<3" "fastapi>=0.115,<1" "pytest>=8,<9" "cryptography>=42,<47"
       - name: Compile new organs and router
         run: python -m compileall -q core_evolve core_migrate fastapi_routes/evolve_migrate.py
       - name: Run USECT-EVOLVE and USECT-MIGRATE tests
