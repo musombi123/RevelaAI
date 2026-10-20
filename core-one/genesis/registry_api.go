@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
 	"path/filepath"
 	"strings"
 	"time"
@@ -52,7 +53,7 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 				"name": record.Name, "version": record.Version, "artifact_hash": record.ArtifactHash,
 				"risk_tier": record.Manifest.RiskTier, "manifest": record.Manifest,
 				"active": pointer.Active && pointer.ArtifactHash == record.ArtifactHash,
-				"signature": record.Signature, "sandbox_evidence": record.SandboxEvidence,
+				"signature": record.Signature, "sandbox_evidence": map[string]any{"passed": record.SandboxEvidence.Passed, "isolation_level": record.SandboxEvidence.IsolationLevel, "finished_at": record.SandboxEvidence.FinishedAt, "error_class": record.SandboxEvidence.ErrorClass},
 				"created_at": record.CreatedAt,
 			})
 		}
@@ -279,4 +280,31 @@ func validGeneratedToolArguments(arguments map[string]any) bool {
 		}
 	}
 	return true
+}
+
+
+func (s *Server) serveToolTelemetry(w http.ResponseWriter, r *http.Request) {
+	if s == nil || s.Engine == nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "genesis_unavailable", "Genesis engine is not initialized.")
+		return
+	}
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, "GET")
+		return
+	}
+	limit := 100
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 500 {
+			writeAPIError(w, http.StatusBadRequest, "invalid_limit", "limit must be between 1 and 500.")
+			return
+		}
+		limit = parsed
+	}
+	events, err := listToolCallTelemetry(s.Engine.CoreRoot, limit)
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "telemetry_unavailable", "Genesis tool telemetry is unavailable.")
+		return
+	}
+	writeAPIJSON(w, http.StatusOK, map[string]any{"events": events, "count": len(events), "content_included": false})
 }
