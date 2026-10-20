@@ -8,8 +8,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
-      - key: GROQ_API_KEY
-        sync: false
       # Authoritative platform-admin verifier used by routes/meta_engineer_routes.py.
       # Keep this server-side; bearer JWTs are never sent to the Go core.
       - key: REVELACODE_BACKEND_URL
@@ -83,6 +81,16 @@ services:
     envVars:
       - key: GENESIS_ADMIN_TOKEN
         generateValue: true
+      - key: GENESIS_SIGNING_KEY
+        sync: false
+      - key: GENESIS_MODEL_BASE_URL
+        sync: false
+      - key: GENESIS_MODEL_NAME
+        sync: false
+      - key: GENESIS_MODEL_API_KEY
+        sync: false
+      - key: GENESIS_OFFLINE
+        value: "true"
 
   # Core-Two: standalone Infinite Mind service. Its sibling-module imports
   # require the full repository checkout to remain the build/runtime root.
