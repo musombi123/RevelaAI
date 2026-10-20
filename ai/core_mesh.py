@@ -18,6 +18,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from services.core_config import core_base_url, core_admin_token
+
 
 CACHE_TTL_SECONDS = 12.0
 MAX_RESPONSE_BYTES = 1_000_000
@@ -36,25 +38,13 @@ class CoreMeshError(RuntimeError):
 
 
 def _base_url(name: str, default: str) -> str:
-    raw = str(os.getenv(name, default) or "").strip()
-    if raw and "://" not in raw:
-        # Render's fromService.property=hostport value is "service-name:port".
-        # Convert only a plain host:port value; reject URL-like fragments.
-        candidate = urlsplit("//" + raw)
-        try:
-            port = candidate.port
-        except ValueError:
-            port = None
-        if (
-            candidate.hostname
-            and port is not None
-            and candidate.username is None
-            and candidate.password is None
-            and not candidate.path
-            and not candidate.query
-            and not candidate.fragment
-        ):
-            raw = "http://" + raw
+    core = {
+        "USECT_ZERO_BASE_URL": "zero", "USECT_ZERO_URL": "zero",
+        "GENESIS_BASE_URL": "genesis", "MIND_BASE_URL": "mind",
+    }.get(name)
+    if not core:
+        return str(os.getenv(name, default) or "").strip().rstrip("/")
+    raw = core_base_url(core, default=default)
     return raw.rstrip("/")
 
 
@@ -161,11 +151,11 @@ def _safe_fetch(base: str, path: str, *, headers: dict[str, str] | None = None) 
 def _upstream_headers(*, include_genesis: bool = False, mutation: bool = False) -> dict[str, str]:
     headers: dict[str, str] = {}
     if include_genesis:
-        token = str(os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN") or "").strip()
+        token = core_admin_token("genesis")
         if token:
             headers["X-Genesis-Token"] = token
     if mutation:
-        token = str(os.getenv("MIND_ADMIN_TOKEN") or "").strip()
+        token = core_admin_token("mind")
         if not token:
             raise CoreMeshError("MIND_ADMIN_TOKEN is not configured on the RevelaAI service.", status_code=503, code="mind_admin_token_not_configured")
         headers["X-Mind-Token"] = token
