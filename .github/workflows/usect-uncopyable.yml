@@ -4,7 +4,15 @@ on:
   pull_request:
     paths:
       - "core_uncopyable/**"
+      - "rvx/crypto.py"
+      - "core_billing/keys.py"
+      - "openapi.yaml"
+      - ".gitignore"
       - "core_billing/licensing.py"
+      - "rvx/crypto.py"
+      - "core_billing/keys.py"
+      - "openapi.yaml"
+      - ".gitignore"
       - "mesh/rvx_mesh.py"
       - "revela_platform/fastapi_app.py"
       - "fastapi_routes/uncopyable.py"
