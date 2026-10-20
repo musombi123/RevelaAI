@@ -3,7 +3,9 @@
 ## Runtime contract
 
 RevelaAI now starts from a native FastAPI application. `app.py` exports the
-same FastAPI instance as `asgi.py`; Render starts it with Uvicorn.
+same FastAPI instance as `asgi.py`; Render starts it with Uvicorn. The separate
+revenue/platform gateway at `revela_platform/fastapi_app.py` mounts `asgi:app`
+directly as a nested ASGI application.
 
 - No Flask application is constructed by the active runtime.
 - No WSGI compatibility application is mounted.
@@ -70,9 +72,9 @@ online. This avoids quietly reintroducing Flask as a fallback.
 
 ## Dependency and security notes
 
-`requirements.txt` excludes Flask, `flask-cors`, and `a2wsgi`. Werkzeug
-remains an explicit dependency because existing security/service helpers use
-its HTTP exception type; it does not start a Flask application.
+`requirements.txt` excludes Flask, `flask-cors`, `a2wsgi`, and Werkzeug. The
+Sci-Core research policy uses a framework-neutral exception instead of an HTTP
+exception from a web framework.
 
 JWT identity checks remain fail-closed. Privileged endpoints verify current
 authority through the existing server-side verification boundary; browser role
@@ -90,12 +92,13 @@ uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
 
 One worker remains intentional while conversation/session state is process-local.
 The migration workflow compiles `app.py` and `asgi.py`, asserts that Flask/WSGI
-runtime dependencies and the compatibility mount are absent, and runs the
-FastAPI route regression tests.
+runtime dependencies and mounts are absent from both gateways, and runs the
+FastAPI route regression tests. The active FastAPI import graph is tested in an
+environment that installs no Flask package.
 
-The gateway suite must pass on the latest branch head before PR #70 is marked
-ready. The separate Go Core-Zero/Core-Two CI suites currently have independent
-failures unrelated to this FastAPI gateway change.
+PR #72 remains a draft while sector-specific source is reviewed. The separate
+Go Core-Zero/Core-Two CI suites have independent compile/test failures unrelated
+to the Python gateway migration.
 
 ## Remaining work
 
