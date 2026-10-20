@@ -422,10 +422,61 @@ def list_genesis_proposals() -> dict:
 
 
 def get_genesis_proposal(name: str) -> dict:
+    """Return a sanitized proposal summary, never raw saved research or source material."""
     name = str(name or "").strip()
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", name):
         raise CoreMeshError("Genesis tool name is invalid.", status_code=400, code="invalid_tool_name")
-    return _genesis_request("/v1/genesis/tools/" + quote(name, safe=""))
+    payload = _genesis_request("/v1/genesis/tools/" + quote(name, safe=""))
+    return _public_genesis_detail(payload)
+
+
+def _public_genesis_detail(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise CoreMeshError("Genesis returned an invalid proposal response.", status_code=502, code="genesis_invalid_payload")
+    result = {
+        key: payload[key]
+        for key in ("name", "status", "hardware_guide_url")
+        if isinstance(payload.get(key), (str, int, float, bool))
+    }
+    raw_proposal = payload.get("proposal")
+    if not isinstance(raw_proposal, dict):
+        # Keep only the minimal safe metadata if Genesis returns a legacy shape.
+        return result
+    safe_proposal: dict[str, object] = {}
+    for key in ("invention_id", "created_at", "status", "schema_version"):
+        value = raw_proposal.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            safe_proposal[key] = value
+    raw_spec = raw_proposal.get("specification")
+    if isinstance(raw_spec, dict):
+        spec_keys = (
+            "name", "title", "purpose", "category", "industry",
+            "capabilities", "inputs", "outputs", "safeguards",
+            "needs_hardware_guide", "model_assisted", "model_note",
+        )
+        safe_spec: dict[str, object] = {}
+        for key in spec_keys:
+            value = raw_spec.get(key)
+            if isinstance(value, (str, int, float, bool)):
+                safe_spec[key] = value
+            elif isinstance(value, list) and len(value) <= 32 and all(isinstance(item, str) for item in value):
+                safe_spec[key] = value[:32]
+        safe_proposal["specification"] = safe_spec
+    raw_research = raw_proposal.get("research")
+    if isinstance(raw_research, dict):
+        sources = raw_research.get("sources")
+        findings = raw_research.get("findings")
+        safe_proposal["research_summary"] = {
+            "mode": str(raw_research.get("mode") or "")[:80],
+            "collected_at": str(raw_research.get("collected_at") or "")[:80],
+            "source_count": len(sources) if isinstance(sources, list) else 0,
+            "finding_count": len(findings) if isinstance(findings, list) else 0,
+        }
+    result["proposal"] = safe_proposal
+    result["human_approval_required"] = True
+    result["automatic_execution"] = False
+    result["automatic_merge"] = False
+    return result
 
 
 def get_genesis_hardware_guide(name: str, country: str = "KE", language: str = "") -> dict:
