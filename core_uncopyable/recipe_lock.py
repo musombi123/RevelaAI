@@ -66,3 +66,10 @@ def recipe_lock_status() -> dict[str, Any]:
         return {"locked": True, **verify_recipe()}
     except RecipeLockError as exc:
         return {"locked": False, "reason": str(exc)}
+
+
+def guard_core_startup() -> None:
+    """Apply the recipe gate from Python core packages in strict deployments."""
+    enabled = os.getenv("REVELA_UNCOPYABLE_ENFORCE", "").strip().lower() in {"1", "true", "yes", "on"}
+    if enabled:
+        verify_recipe(strict_path=True)
