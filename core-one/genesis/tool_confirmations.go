@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-const toolActionConfirmationTTL = 2 * time.Minute
+const (
+	toolActionConfirmationTTL = 2 * time.Minute
+	maxPendingToolConfirmations = 4096
+)
 
 type pendingToolActionConfirmation struct {
 	Name        string
@@ -65,6 +68,9 @@ func IssueToolActionConfirmation(coreRoot, name, version, artifactHash string, i
 		if !pending.ExpiresAt.After(now) {
 			delete(toolActionConfirmations, existing)
 		}
+	}
+	if len(toolActionConfirmations) >= maxPendingToolConfirmations {
+		return "", time.Time{}, errors.New("too many pending Tier 2 confirmations; retry after existing tokens expire")
 	}
 	toolActionConfirmations[token] = pendingToolActionConfirmation{
 		Name: name, Version: version, ArtifactHash: artifactHash,
