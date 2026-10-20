@@ -165,3 +165,38 @@ def test_confirmation_rejects_invalid_or_oversized_arguments_before_network(monk
         assert exc.code == "invalid_tool_arguments"
     else:
         raise AssertionError("oversized confirmation arguments must be rejected")
+
+
+def test_render_private_genesis_hostport_is_normalized(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "genesis-core-one:10000")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    base, headers = tool_registry._configuration()
+    assert base == "http://genesis-core-one:10000"
+    assert headers["X-Genesis-Token"] == "test-token"
+
+
+def test_public_plain_http_genesis_url_is_rejected(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "http://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    try:
+        tool_registry._configuration()
+    except tool_registry.GenesisToolRegistryError as exc:
+        assert exc.code == "genesis_url_tls_required"
+    else:
+        raise AssertionError("public Genesis URLs must use HTTPS")
+
+
+def test_genesis_url_rejects_credentials_and_paths(monkeypatch):
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    for value in (
+        "https://user:pass@genesis.example.com",
+        "https://genesis.example.com/api",
+        "genesis-core-one/not-a-hostport",
+        "genesis-core-one:badport",
+    ):
+        monkeypatch.setenv("GENESIS_BASE_URL", value)
+        try:
+            tool_registry._configuration()
+        except tool_registry.GenesisToolRegistryError:
+            continue
+        raise AssertionError(f"unsafe Genesis URL must be rejected: {value}")
