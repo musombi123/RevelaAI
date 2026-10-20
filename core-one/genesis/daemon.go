@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -431,7 +430,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 				item.Status = "blocked"
 				item.Error = "Guardian blocked the demand during queue processing; no invention was generated."
 
-				if err := finalizeQueueRecord(
+				if err := e.finalizeQueueRecord(
 					root,
 					claim,
 					entry.Name(),
