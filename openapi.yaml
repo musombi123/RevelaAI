@@ -529,16 +529,14 @@ paths:
       summary: Report revenue gateway readiness without secrets
       security: []
       responses:
-        '200':
-          description: Platform health and safe configuration indicators
+        '200': {description: Platform health and safe configuration indicators}
   /v1/meter/health:
     get:
       operationId: getMeterHealth
       summary: Check usage metering storage
       security: []
       responses:
-        '200':
-          description: Meter storage and privacy status
+        '200': {description: Meter storage and privacy status}
   /v1/marketplace/{tool_id}/rating:
     post:
       operationId: ratePublishedTool
@@ -629,6 +627,7 @@ paths:
     get:
       operationId: getUncopyableLockStatus
       summary: Get redacted status of the five security locks
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -638,10 +637,33 @@ paths:
         '200': {description: Redacted lock status}
         '401': {description: Invalid administrator token}
         '503': {description: Administration is not configured}
+  /v1/uncopyable/rotate-dialect:
+    post:
+      operationId: rotateUncopyableRvxDialect
+      summary: Immediately rotate the authenticated RVX dialect
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, minLength: 3, maxLength: 80, default: scheduled_rotation}
+      responses:
+        '200': {description: Dialect rotated; packets from the previous generation are rejected}
+        '401': {description: Invalid administrator token}
+        '503': {description: Recipe unavailable or rotation failed}
   /v1/uncopyable/restore:
     post:
       operationId: restoreDnaVault
       summary: Restore an encrypted DNA snapshot using fresh founder authorization
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -663,8 +685,6 @@ paths:
         '401': {description: Invalid administrator token}
         '403': {description: Vault or founder signature validation failed}
         '503': {description: Administration is not configured}
-
-
   /api/usect/evolve/health:
     get:
       operationId: getUsectEvolveHealth
@@ -676,6 +696,7 @@ paths:
     post:
       operationId: createUsectEvolutionProposal
       summary: Create an evidence-based evolution proposal
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -697,6 +718,7 @@ paths:
     post:
       operationId: recursivelyImproveEvolutionProposal
       summary: Create a bounded child proposal
+      security: []
       parameters:
         - name: proposal_id
           in: path
@@ -722,6 +744,7 @@ paths:
     post:
       operationId: evaluateUsectEvolutionProposal
       summary: Evaluate a candidate against measured evidence and review gates
+      security: []
       parameters:
         - name: proposal_id
           in: path
@@ -747,6 +770,7 @@ paths:
     get:
       operationId: listUsectEnrolledDevices
       summary: List explicitly enrolled devices
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -763,6 +787,7 @@ paths:
     post:
       operationId: enrollUsectMigrationDevice
       summary: Enroll a device and verified resource inventory
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -784,6 +809,7 @@ paths:
     post:
       operationId: createUsectMigrationPlan
       summary: Plan an authorized digest-bound migration
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -805,6 +831,7 @@ paths:
     post:
       operationId: createUsectRobotBlueprint
       summary: Produce a planning-only robot blueprint from verified inventory
+      security: []
       parameters:
         - name: X-Organ-Admin-Token
           in: header
@@ -822,29 +849,6 @@ paths:
       responses:
         '201': {description: Blueprint; physical actuation remains disabled}
         '402': {description: Enterprise entitlement required}
-
-
-  /v1/uncopyable/rotate-dialect:
-    post:
-      operationId: rotateUncopyableRvxDialect
-      summary: Immediately rotate the authenticated RVX dialect
-      parameters:
-        - name: X-Organ-Admin-Token
-          in: header
-          required: true
-          schema: {type: string, minLength: 32}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                reason: {type: string, minLength: 3, maxLength: 80, default: scheduled_rotation}
-      responses:
-        '200': {description: Dialect rotated; packets from the previous generation are rejected}
-        '401': {description: Invalid administrator token}
-        '503': {description: Recipe unavailable or rotation failed}
 
 components:
   securitySchemes:
