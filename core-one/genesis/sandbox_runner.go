@@ -341,20 +341,36 @@ func validateSandboxCandidate(root string, manifest ToolManifest) error {
 			}
 		}
 		hasTest := false
-		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		err = filepath.WalkDir(root, func(filePath string, fileEntry os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if entry.IsDir() {
+			if fileEntry.IsDir() {
 				return nil
 			}
-			if strings.HasSuffix(entry.Name(), "_test.go") || entry.Name() == "test.go" {
-				hasTest = true
+			if filepath.Ext(filePath) != ".go" {
+				return nil
 			}
-			return nil
+			relative, relErr := filepath.Rel(root, filePath)
+			if relErr != nil || filepath.Dir(relative) != "." {
+				return errors.New("Go source files must be in the artifact root to match the runtime ABI")
+			}
+			base := filepath.Base(relative)
+			switch {
+			case base == "code.go", base == "library.go":
+				return nil
+			case base == "test.go" || strings.HasSuffix(base, "_test.go"):
+				hasTest = true
+				return nil
+			default:
+				return errors.New("Go candidate contains a source file outside the supported runtime ABI")
+			}
 		})
-		if err != nil || !hasTest {
-			return errors.New("Go candidate must include a test.go or *_test.go test suite")
+		if err != nil {
+			return err
+		}
+		if !hasTest {
+			return errors.New("Go candidate must include a root-level test.go or *_test.go test suite")
 		}
 		return nil
 	}
