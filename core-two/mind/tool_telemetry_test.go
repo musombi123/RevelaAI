@@ -86,6 +86,13 @@ func TestTelemetryEndpointAcceptsAuthenticatedMetadataOnly(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("expected authenticated telemetry write to return 201, got %d: %s", response.Code, response.Body.String())
 	}
+	var responsePayload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &responsePayload); err != nil {
+		t.Fatal(err)
+	}
+	if responsePayload["synthetic_fixture"] != true || responsePayload["production_verified"] != false {
+		t.Fatalf("telemetry ingest response must preserve unverified fixture provenance: %#v", responsePayload)
+	}
 	raw, err := os.ReadFile(filepath.Join(service.CoreRoot, "metrics", "tool-telemetry.jsonl"))
 	if err != nil { t.Fatal(err) }
 	if strings.Contains(string(raw), "prompt") || strings.Contains(string(raw), "user_content") {
