@@ -263,7 +263,7 @@ func TestInvalidRequestInputsAreRejected(t *testing.T) {
 		scopes []string
 	}{
 		{
-			name: "short name", email: testEmail, reason: testReason,
+			name: "S", email: testEmail, reason: testReason,
 			scopes: []string{"scan:read"},
 		},
 		{
