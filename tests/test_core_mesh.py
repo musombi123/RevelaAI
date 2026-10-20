@@ -135,3 +135,74 @@ def test_genesis_unreachable_is_explicit_and_does_not_fallback_to_mind(monkeypat
         core_mesh.propose_genesis_invention("Create a safe document summarizer")
     assert error.value.code == "genesis_unavailable"
     assert error.value.status_code == 503
+
+
+def test_genesis_documented_read_routes_use_direct_core_one_url(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    calls = []
+
+    def fake_request(base, path, **kwargs):
+        calls.append((base, path, kwargs))
+        return {"status": "ok", "path": path}
+
+    monkeypatch.setattr(core_mesh, "_request_json", fake_request)
+    assert core_mesh.get_genesis_status()["status"] == "ok"
+    assert core_mesh.list_genesis_proposals()["path"] == "/v1/genesis/tools"
+    assert core_mesh.get_genesis_proposal("safe_tool")["path"] == "/v1/genesis/tools/safe_tool"
+    guide = core_mesh.get_genesis_hardware_guide("safe_tool", country="KE", language="sw")
+    assert guide["path"].startswith("/v1/genesis/tools/safe_tool/hardware_guide?")
+    assert "country=KE" in guide["path"] and "lang=sw" in guide["path"]
+    plan = core_mesh.get_genesis_capability_plan("safe_tool")
+    assert plan["path"] == "/v1/genesis/tools/safe_tool/capability_plan"
+    assert len(calls) == 5
+    assert all(call[0] == "https://genesis.example.com" for call in calls)
+    assert all(call[2]["headers"]["X-Genesis-Token"] == "test-token" for call in calls)
+
+
+def test_genesis_queue_key_and_rvx_use_expected_http_contracts(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    calls = []
+
+    def fake_request(base, path, **kwargs):
+        calls.append((path, kwargs))
+        return {"status": "queued"}
+
+    monkeypatch.setattr(core_mesh, "_request_json", fake_request)
+    queued = core_mesh.queue_genesis_demand(
+        "Create a safe school document index",
+        country="KE",
+        language="sw",
+    )
+    assert queued["status"] == "queued"
+    assert calls[0][0] == "/v1/genesis/queue"
+    assert calls[0][1]["method"] == "POST"
+    assert calls[0][1]["payload"]["demand"] == "Create a safe school document index"
+    assert core_mesh.get_genesis_key_request_info()["status"] == "queued"
+    key_request = core_mesh.request_genesis_provider_key("gateway-test", "Request a provider key for approved testing")
+    assert key_request["status"] == "queued"
+    assert calls[2][0] == "/v1/genesis/key"
+    assert calls[2][1]["payload"]["client_id"] == "gateway-test"
+    assert core_mesh.compile_genesis_rvx("module safe_tool").get("status") == "queued"
+    assert calls[3][0] == "/v1/rvx/compile"
+    assert calls[3][1]["method"] == "POST"
+    assert calls[3][1]["payload"]["source"] == "module safe_tool"
+
+
+def test_genesis_clients_fail_explicitly_when_gateway_credential_missing(monkeypatch):
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis.example.com")
+    monkeypatch.delenv("GENESIS_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("GENESIS_TOKEN", raising=False)
+    with pytest.raises(core_mesh.CoreMeshError) as error:
+        core_mesh.get_genesis_status()
+    assert error.value.code == "genesis_unavailable"
+    assert error.value.status_code == 503
+
+
+def test_genesis_stream_fails_with_explicit_unavailable_status_when_unconfigured(monkeypatch):
+    monkeypatch.delenv("GENESIS_BASE_URL", raising=False)
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+    with pytest.raises(core_mesh.CoreMeshError) as error:
+        next(core_mesh.iter_genesis_events(max_events=1))
+    assert error.value.code in {"core_service_not_configured", "genesis_unavailable"}
