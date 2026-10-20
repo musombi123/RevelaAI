@@ -59,7 +59,7 @@ def test_enterprise_entitlement_is_signed_and_plan_scoped(tmp_path, monkeypatch)
         user_id="user-1", plan_id="enterprise", country="KE",
         hardware_fingerprint=fingerprint, factory_ids=["factory-1"],
     )
-    assert require_entitlement(enterprise, "factory_build")["plan"] == "enterprise"
+    assert require_entitlement(enterprise, "factory_build", hardware_fingerprint=fingerprint)["plan"] == "enterprise"
     assert verify_license_token(enterprise, hardware_fingerprint=fingerprint)["sub"] == "user-1"
     with pytest.raises(Exception, match="Hardware fingerprint mismatch"):
         verify_license_token(enterprise, hardware_fingerprint="b" * 64)
