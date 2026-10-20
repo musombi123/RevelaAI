@@ -10,6 +10,227 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+const (
+	registryRootName = "tool-registry"
+	maxRegistryFiles = 10000
+	maxRegistryBytes int64 = 512 << 20
+)
+
+type SignedToolArtifact struct {
+	Name           string          `json:"name"`
+	Version        string          `json:"version"`
+	ArtifactHash   string          `json:"artifact_hash"`
+	Manifest       ToolManifest    `json:"manifest"`
+	Signature      string          `json:"signature"`
+	SandboxEvidence SandboxEvidence `json:"sandbox_evidence"`
+	CreatedAt      time.Time       `json:"created_at"`
+}
+
+type ActiveToolPointer struct {
+	Name             string    `json:"name"`
+	Version          string    `json:"version"`
+	ArtifactHash     string    `json:"artifact_hash"`
+	Active           bool      `json:"active"`
+	OwnerApprovalHash string   `json:"owner_approval_hash,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+func PublishSignedToolArtifact(coreRoot, candidateDir string, manifest ToolManifest, evidence SandboxEvidence) (SignedToolArtifact, error) {
+	if err := ValidateToolManifest(manifest); err != nil {
+		return SignedToolArtifact{}, err
+	}
+	manifestJSON, marshalErr := json.Marshal(manifest)
+	if marshalErr != nil {
+		return SignedToolArtifact{}, errors.New("tool manifest could not be encoded")
+	}
+	manifestDigest := sha256.Sum256(manifestJSON)
+	if !evidence.Passed || evidence.ToolName != manifest.Name ||
+		evidence.ManifestHash != hex.EncodeToString(manifestDigest[:]) {
+		return SignedToolArtifact{}, errors.New("matching passing sandbox evidence is required; artifact cannot be signed")
+	}
+	key, err := registrySigningKey()
+	if err != nil {
+		return SignedToolArtifact{}, err
+	}
+	hash, err := hashArtifactTree(candidateDir)
+	if err != nil {
+		return SignedToolArtifact{}, err
+	}
+	record := SignedToolArtifact{
+		Name: manifest.Name, Version: manifest.Version, ArtifactHash: hash,
+		Manifest: manifest, SandboxEvidence: evidence, CreatedAt: time.Now().UTC(),
+	}
+	signatureInput, err := signingPayload(record)
+	if err != nil {
+		return SignedToolArtifact{}, err
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(signatureInput)
+	record.Signature = "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
+
+	root, err := registryRoot(coreRoot)
+	if err != nil {
+		return SignedToolArtifact{}, err
+	}
+	versionDir := filepath.Join(root, "versions", manifest.Name, manifest.Version, hash)
+	if _, err := os.Lstat(versionDir); err == nil {
+		return SignedToolArtifact{}, errors.New("registry versions are append-only; this artifact version already exists")
+	} else if !os.IsNotExist(err) {
+		return SignedToolArtifact{}, errors.New("could not inspect registry version path")
+	}
+	if err := os.MkdirAll(filepath.Dir(versionDir), 0o700); err != nil {
+		return SignedToolArtifact{}, errors.New("could not create registry version directory")
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(versionDir), ".candidate-*")
+	if err != nil {
+		return SignedToolArtifact{}, errors.New("could not create registry staging directory")
+	}
+	defer os.RemoveAll(stage)
+	artifactDir := filepath.Join(stage, "artifact")
+	if err := copyArtifactTree(candidateDir, artifactDir); err != nil {
+		return SignedToolArtifact{}, err
+	}
+	copiedHash, err := hashArtifactTree(artifactDir)
+	if err != nil || copiedHash != hash {
+		return SignedToolArtifact{}, errors.New("artifact changed while it was being copied; refusing to sign")
+	}
+	recordRaw, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return SignedToolArtifact{}, errors.New("could not encode signed registry record")
+	}
+	if err := atomicWrite(filepath.Join(stage, "record.json"), recordRaw, 0o444); err != nil {
+		return SignedToolArtifact{}, errors.New("could not persist signed registry record")
+	}
+	if err := makeTreeReadOnly(stage); err != nil {
+		return SignedToolArtifact{}, errors.New("could not mark signed artifact immutable")
+	}
+	if err := os.Rename(stage, versionDir); err != nil {
+		return SignedToolArtifact{}, errors.New("could not publish immutable registry version")
+	}
+	// Tier 0 is automatically activated only after sandbox pass and signature.
+	if manifest.RiskTier == 0 {
+		if err := writeActivePointer(root, ActiveToolPointer{
+			Name: manifest.Name, Version: manifest.Version, ArtifactHash: hash,
+			Active: true, UpdatedAt: time.Now().UTC(),
+		}); err != nil {
+			return SignedToolArtifact{}, err
+		}
+	}
+	return record, nil
+}
+
+func ActivateSignedToolVersion(coreRoot, name, version, artifactHash, ownerApprovalHash string) (ActiveToolPointer, error) {
+	record, err := loadSignedToolArtifact(coreRoot, name, version, artifactHash)
+	if err != nil {
+		return ActiveToolPointer{}, err
+	}
+	if record.Manifest.RiskTier > 0 && !constantTimeStringEqual(ownerApprovalHash, artifactHash) {
+		return ActiveToolPointer{}, errors.New("owner approval must explicitly match the exact artifact hash")
+	}
+	root, err := registryRoot(coreRoot)
+	if err != nil {
+		return ActiveToolPointer{}, err
+	}
+	pointer := ActiveToolPointer{
+		Name: name, Version: version, ArtifactHash: artifactHash, Active: true,
+		UpdatedAt: time.Now().UTC(),
+	}
+	if record.Manifest.RiskTier > 0 {
+		pointer.OwnerApprovalHash = ownerApprovalHash
+	}
+	if err := writeActivePointer(root, pointer); err != nil {
+		return ActiveToolPointer{}, err
+	}
+	return pointer, nil
+}
+
+func DeactivateSignedTool(coreRoot, name string) (ActiveToolPointer, error) {
+	root, err := registryRoot(coreRoot)
+	if err != nil {
+		return ActiveToolPointer{}, err
+	}
+	pointer, err := readActivePointer(root, name)
+	if err != nil {
+		return ActiveToolPointer{}, err
+	}
+	pointer.Active = false
+	pointer.UpdatedAt = time.Now().UTC()
+	if err := writeActivePointer(root, pointer); err != nil {
+		return ActiveToolPointer{}, err
+	}
+	return pointer, nil
+}
+
+func RollbackSignedTool(coreRoot, name, version, artifactHash, ownerApprovalHash string) (ActiveToolPointer, error) {
+	return ActivateSignedToolVersion(coreRoot, name, version, artifactHash, ownerApprovalHash)
+}
+
+func ListSignedToolArtifacts(coreRoot string) ([]SignedToolArtifact, error) {
+	root, err := registryRoot(coreRoot)
+	if err != nil {
+		return nil, err
+	}
+	base := filepath.Join(root, "versions")
+	var records []SignedToolArtifact
+	err = filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if os.IsNotExist(walkErr) {
+				return nil
+			}
+			return walkErr
+		}
+		if entry.IsDir() || entry.Name() != "record.json" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		var record SignedToolArtifact
+		if json.Unmarshal(raw, &record) != nil {
+			return errors.New("registry contains an invalid record")
+		}
+		if _, verifyErr := loadSignedToolArtifact(coreRoot, record.Name, record.Version, record.ArtifactHash); verifyErr != nil {
+			return verifyErr
+		}
+		records = append(records, record)
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		return nil, errors.New("could not list signed tool registry")
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Name == records[j].Name {
+			if records[i].Version == records[j].Version {
+				return records[i].ArtifactHash < records[j].ArtifactHash
+			}
+			return records[i].Version < records[j].Version
+		}
+		return records[i].Name < records[j].Name
+	})
+	return records, nil
+}
+
+func loadSignedToolArtifact(coreRoot, name, version, artifactHash string) (SignedToolArtifact, error) {
+	if !validResourceName(name) || !regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}package genesis
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -207,7 +428,7 @@ func ListSignedToolArtifacts(coreRoot string) ([]SignedToolArtifact, error) {
 }
 
 func loadSignedToolArtifact(coreRoot, name, version, artifactHash string) (SignedToolArtifact, error) {
-	if !validResourceName(name) || strings.TrimSpace(version) == "" || len(version) > 64 ||
+	).MatchString(version) ||
 		len(artifactHash) != 64 || strings.Trim(artifactHash, "0123456789abcdef") != "" {
 		return SignedToolArtifact{}, errors.New("invalid signed artifact reference")
 	}
