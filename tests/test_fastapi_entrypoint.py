@@ -47,16 +47,57 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
                 module = (node.module or "").lower()
                 assert module != "flask" and not module.startswith("flask.")
 
+    import re
+
     forbidden = {"flask", "flask-cors", "a2wsgi", "werkzeug"}
     for line in requirements.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        import re
         match = re.match(r"^([a-zA-Z0-9_.-]+)", stripped)
         if match:
             package = match.group(1).replace("_", "-").lower()
             assert package not in forbidden, package
+
+    # Scan production Python source, not just the two entrypoints: a dormant
+    # Flask import in a shared service could otherwise break FastAPI at startup.
+    # The old sector-specific blueprint sources under routes/ are deliberately
+    # outside this active runtime until their manual endpoint-by-endpoint port.
+    scan_roots = [
+        Path("ai"),
+        Path("automation_fabric"),
+        Path("core"),
+        Path("db"),
+        Path("fastapi_routes"),
+        Path("features"),
+        Path("meta_engineer"),
+        Path("models"),
+        Path("revela_platform"),
+        Path("revelai"),
+        Path("schemas"),
+        Path("services"),
+        Path("utils"),
+        Path("voice"),
+    ]
+    forbidden_import_roots = {"flask", "flask_cors", "werkzeug", "a2wsgi"}
+    scanned = set()
+    for root in scan_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            if path.name.startswith("test_") or path in scanned:
+                continue
+            scanned.add(path)
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        assert alias.name.split(".")[0].lower() not in forbidden_import_roots, (path, alias.name)
+                elif isinstance(node, ast.ImportFrom):
+                    imported_module = (node.module or "").split(".")[0].lower()
+                    assert imported_module not in forbidden_import_roots, (path, node.module)
+    assert scanned, "No production Python source was scanned"
 
 
 
