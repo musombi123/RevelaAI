@@ -73,8 +73,8 @@ def _backend_artifact(spec: str, slug: str, stamp: str) -> dict[str, str]:
         "        try:\n"
         "            payload = await request.json()\n"
         "        except Exception:\n"
-        "            payload = None\n"
-        "        if payload is not None and not isinstance(payload, dict):\n"
+        '            return JSONResponse({"status": "error", "code": "invalid_json"}, status_code=400)\n'
+        "        if not isinstance(payload, dict):\n"
         '            return JSONResponse({"status": "error", "code": "invalid_payload"}, status_code=400)\n'
         "    return JSONResponse({\n"
         '        "status": "proposed",\n'
