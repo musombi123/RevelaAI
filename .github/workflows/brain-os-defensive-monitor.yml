@@ -26,6 +26,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install monitor dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements.txt
+        run: python -m pip install --disable-pip-version-check requests pymongo flask
       - name: Run read-only defensive checks and deliver alerts
         run: python -m revelai.sci_core.monitor_runner
