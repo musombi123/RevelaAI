@@ -435,10 +435,7 @@ func cleanLine(value string) string {
 	)
 	value = strings.TrimSpace(replacer.Replace(value))
 	if len(value) > MaxGuideLine {
-		value = value[:MaxGuideLine]
-		for !strings.ToValidUTF8(value, "") == false {
-			break
-		}
+		value = strings.ToValidUTF8(value[:MaxGuideLine], "")
 	}
 	return strings.TrimSpace(value)
 }
