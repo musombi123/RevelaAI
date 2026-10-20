@@ -188,5 +188,95 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 		return
 	}
 
+	if len(parts) == 4 && parts[3] == "invoke" && r.Method == http.MethodPost {
+		if !s.allowMutation(w, r) {
+			return
+		}
+		var body struct {
+			Arguments map[string]any `json:"arguments"`
+			ConfirmationHash string `json:"confirmation_hash,omitempty"`
+		}
+		if err := decodeAPIJSON(w, r, &body); err != nil || body.Arguments == nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_tool_arguments", "Invocation requires an arguments JSON object.")
+			return
+		}
+		if !validGeneratedToolArguments(body.Arguments) {
+			writeAPIError(w, http.StatusBadRequest, "invalid_tool_arguments", "Tool arguments do not match the generated runtime contract.")
+			return
+		}
+		input, err := json.Marshal(body.Arguments)
+		if err != nil || len(input) > 64*1024 {
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "tool_arguments_too_large", "Tool arguments exceed the permitted size.")
+			return
+		}
+		started := time.Now()
+		output, runErr := RunSignedToolInvocation(r.Context(), s.Engine.CoreRoot, name, parts[1], parts[2], input, body.ConfirmationHash)
+		event := ToolCallTelemetry{
+			At: time.Now().UTC(), Tool: name, VersionHash: parts[2],
+			Success: runErr == nil, LatencyMS: time.Since(started).Milliseconds(),
+			ErrorClass: normalizeToolErrorClass(runErr),
+		}
+		_ = appendToolCallTelemetry(s.Engine.CoreRoot, event)
+		s.Engine.publish(Event{
+			Type: "tool_call", At: event.At, Invention: name,
+			Status: map[bool]string{true: "success", false: "failure"}[event.Success],
+			Message: "Signed tool invocation telemetry recorded without user content.",
+		})
+		if runErr != nil {
+			code := "tool_execution_failed"
+			status := http.StatusUnprocessableEntity
+			if strings.Contains(strings.ToLower(runErr.Error()), "confirmation") {
+				code, status = "tier2_confirmation_required", http.StatusForbidden
+			} else if strings.Contains(strings.ToLower(runErr.Error()), "active signed version") {
+				code, status = "tool_not_active", http.StatusConflict
+			} else if strings.Contains(strings.ToLower(runErr.Error()), "signature") || strings.Contains(strings.ToLower(runErr.Error()), "hash") {
+				code, status = "artifact_verification_failed", http.StatusForbidden
+			}
+			writeAPIError(w, status, code, "Genesis refused or could not complete the sandboxed tool invocation.")
+			return
+		}
+		var result any
+		if json.Unmarshal(output, &result) != nil {
+			writeAPIError(w, http.StatusBadGateway, "tool_output_invalid", "Sandboxed tool returned invalid JSON.")
+			return
+		}
+		writeAPIJSON(w, http.StatusOK, map[string]any{"status": "success", "tool": name, "version": parts[1], "artifact_hash": parts[2], "result": result})
+		return
+	}
+
 	writeAPIError(w, http.StatusNotFound, "not_found", "Registry route not found.")
+}
+
+
+func validGeneratedToolArguments(arguments map[string]any) bool {
+	if len(arguments) == 0 || len(arguments) > 3 {
+		return false
+	}
+	for key := range arguments {
+		if key != "action" && key != "inputs" && key != "consent" {
+			return false
+		}
+	}
+	action, ok := arguments["action"].(string)
+	if !ok || strings.TrimSpace(action) == "" || len(action) > 2000 {
+		return false
+	}
+	if raw, exists := arguments["consent"]; exists {
+		if _, ok := raw.(bool); !ok {
+			return false
+		}
+	}
+	if raw, exists := arguments["inputs"]; exists {
+		inputs, ok := raw.(map[string]any)
+		if !ok || len(inputs) > 100 {
+			return false
+		}
+		for key, value := range inputs {
+			text, ok := value.(string)
+			if !ok || strings.TrimSpace(key) == "" || len(key) > 100 || len(text) > 4000 {
+				return false
+			}
+		}
+	}
+	return true
 }
