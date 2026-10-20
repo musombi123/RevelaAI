@@ -510,7 +510,12 @@ func signingPayload(record SignedToolArtifact) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []byte(record.Name + "\n" + record.Version + "\n" + record.ArtifactHash + "\n" + string(manifest) + "\n" + record.SandboxEvidence.ManifestHash), nil
+	evidence, err := json.Marshal(record.SandboxEvidence)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(record.Name + "\n" + record.Version + "\n" + record.ArtifactHash + "\n" +
+		string(manifest) + "\n" + string(evidence) + "\n" + record.CreatedAt.UTC().Format(time.RFC3339Nano)), nil
 }
 
 func hashArtifactTree(root string) (string, error) {
