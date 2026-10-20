@@ -21,6 +21,18 @@ tags:
   - name: bridge
   - name: mind
 paths:
+  /v1/audit/verify:
+    get:
+      tags: [system]
+      operationId: verifyAuditChain
+      summary: Verify append-only audit hash-chain integrity
+      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
+      security: [{AdminToken: []}]
+      responses:
+        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Audit-chain tampering or broken hash links detected.}
+        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/supervisor/status:
     get:
       tags: [system]
@@ -91,18 +103,6 @@ paths:
           in: path
           required: true
           schema: {type: string, pattern: '^[a-f0-9]{24}    get:
-      tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/health:
-    get:
       tags: [system]
       operationId: getHealth
       summary: Read local kernel status
@@ -620,23 +620,6 @@ components:
         source: {type: string}
         evidence_id: {type: string}
 }
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
       requestBody:
         required: true
         content:
@@ -664,18 +647,6 @@ components:
           required: true
           schema: {type: string, pattern: '^[a-f0-9]{24}    get:
       tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/health:
-    get:
-      tags: [system]
       operationId: getHealth
       summary: Read local kernel status
       responses:
@@ -684,17 +655,6 @@ components:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
-  /v1/diagnostics:
-    get:
-      tags: [system]
-      operationId: getDiagnostics
-      summary: Run bounded, read-only repository diagnostics
-      security: [{ApiKey: []}]
-      x-required-scope: scan:read
-      responses:
-        '200': {description: Diagnostic evidence and repository baseline status.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -723,22 +683,6 @@ components:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/keys/issued:
-    get:
-      tags: [forge]
-      operationId: listIssuedApiKeys
-      summary: List issued-key metadata without exposing key material
-      security: [{AdminToken: []}]
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema: {type: string, enum: [active, revoked, expired]}
-      responses:
-        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
-        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -1165,23 +1109,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}
@@ -1216,18 +1143,6 @@ components:
           required: true
           schema: {type: string, pattern: '^[a-f0-9]{24}    get:
       tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/health:
-    get:
-      tags: [system]
       operationId: getHealth
       summary: Read local kernel status
       responses:
@@ -1236,17 +1151,6 @@ components:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
-  /v1/diagnostics:
-    get:
-      tags: [system]
-      operationId: getDiagnostics
-      summary: Run bounded, read-only repository diagnostics
-      security: [{ApiKey: []}]
-      x-required-scope: scan:read
-      responses:
-        '200': {description: Diagnostic evidence and repository baseline status.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -1275,22 +1179,6 @@ components:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/keys/issued:
-    get:
-      tags: [forge]
-      operationId: listIssuedApiKeys
-      summary: List issued-key metadata without exposing key material
-      security: [{AdminToken: []}]
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema: {type: string, enum: [active, revoked, expired]}
-      responses:
-        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
-        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -1717,23 +1605,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}
@@ -1762,18 +1633,6 @@ components:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/audit/verify:
-    get:
-      tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/health:
     get:
       tags: [system]
@@ -1785,17 +1644,6 @@ components:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
-  /v1/diagnostics:
-    get:
-      tags: [system]
-      operationId: getDiagnostics
-      summary: Run bounded, read-only repository diagnostics
-      security: [{ApiKey: []}]
-      x-required-scope: scan:read
-      responses:
-        '200': {description: Diagnostic evidence and repository baseline status.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -1824,22 +1672,6 @@ components:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/keys/issued:
-    get:
-      tags: [forge]
-      operationId: listIssuedApiKeys
-      summary: List issued-key metadata without exposing key material
-      security: [{AdminToken: []}]
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema: {type: string, enum: [active, revoked, expired]}
-      responses:
-        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
-        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -2266,23 +2098,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}
@@ -2351,23 +2166,6 @@ components:
         source: {type: string}
         evidence_id: {type: string}
 }
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
       requestBody:
         required: true
         content:
@@ -2395,18 +2193,6 @@ components:
           required: true
           schema: {type: string, pattern: '^[a-f0-9]{24}    get:
       tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/health:
-    get:
-      tags: [system]
       operationId: getHealth
       summary: Read local kernel status
       responses:
@@ -2415,17 +2201,6 @@ components:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
-  /v1/diagnostics:
-    get:
-      tags: [system]
-      operationId: getDiagnostics
-      summary: Run bounded, read-only repository diagnostics
-      security: [{ApiKey: []}]
-      x-required-scope: scan:read
-      responses:
-        '200': {description: Diagnostic evidence and repository baseline status.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -2454,22 +2229,6 @@ components:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/keys/issued:
-    get:
-      tags: [forge]
-      operationId: listIssuedApiKeys
-      summary: List issued-key metadata without exposing key material
-      security: [{AdminToken: []}]
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema: {type: string, enum: [active, revoked, expired]}
-      responses:
-        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
-        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -2896,23 +2655,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}
@@ -2939,25 +2681,13 @@ components:
       tags: [bridge]
       operationId: actuateEnrolledESP32
       summary: Execute one allowlisted GPIO action on an enrolled ESP32
-      description: Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION on every action. Only set_gpio with pin 0-39 and value 0 or 1 is supported; arbitrary serial commands and firmware flashing are not exposed.
+      description: Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION on every action. Only set_gpio on curated output pins with value 0 or 1 is supported; arbitrary serial commands and firmware flashing are not exposed.
       security: [{DeviceToken: []}]
       parameters:
         - name: device_id
           in: path
           required: true
           schema: {type: string, pattern: '^[a-f0-9]{24}    get:
-      tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/health:
-    get:
       tags: [system]
       operationId: getHealth
       summary: Read local kernel status
@@ -2967,17 +2697,6 @@ components:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
-  /v1/diagnostics:
-    get:
-      tags: [system]
-      operationId: getDiagnostics
-      summary: Run bounded, read-only repository diagnostics
-      security: [{ApiKey: []}]
-      x-required-scope: scan:read
-      responses:
-        '200': {description: Diagnostic evidence and repository baseline status.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -3006,22 +2725,6 @@ components:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/keys/issued:
-    get:
-      tags: [forge]
-      operationId: listIssuedApiKeys
-      summary: List issued-key metadata without exposing key material
-      security: [{AdminToken: []}]
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema: {type: string, enum: [active, revoked, expired]}
-      responses:
-        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
-        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -3448,23 +3151,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}
@@ -3493,18 +3179,6 @@ components:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
         '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/audit/verify:
-    get:
-      tags: [system]
-      operationId: verifyAuditChain
-      summary: Verify append-only audit hash-chain integrity
-      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
-      security: [{AdminToken: []}]
-      responses:
-        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '409': {description: Audit-chain tampering or broken hash links detected.}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/health:
     get:
       tags: [system]
@@ -3516,17 +3190,6 @@ components:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
-  /v1/diagnostics:
-    get:
-      tags: [system]
-      operationId: getDiagnostics
-      summary: Run bounded, read-only repository diagnostics
-      security: [{ApiKey: []}]
-      x-required-scope: scan:read
-      responses:
-        '200': {description: Diagnostic evidence and repository baseline status.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
   /v1/scan:
     get:
       tags: [system]
@@ -3555,22 +3218,6 @@ components:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/keys/issued:
-    get:
-      tags: [forge]
-      operationId: listIssuedApiKeys
-      summary: List issued-key metadata without exposing key material
-      security: [{AdminToken: []}]
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema: {type: string, enum: [active, revoked, expired]}
-      responses:
-        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
-        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -3997,23 +3644,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}
