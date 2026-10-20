@@ -7,6 +7,7 @@ on:
       - "app.py"
       - "requirements.txt"
       - "render.yaml"
+      - "revela_platform/**"
       - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
@@ -19,6 +20,7 @@ on:
       - "app.py"
       - "requirements.txt"
       - "render.yaml"
+      - "revela_platform/**"
       - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
@@ -54,14 +56,18 @@ jobs:
 
           app_source = Path("app.py").read_text(encoding="utf-8")
           asgi_source = Path("asgi.py").read_text(encoding="utf-8")
+          platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
           requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
           assert "from asgi import app" in app_source
           assert "WSGIMiddleware" not in asgi_source
           assert "legacy_flask_app" not in asgi_source
           assert not Path("legacy_flask_app.py").exists()
+          assert "from asgi import app as revelaai_app" in platform_source
+          assert "app.mount(\"/\", revelaai_app" in platform_source
+          assert "WSGIMiddleware" not in platform_source
 
-          for filename, source in (("app.py", app_source), ("asgi.py", asgi_source)):
+          for filename, source in (("app.py", app_source), ("asgi.py", asgi_source), ("revela_platform/fastapi_app.py", platform_source)):
               tree = ast.parse(source, filename=filename)
               for node in ast.walk(tree):
                   if isinstance(node, ast.Import):
