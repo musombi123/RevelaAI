@@ -6,9 +6,19 @@ on:
       - "asgi.py"
       - "ai/**"
       - "app.py"
+      - "automation_fabric/**"
       - "requirements.txt"
       - "render.yaml"
       - "revela_platform/**"
+      - "revelai/**"
+      - "core/**"
+      - "db/**"
+      - "features/**"
+      - "models/**"
+      - "schemas/**"
+      - "utils/**"
+      - "voice/**"
+      - "whatsapp_webhook.py"
       - "meta_engineer/**"
       - "revelai/core/brain_os.py"
       - "tests/test_meta_engineer.py"
@@ -19,7 +29,7 @@ on:
       - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
-      - "tests/test_fastapi_entrypoint.py"
+      - "tests/**"
       - ".github/workflows/fastapi-migration.yml"
   push:
     branches: [migration/flask-to-fastapi, migration/fastapi-shared-routes]
@@ -33,7 +43,7 @@ on:
       - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
-      - "tests/test_fastapi_entrypoint.py"
+      - "tests/**"
       - ".github/workflows/fastapi-migration.yml"
 
 permissions:
@@ -55,7 +65,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
       - name: Compile ASGI entry point and tests
-        run: python -m py_compile app.py asgi.py ai/raw_reply.py meta_engineer/generator.py revelai/core/brain_os.py tests/test_fastapi_entrypoint.py
+        run: python -m py_compile app.py asgi.py whatsapp_webhook.py automation_fabric/http.py automation_fabric/local_agent.py ai/raw_reply.py meta_engineer/generator.py revelai/core/brain_os.py tests/test_fastapi_entrypoint.py tests/test_automation_fabric.py
       - name: Reject Flask and WSGI runtime dependencies
         run: |
           python - <<'PY'
@@ -112,3 +122,9 @@ jobs:
           tests/test_brain_os.py
           tests/test_agi_manifest.py
           tests/test_sci_core.py
+          tests/test_gemini_routing.py
+          tests/test_identity_header.py
+          tests/test_live_vision.py
+          tests/test_usect_zero_admin_verification.py
+          tests/test_usect_zero_backend.py
+          tests/test_automation_fabric.py
