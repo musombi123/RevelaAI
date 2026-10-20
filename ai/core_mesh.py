@@ -227,7 +227,7 @@ def _dashboard_snapshot() -> dict:
     two_learning = results["two_learning"]
 
     zero_online = _is_online(zero_health)
-    one_online = _is_online(one_health)
+    one_online = _is_online(one_health) and _is_online(one_status)
     two_online = _is_online(two_health)
 
     guardian = one_status.get("guardian") if isinstance(one_status.get("guardian"), dict) else {}
