@@ -79,7 +79,7 @@ func (a *ESP32USBAdapter) Connect(deviceID, token string) error {
 	defer cancel()
 	// Fixed executable and arguments; the enrolled port is validated and no
 	// shell is involved. No port enumeration or probing occurs.
-	cmd := exec.CommandContext(ctx, "stty", "-F", device.SerialPort, "115200", "raw", "-echo", "min", "0", "time", "10")
+	cmd := exec.CommandContext(ctx, "/bin/stty", "-F", device.SerialPort, "115200", "raw", "-echo", "min", "0", "time", "10")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("configure enrolled serial port: %w (%s)", err, strings.TrimSpace(string(output)))
 	}
