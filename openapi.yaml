@@ -278,283 +278,6 @@ paths:
                   type: string
                 endpoint:
                   type: string
-                factory_build_id:
-                  type: string
-                  pattern: '^fab_[a-f0-9]{24}                  type: string
-                  default: KE
-                bom_by_country:
-                  type: object
-                guides_by_language:
-                  type: object
-      responses:
-        '202':
-          description: Listing saved as pending_review
-        '402':
-          description: Valid license required
-  /v1/marketplace/buy:
-    post:
-      operationId: createMarketplaceCheckout
-      summary: Create a one-time checkout for a reviewed listing
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [tool_id, license_key, buyer_country]
-              properties:
-                tool_id:
-                  type: string
-                license_key:
-                  type: string
-                buyer_country:
-                  type: string
-                  default: KE
-      responses:
-        '202':
-          description: Checkout created; delivery follows verified payment
-        '402':
-          description: Valid platform license required
-        '503':
-          description: Payment provider not configured
-  /v1/marketplace/purchases/{purchase_id}:
-    get:
-      operationId: deliverMarketplacePurchase
-      summary: Get the localized tool bundle after payment confirmation
-      parameters:
-        - name: purchase_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Tool endpoint, available country BOM and guide
-        '409':
-          description: Payment not confirmed
-  /v1/marketplace/earnings/me:
-    get:
-      operationId: getCreatorEarnings
-      summary: Read creator earnings and pending payout balance
-      responses:
-        '200':
-          description: Paid sales with creator/platform split; payouts may remain pending
-
-
-  /v1/foundry/build:
-    post:
-      operationId: buildFactoryProposal
-      summary: Build a licensed, reviewable factory manifest
-      parameters:
-        - name: X-Revela-License
-          in: header
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [name, description, requirements]
-              properties:
-                name:
-                  type: string
-                description:
-                  type: string
-                requirements:
-                  type: array
-                  minItems: 1
-                  maxItems: 50
-                  items:
-                    type: string
-                country:
-                  type: string
-                  default: KE
-                language:
-                  type: string
-                  default: en
-                industry:
-                  type: string
-                  default: general
-                adapters:
-                  type: array
-                  items:
-                    type: string
-      responses:
-        '202':
-          description: Factory manifest staged for review; generated code is not executed
-        '402':
-          description: Valid license required
-  /v1/foundry/builds/{build_id}:
-    get:
-      operationId: getFactoryProposal
-      summary: Get an owned or reviewer-authorized factory manifest
-      parameters:
-        - name: build_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Manifest and current database review status
-        '403':
-          description: Not authorized to view this factory
-  /v1/foundry/builds/{build_id}/review:
-    post:
-      operationId: reviewFactoryProposal
-      summary: Approve or reject a factory proposal as an authorized reviewer
-      parameters:
-        - name: build_id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [approved, review_note]
-              properties:
-                approved:
-                  type: boolean
-                review_note:
-                  type: string
-      responses:
-        '200':
-          description: Review decision persisted to the manifest and audit trail
-        '403':
-          description: Reviewer permission required
-  /v1/seed/{build_id}:
-    post:
-      operationId: seedOfflineFactoryChild
-      summary: Seed a declarative child from an approved factory while honoring a signed offline lease
-      parameters:
-        - name: build_id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: X-Revela-License
-          in: header
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [child_name]
-              properties:
-                child_name:
-                  type: string
-                buyer_country:
-                  type: string
-                  default: KE
-                purchase_id:
-                  type: string
-      responses:
-        '201':
-          description: Local declarative child bundle with signed lease; code execution remains disabled
-        '402':
-          description: Valid license required
-        '409':
-          description: Parent factory is not approved
-  /v1/seed/{seed_id}/verify:
-    get:
-      operationId: verifyOfflineSeedLease
-      summary: Check registered child lease status for the authenticated owner
-      parameters:
-        - name: seed_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Registered offline authorization information
-  /v1/auditor/verify:
-    get:
-      operationId: verifyAuditChain
-      summary: Verify hash-chain consistency of audit ledger
-      responses:
-        '200':
-          description: Ledger verification result and current head hash
-        '403':
-          description: Reviewer permission required
-        '409':
-          description: Corrupt audit ledger
-  /v1/auditor/events:
-    get:
-      operationId: listAuditEvents
-      summary: List own audit events or reviewer-authorized user events
-      parameters:
-        - name: actor_user_id
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-            minimum: 1
-            maximum: 250
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-            minimum: 0
-      responses:
-        '200':
-          description: Audit events with minimized details
-        '403':
-          description: Not authorized
-
-  /v1/{tool_id}:
-    post:
-      operationId: invokeLicensedTool
-      summary: Invoke a published tool through an encrypted RVXP1 runtime adapter
-      description: Requires a valid X-Revela-License, authenticated user, owner entitlement or confirmed marketplace purchase, and a configured RVXP1 tool adapter. No plaintext fallback is permitted.
-      parameters:
-        - name: tool_id
-          in: path
-          required: true
-          schema:
-            type: string
-            pattern: '^[a-z0-9][a-z0-9_-]{0,63}  securitySchemes:
-    RevelaCodeBearer:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    Country:
-      name: country
-      in: query
-      required: false
-      schema:
-        type: string
-        default: KE
-      description: Backward-compatible Kenya default.
-    Language:
-      name: lang
-      in: query
-      required: false
-      schema:
-        type: string
-        enum: [en, de, zh, ja, fr, es, sw]
-
-                  description: Optional owned, human-approved Foundry build ID
                 price_usd_cents:
                   type: integer
                 country_origin:
@@ -799,29 +522,55 @@ paths:
         '403':
           description: Not authorized
 
-components:
-  securitySchemes:
-    RevelaCodeBearer:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    Country:
-      name: country
-      in: query
-      required: false
-      schema:
-        type: string
-        default: KE
-      description: Backward-compatible Kenya default.
-    Language:
-      name: lang
-      in: query
-      required: false
-      schema:
-        type: string
-        enum: [en, de, zh, ja, fr, es, sw]
 
+  /v1/platform/health:
+    get:
+      operationId: getRevenuePlatformHealth
+      summary: Report revenue gateway readiness without secrets
+      security: []
+      responses:
+        '200': {description: Platform health and safe configuration indicators}
+  /v1/meter/health:
+    get:
+      operationId: getMeterHealth
+      summary: Check usage metering storage
+      security: []
+      responses:
+        '200': {description: Meter storage and privacy status}
+  /v1/marketplace/{tool_id}/rating:
+    post:
+      operationId: ratePublishedTool
+      summary: Rate a published marketplace tool
+      parameters:
+        - name: tool_id
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rating]
+              properties:
+                rating: {type: integer, minimum: 1, maximum: 5}
+      responses:
+        '200': {description: Rating recorded}
+        '403': {description: Creator cannot rate own tool}
+        '404': {description: Published tool not found}
+  /v1/{tool_id}:
+    post:
+      operationId: invokeLicensedTool
+      summary: Invoke a published tool through an encrypted RVXP1 runtime adapter
+      description: Requires a valid signed license, authenticated user, and configured encrypted RVXP1 tool adapter.
+      parameters:
+        - name: tool_id
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
         - name: X-Revela-License
           in: header
           required: true
@@ -844,281 +593,251 @@ components:
         '200':
           description: Authenticated RVXP1 tool adapter response
         '402':
-          description: License missing, expired, over quota or marketplace purchase required
+          description: License missing, expired, or out of scope
         '404':
           description: Tool is not published or registered
-        '413':
-          description: Input exceeds the 1 MB limit
         '503':
-          description: RVX tool adapter or encrypted mesh transport is unavailable
+          description: Encrypted mesh transport unavailable
 
-components:
-  securitySchemes:
-    RevelaCodeBearer:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    Country:
-      name: country
-      in: query
-      required: false
-      schema:
-        type: string
-        default: KE
-      description: Backward-compatible Kenya default.
-    Language:
-      name: lang
-      in: query
-      required: false
-      schema:
-        type: string
-        enum: [en, de, zh, ja, fr, es, sw]
-
-                  description: Optional owned, human-approved Foundry build ID
-                price_usd_cents:
-                  type: integer
-                country_origin:
-                  type: string
-                  default: KE
-                bom_by_country:
-                  type: object
-                guides_by_language:
-                  type: object
+  /v1/verify/{tool_id}:
+    get:
+      operationId: verifyRevelaCodeToolWatermark
+      summary: Publicly verify founder-signed tool provenance
+      security: []
+      parameters:
+        - name: tool_id
+          in: path
+          required: true
+          schema: {type: string, maxLength: 180}
       responses:
-        '202':
-          description: Listing saved as pending_review
-        '402':
-          description: Valid license required
-  /v1/marketplace/buy:
+        '200':
+          description: Watermark status; invalid or missing signatures return valid false
+  /v1/uncopyable/status:
+    get:
+      operationId: getUncopyableLockStatus
+      summary: Get redacted status of the five security locks
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+      responses:
+        '200': {description: Redacted lock status}
+        '401': {description: Invalid administrator token}
+        '503': {description: Administration is not configured}
+  /v1/uncopyable/rotate-dialect:
     post:
-      operationId: createMarketplaceCheckout
-      summary: Create a one-time checkout for a reviewed listing
+      operationId: rotateUncopyableRvxDialect
+      summary: Immediately rotate the authenticated RVX dialect
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [tool_id, license_key, buyer_country]
               properties:
-                tool_id:
-                  type: string
-                license_key:
-                  type: string
-                buyer_country:
-                  type: string
-                  default: KE
+                reason: {type: string, minLength: 3, maxLength: 80, default: scheduled_rotation}
       responses:
-        '202':
-          description: Checkout created; delivery follows verified payment
-        '402':
-          description: Valid platform license required
-        '503':
-          description: Payment provider not configured
-  /v1/marketplace/purchases/{purchase_id}:
-    get:
-      operationId: deliverMarketplacePurchase
-      summary: Get the localized tool bundle after payment confirmation
-      parameters:
-        - name: purchase_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Tool endpoint, available country BOM and guide
-        '409':
-          description: Payment not confirmed
-  /v1/marketplace/earnings/me:
-    get:
-      operationId: getCreatorEarnings
-      summary: Read creator earnings and pending payout balance
-      responses:
-        '200':
-          description: Paid sales with creator/platform split; payouts may remain pending
-
-
-  /v1/foundry/build:
+        '200': {description: Dialect rotated; packets from the previous generation are rejected}
+        '401': {description: Invalid administrator token}
+        '503': {description: Recipe unavailable or rotation failed}
+  /v1/uncopyable/restore:
     post:
-      operationId: buildFactoryProposal
-      summary: Build a licensed, reviewable factory manifest
+      operationId: restoreDnaVault
+      summary: Restore an encrypted DNA snapshot using fresh founder authorization
+      security: []
       parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [encrypted_blob_b64, signature_payload, founder_signature_b64]
+              properties:
+                encrypted_blob_b64: {type: string}
+                signature_payload: {type: object, additionalProperties: true}
+                founder_signature_b64: {type: string}
+      responses:
+        '200': {description: DNA Vault restored after recipe and founder signature validation}
+        '401': {description: Invalid administrator token}
+        '403': {description: Vault or founder signature validation failed}
+        '503': {description: Administration is not configured}
+  /api/usect/evolve/health:
+    get:
+      operationId: getUsectEvolveHealth
+      summary: Check bounded evidence-driven evolution service
+      security: []
+      responses:
+        '200': {description: Evolver status}
+  /api/usect/evolve/proposals:
+    post:
+      operationId: createUsectEvolutionProposal
+      summary: Create an evidence-based evolution proposal
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
         - name: X-Revela-License
           in: header
           required: true
-          schema:
-            type: string
+          schema: {type: string}
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [name, description, requirements]
-              properties:
-                name:
-                  type: string
-                description:
-                  type: string
-                requirements:
-                  type: array
-                  minItems: 1
-                  maxItems: 50
-                  items:
-                    type: string
-                country:
-                  type: string
-                  default: KE
-                language:
-                  type: string
-                  default: en
-                industry:
-                  type: string
-                  default: general
-                adapters:
-                  type: array
-                  items:
-                    type: string
+            schema: {type: object, additionalProperties: true}
       responses:
-        '202':
-          description: Factory manifest staged for review; generated code is not executed
-        '402':
-          description: Valid license required
-  /v1/foundry/builds/{build_id}:
-    get:
-      operationId: getFactoryProposal
-      summary: Get an owned or reviewer-authorized factory manifest
-      parameters:
-        - name: build_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Manifest and current database review status
-        '403':
-          description: Not authorized to view this factory
-  /v1/foundry/builds/{build_id}/review:
+        '201': {description: Proposal created for review}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/evolve/proposals/{proposal_id}/children:
     post:
-      operationId: reviewFactoryProposal
-      summary: Approve or reject a factory proposal as an authorized reviewer
+      operationId: recursivelyImproveEvolutionProposal
+      summary: Create a bounded child proposal
+      security: []
       parameters:
-        - name: build_id
+        - name: proposal_id
           in: path
           required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [approved, review_note]
-              properties:
-                approved:
-                  type: boolean
-                review_note:
-                  type: string
-      responses:
-        '200':
-          description: Review decision persisted to the manifest and audit trail
-        '403':
-          description: Reviewer permission required
-  /v1/seed/{build_id}:
-    post:
-      operationId: seedOfflineFactoryChild
-      summary: Seed a declarative child from an approved factory while honoring a signed offline lease
-      parameters:
-        - name: build_id
-          in: path
+          schema: {type: string}
+        - name: X-Organ-Admin-Token
+          in: header
           required: true
-          schema:
-            type: string
+          schema: {type: string, minLength: 32}
         - name: X-Revela-License
           in: header
           required: true
-          schema:
-            type: string
+          schema: {type: string}
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [child_name]
-              properties:
-                child_name:
-                  type: string
-                buyer_country:
-                  type: string
-                  default: KE
-                purchase_id:
-                  type: string
+            schema: {type: object, additionalProperties: true}
       responses:
-        '201':
-          description: Local declarative child bundle with signed lease; code execution remains disabled
-        '402':
-          description: Valid license required
-        '409':
-          description: Parent factory is not approved
-  /v1/seed/{seed_id}/verify:
-    get:
-      operationId: verifyOfflineSeedLease
-      summary: Check registered child lease status for the authenticated owner
+        '201': {description: Child proposal created}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/evolve/proposals/{proposal_id}/evaluate:
+    post:
+      operationId: evaluateUsectEvolutionProposal
+      summary: Evaluate a candidate against measured evidence and review gates
+      security: []
       parameters:
-        - name: seed_id
+        - name: proposal_id
           in: path
           required: true
-          schema:
-            type: string
+          schema: {type: string}
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
       responses:
-        '200':
-          description: Registered offline authorization information
-  /v1/auditor/verify:
+        '200': {description: Evidence-based evaluation}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/devices:
     get:
-      operationId: verifyAuditChain
-      summary: Verify hash-chain consistency of audit ledger
-      responses:
-        '200':
-          description: Ledger verification result and current head hash
-        '403':
-          description: Reviewer permission required
-        '409':
-          description: Corrupt audit ledger
-  /v1/auditor/events:
-    get:
-      operationId: listAuditEvents
-      summary: List own audit events or reviewer-authorized user events
+      operationId: listUsectEnrolledDevices
+      summary: List explicitly enrolled devices
+      security: []
       parameters:
-        - name: actor_user_id
-          in: query
-          required: false
-          schema:
-            type: string
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-            minimum: 1
-            maximum: 250
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-            minimum: 0
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
       responses:
-        '200':
-          description: Audit events with minimized details
-        '403':
-          description: Not authorized
+        '200': {description: Enrolled device inventory}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/devices/enroll:
+    post:
+      operationId: enrollUsectMigrationDevice
+      summary: Enroll a device and verified resource inventory
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Device enrolled}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/plans:
+    post:
+      operationId: createUsectMigrationPlan
+      summary: Plan an authorized digest-bound migration
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Migration plan; no remote execution performed}
+        '402': {description: Enterprise entitlement required}
+  /api/usect/migrate/robot-blueprints:
+    post:
+      operationId: createUsectRobotBlueprint
+      summary: Produce a planning-only robot blueprint from verified inventory
+      security: []
+      parameters:
+        - name: X-Organ-Admin-Token
+          in: header
+          required: true
+          schema: {type: string, minLength: 32}
+        - name: X-Revela-License
+          in: header
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: true}
+      responses:
+        '201': {description: Blueprint; physical actuation remains disabled}
+        '402': {description: Enterprise entitlement required}
 
 components:
   securitySchemes:

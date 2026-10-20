@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -37,6 +38,9 @@ func main() {
 }
 
 func run() error {
+	if err := verifyOwnerRecipe(); err != nil {
+		return err
+	}
 	flags := flag.NewFlagSet("genesis", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 
@@ -496,4 +500,35 @@ func writeJSON(value any) error {
 		return fmt.Errorf("write JSON to stdout: %w", err)
 	}
 	return nil
+}
+
+
+func verifyOwnerRecipe() error {
+    mode := strings.ToLower(strings.TrimSpace(os.Getenv("REVELA_UNCOPYABLE_ENFORCE")))
+    if mode != "1" && mode != "true" && mode != "yes" && mode != "on" {
+        return nil
+    }
+    path := strings.TrimSpace(os.Getenv("REVELA_MASTER_KEY_PATH"))
+    if path == "" {
+        home, err := os.UserHomeDir()
+        if err != nil {
+            return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner home is unavailable")
+        }
+        path = filepath.Join(home, ".revela_recipe", "master.key")
+    }
+    key, err := os.ReadFile(path)
+    if err != nil {
+        return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe is unavailable")
+    }
+    if len(key) != 512 {
+        return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe length is invalid")
+    }
+    expected := strings.TrimSpace(os.Getenv("REVELA_RECIPE_EXPECTED_SHA256"))
+    if expected != "" {
+        digest := sha256.Sum256(key)
+        if !strings.EqualFold(fmt.Sprintf("%x", digest), expected) {
+            return fmt.Errorf("Need RevelaCode Brain - Contact founder: owner recipe fingerprint mismatch")
+        }
+    }
+    return nil
 }

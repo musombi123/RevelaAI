@@ -29,3 +29,14 @@ Thumbs.db
 /.revela-build/
 /.data/
 *.rvx.tmp
+
+# USECT-UNCOPYABLE: never commit owner secrets, runtime watermarks, dialects or vault data
+/.revela/
+/.revela_recipe/
+/dna_vault/
+/rvx/dialect.json
+/rvx/dialect.json.tmp
+/recipe/private.key
+/recipe/signature.key
+/recipe/*.pem
+/recipe/*.rvx
