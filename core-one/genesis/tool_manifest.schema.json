@@ -23,8 +23,32 @@
     "version": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" },
     "language": { "enum": ["python", "go"] },
     "entrypoint": { "type": "string", "minLength": 1, "maxLength": 240, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$" },
-    "input_schema": { "$ref": "#/$defs/localObjectSchema" },
-    "output_schema": { "$ref": "#/$defs/localObjectSchema" },
+    "input_schema": {
+      "const": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "maxLength": 2000 },
+          "inputs": { "type": "object", "additionalProperties": { "type": "string", "maxLength": 4000 } },
+          "consent": { "type": "boolean" }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    },
+    "output_schema": {
+      "const": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "tool": { "type": "string" },
+          "summary": { "type": "string" },
+          "created_at": { "type": "string" },
+          "evidence": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["status", "tool", "summary"],
+        "additionalProperties": false
+      }
+    },
     "risk_tier": { "type": "integer", "enum": [0, 1, 2] },
     "permissions": {
       "type": "object",
@@ -50,20 +74,6 @@
       "then": { "properties": { "entrypoint": { "pattern": "\\.py$" } } }
     }
   ],
-  "$defs": {
-    "localObjectSchema": {
-      "type": "object",
-      "required": ["type"],
-      "properties": {
-        "type": { "const": "object" },
-        "properties": { "type": "object" },
-        "required": { "type": "array", "items": { "type": "string" } },
-        "additionalProperties": { "type": ["boolean", "object"] }
-      },
-      "additionalProperties": true,
-      "not": { "required": ["$ref"] }
-    }
-  },
   "x-genesis-policy": {
     "risk_tier_is_derived": true,
     "tier_0": "No network, filesystem, secrets, or hardware permission",
