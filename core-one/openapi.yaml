@@ -840,7 +840,7 @@ paths:
       tags: [Tools]
       operationId: invokeSignedGenesisTool
       summary: Invoke an active signed tool inside the sandbox runner
-      description: Tier 2 requires confirmation_hash equal to the active artifact hash for each invocation. Arguments and results are bounded; telemetry excludes user content.
+      description: Tier 2 requires a one-use confirmation_token bound to the exact active artifact hash and exact JSON arguments for each invocation. Arguments and results are bounded; telemetry excludes user content.
       parameters:
         - $ref: "#/components/parameters/ToolName"
         - name: version
