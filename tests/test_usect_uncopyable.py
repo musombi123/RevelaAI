@@ -23,6 +23,7 @@ from core_uncopyable.hardware_bind import compare_hardware_binding, hardware_fin
 from core_uncopyable.license_lock import EntitlementError, require_entitlement
 from core_uncopyable.recipe_lock import RecipeLockError, verify_recipe
 from core_uncopyable.rvx_evolver import evolve_dialect, verify_dialect
+from rvx.crypto import StalePacketError, open_packet, seal_packet
 
 
 def configure_keys(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
@@ -84,6 +85,13 @@ def test_dialect_is_encrypted_authenticated_and_date_scoped(tmp_path, monkeypatc
     assert result["artifact_sha256"]
     assert output.read_bytes().startswith(b"RVX1.")
     assert verify_dialect(output, now=now)["valid"] is True
+    packet = seal_packet({"action": "test"}, route="marketplace.search", secret=b"m" * 32,
+                         now=datetime(2026, 10, 20, 12, 30, tzinfo=timezone.utc))
+    evolve_dialect(output_path=output, now=datetime(2026, 10, 20, 12, 32, tzinfo=timezone.utc),
+                   reason="twin_detected")
+    with pytest.raises(StalePacketError, match="Dialect obsolete"):
+        open_packet(packet, route="marketplace.search", secret=b"m" * 32,
+                    now=datetime(2026, 10, 20, 12, 33, tzinfo=timezone.utc))
     old = datetime(2026, 10, 21, 12, tzinfo=timezone.utc)
     assert verify_dialect(output, now=old)["reason"] == "Dialect obsolete - Pull new"
 
