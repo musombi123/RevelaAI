@@ -52,6 +52,16 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
             assert package not in forbidden, package
 
 
+
+def test_revenue_platform_mounts_the_native_asgi_gateway() -> None:
+    from pathlib import Path
+    source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+
+    assert "from asgi import app as revelaai_app" in source
+    assert 'app.mount("/", revelaai_app, name="revelaai-native-gateway")' in source
+    assert "WSGIMiddleware" not in source
+    assert "from app import app as flask_app" not in source
+
 def test_native_core_routers_do_not_import_the_flask_compatibility_module() -> None:
     from fastapi_routes import ai as ai_routes
     from fastapi_routes import stream as stream_routes
