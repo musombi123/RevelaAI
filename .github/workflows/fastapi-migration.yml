@@ -1,4 +1,4 @@
-name: FastAPI Gateway Migration Checks
+name: FastAPI-only Runtime and Generated Route Checks
 
 on:
   pull_request:
@@ -39,7 +39,7 @@ permissions:
 
 jobs:
   asgi-entrypoint:
-    name: Native FastAPI entry point and route contract
+    name: Native FastAPI entry point, generated route and route contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
