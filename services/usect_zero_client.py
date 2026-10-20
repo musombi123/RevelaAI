@@ -68,8 +68,33 @@ def _timeout_seconds() -> int:
     return min(max(value, 1), 15)
 
 
+def _configured_base_url() -> str:
+    """Resolve the canonical URL and its legacy alias without a production localhost fallback."""
+    primary = os.getenv("USECT_ZERO_URL", "").strip()
+    alias = os.getenv("USECT_ZERO_BASE_URL", "").strip()
+    raw = primary or alias
+    if not raw:
+        # A loopback default is convenient for local development only. Render
+        # and other production deployments must configure an explicit service URL.
+        production = any(
+            os.getenv(name, "").strip().lower() in _ENABLED_VALUES
+            for name in ("RENDER", "RENDER_SERVICE_ID", "K_SERVICE", "DYNO")
+        )
+        if production:
+            raise USECTZeroConfigurationError(
+                "Set USECT_ZERO_URL or USECT_ZERO_BASE_URL for the deployed USECT-ZERO service."
+            )
+        raw = "http://127.0.0.1:8780"
+    return raw
+
+
+def _admin_token() -> str:
+    """Read the server-side admin token through one configuration boundary."""
+    return os.getenv("USECT_ZERO_ADMIN_TOKEN", "").strip()
+
+
 def _base_url() -> str:
-    raw = os.getenv("USECT_ZERO_URL", "http://127.0.0.1:8780").strip()
+    raw = _configured_base_url()
 
     # Render Blueprints expose a service's internal host and port through
     # fromService.property=hostport (for example, "usect-zero-core:10000").
@@ -164,7 +189,7 @@ def request_core(
         headers["X-API-Key"] = supplied_key
 
     if admin:
-        admin_token = os.getenv("USECT_ZERO_ADMIN_TOKEN", "").strip()
+        admin_token = _admin_token()
         if not admin_token:
             raise USECTZeroAdminTokenMissing(
                 "The backend's USECT_ZERO_ADMIN_TOKEN is not configured."
