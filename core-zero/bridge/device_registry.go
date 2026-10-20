@@ -225,6 +225,9 @@ func validDeviceScopes(scopes []string, tier int) ([]string, error) {
 // Enroll registers one explicitly named USB serial port. It never enumerates
 // or probes local devices. The returned token is shown once; only its hash is stored.
 func (r *DeviceRegistry) Enroll(name, serialPort string, scopes []string, tier int, ttl time.Duration) (Device, string, error) {
+	if r == nil {
+		return Device{}, "", errors.New("device registry is not configured")
+	}
 	name = strings.TrimSpace(name)
 	serialPort = strings.TrimSpace(serialPort)
 	if !validDeviceName(name) {
