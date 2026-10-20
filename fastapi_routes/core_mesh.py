@@ -22,6 +22,7 @@ from ai.tool_registry import (
     confirm_tier2_action,
     deactivate_signed_tool,
     execute_active_tool,
+    get_signed_tool_version,
     list_active_tools,
     list_signed_tools,
     provider_tool_context,
@@ -389,6 +390,23 @@ def _approved_tool_operator(user_id: str):
     return _operator_failure(user_id)
 
 
+def _genesis_owner_failure(user_id: str):
+    """Tier 1-2 activation/rollback must be approved by an explicitly configured owner."""
+    configured = os.getenv("GENESIS_OWNER_USER_IDS", "").strip()
+    if not configured:
+        return JSONResponse(
+            {"status": "error", "error": {"code": "genesis_owner_not_configured", "message": "Configure GENESIS_OWNER_USER_IDS before approving Tier 1-2 tool activation or rollback."}},
+            status_code=503,
+        )
+    allowed = {value.strip() for value in configured.split(",") if value.strip()}
+    if not user_id or user_id not in allowed:
+        return JSONResponse(
+            {"status": "error", "error": {"code": "genesis_owner_required", "message": "This signed tool lifecycle action requires a Genesis owner approval."}},
+            status_code=403,
+        )
+    return None
+
+
 @router.get("/api/core-mesh/tools")
 async def core_mesh_tools_api(request: Request, provider: str = ""):
     user_id = _authenticated_tool_user(request)
@@ -483,6 +501,12 @@ async def core_mesh_tool_activate_api(name: str, version: str, artifact_hash: st
     if operator_error:
         return operator_error
     try:
+        record = await run_in_threadpool(get_signed_tool_version, name, version, artifact_hash)
+        manifest = record.get("manifest") if isinstance(record, dict) else {}
+        if isinstance(manifest, dict) and int(manifest.get("risk_tier", 0) or 0) > 0:
+            owner_error = _genesis_owner_failure(user_id)
+            if owner_error:
+                return owner_error
         result = await run_in_threadpool(activate_signed_tool, name, version, artifact_hash)
     except GenesisToolRegistryError as exc:
         return _tool_registry_error(exc)
@@ -547,13 +571,16 @@ async def core_mesh_tool_rollback_api(name: str, request: Request):
             {"status": "error", "error": {"code": "invalid_json", "message": "Rollback requires version and artifact_hash."}},
             status_code=400,
         )
+    version = str(body.get("version") or "")
+    artifact_hash = str(body.get("artifact_hash") or "")
     try:
-        result = await run_in_threadpool(
-            rollback_signed_tool,
-            name,
-            str(body.get("version") or ""),
-            str(body.get("artifact_hash") or ""),
-        )
+        record = await run_in_threadpool(get_signed_tool_version, name, version, artifact_hash)
+        manifest = record.get("manifest") if isinstance(record, dict) else {}
+        if isinstance(manifest, dict) and int(manifest.get("risk_tier", 0) or 0) > 0:
+            owner_error = _genesis_owner_failure(user_id)
+            if owner_error:
+                return owner_error
+        result = await run_in_threadpool(rollback_signed_tool, name, version, artifact_hash)
     except GenesisToolRegistryError as exc:
         return _tool_registry_error(exc)
     return {"status": "success", "data": result}
