@@ -291,8 +291,24 @@ def get_signed_tool_version(name: str, version: str, artifact_hash: str) -> dict
         "/v1/genesis/registry/tools/" + quote(name, safe="") + "/" + quote(version, safe="") + "/" + quote(artifact_hash, safe="")
     )
     record = result.get("artifact")
-    if not isinstance(record, dict) or not isinstance(record.get("manifest"), dict):
+    if not isinstance(record, dict):
         raise GenesisToolRegistryError("Genesis returned an invalid signed version record.", code="genesis_invalid_payload")
+    manifest = record.get("manifest")
+    evidence = record.get("sandbox_evidence")
+    if (
+        not isinstance(manifest, dict)
+        or not _valid_manifest_shape(manifest)
+        or record.get("name") != name
+        or record.get("version") != version
+        or record.get("artifact_hash") != artifact_hash
+        or manifest.get("name") != name
+        or manifest.get("version") != version
+        or record.get("risk_tier") != manifest.get("risk_tier")
+        or not _SIGNATURE_RE.fullmatch(str(record.get("signature") or ""))
+        or not isinstance(evidence, dict)
+        or evidence.get("passed") is not True
+    ):
+        raise GenesisToolRegistryError("Genesis returned a mismatched or unverified signed version record.", code="genesis_invalid_payload")
     return record
 
 
@@ -302,7 +318,25 @@ def list_signed_tools() -> list[dict[str, Any]]:
     tools = result.get("tools")
     if not isinstance(tools, list):
         raise GenesisToolRegistryError("Genesis tool registry response is missing tools.", code="genesis_invalid_payload")
-    return [item for item in tools[:512] if isinstance(item, dict) and isinstance(item.get("manifest"), dict)]
+    valid: list[dict[str, Any]] = []
+    for item in tools[:512]:
+        if not isinstance(item, dict):
+            continue
+        manifest = item.get("manifest")
+        evidence = item.get("sandbox_evidence")
+        if (
+            isinstance(manifest, dict)
+            and _valid_manifest_shape(manifest)
+            and item.get("name") == manifest.get("name")
+            and item.get("version") == manifest.get("version")
+            and item.get("risk_tier") == manifest.get("risk_tier")
+            and _ARTIFACT_HASH_RE.fullmatch(str(item.get("artifact_hash") or ""))
+            and _SIGNATURE_RE.fullmatch(str(item.get("signature") or ""))
+            and isinstance(evidence, dict)
+            and evidence.get("passed") is True
+        ):
+            valid.append(item)
+    return valid
 
 
 def provider_tool_context(provider: str, tools: list[dict[str, Any]] | None = None) -> dict[str, Any]:
