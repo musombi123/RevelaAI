@@ -1022,22 +1022,6 @@ components:
         version: { type: string, maxLength: 64, pattern: "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$" }
         language: { enum: [python, go] }
         entrypoint: { type: string, minLength: 1, maxLength: 240, pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_./-]+$" }
-        # Keep the public contract aligned with ValidateToolManifest.
-        allOf:
-          - if:
-              properties:
-                language: { const: go }
-              required: [language]
-            then:
-              properties:
-                entrypoint: { const: code.go }
-          - if:
-              properties:
-                language: { const: python }
-              required: [language]
-            then:
-              properties:
-                entrypoint: { pattern: "\\.py$" }
         input_schema: { type: object, required: [type], properties: { type: { const: object } } }
         output_schema: { type: object, required: [type], properties: { type: { const: object } } }
         risk_tier: { type: integer, enum: [0, 1, 2] }
@@ -1052,6 +1036,22 @@ components:
             hardware: { type: boolean }
         timeout_ms: { type: integer, minimum: 1, maximum: 120000 }
         memory_bytes: { type: integer, minimum: 16777216, maximum: 536870912 }
+      # Keep the public contract aligned with ValidateToolManifest.
+      allOf:
+        - if:
+            properties:
+              language: { const: go }
+            required: [language]
+          then:
+            properties:
+              entrypoint: { const: code.go }
+        - if:
+            properties:
+              language: { const: python }
+            required: [language]
+          then:
+            properties:
+              entrypoint: { pattern: "\\.py$" }
 
     APIError:
       type: object
