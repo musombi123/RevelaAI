@@ -21,6 +21,145 @@ tags:
   - name: bridge
   - name: mind
 paths:
+  /v1/audit/verify:
+    get:
+      tags: [system]
+      operationId: verifyAuditChain
+      summary: Verify append-only audit hash-chain integrity
+      description: Legacy audit records predating hash chaining are reported as unverified; the endpoint never rewrites the log.
+      security: [{AdminToken: []}]
+      responses:
+        '200': {description: Chain verified, or legacy prefix explicitly marked unverified.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Audit-chain tampering or broken hash links detected.}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/supervisor/status:
+    get:
+      tags: [system]
+      operationId: getSupervisorStatus
+      summary: Probe configured gateway, Core-One and Core-Two health endpoints
+      security: [{AdminToken: []}]
+      responses:
+        '200': {description: Dependency status and global device kill-switch state; probes are advisory.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/supervisor/kill-switch:
+    post:
+      tags: [system]
+      operationId: setGlobalDeviceKillSwitch
+      summary: Revoke all Tier 1-2 device permissions
+      description: Enabling the switch revokes active Tier 1-2 devices permanently; disabling the switch does not restore revoked tokens. Tier 0 read-only devices are unaffected.
+      security: [{AdminToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, confirmation]
+              properties:
+                enabled: {type: boolean}
+                confirmation: {type: string, enum: [ACTIVATE_GLOBAL_KILL_SWITCH, DEACTIVATE_GLOBAL_KILL_SWITCH]}
+      responses:
+        '200': {description: Kill-switch state updated and audit logged.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/devices:
+    get:
+      tags: [bridge]
+      operationId: listEnrolledDevices
+      summary: List enrolled device metadata without device tokens
+      security: [{AdminToken: []}]
+      responses:
+        '200': {description: Enrolled-device metadata; token hashes and plaintext tokens are omitted.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/devices/enroll:
+    post:
+      tags: [bridge]
+      operationId: enrollESP32Device
+      summary: Owner-enroll one explicitly named USB serial port with approved tier and scopes
+      description: Requires administrator authentication and confirmation=ENROLL_DEVICE. No ports are scanned. A generated device token is returned once; only its hash is stored.
+      security: [{AdminToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceEnrollmentInput'}
+      responses:
+        '201': {description: Device enrolled; copy device_token immediately.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/devices/{device_id}/revoke:
+    post:
+      tags: [bridge]
+      operationId: revokeEnrolledDevice
+      summary: Immediately revoke an enrolled device token
+      security: [{AdminToken: []}]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{24}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirmation]
+              properties:
+                confirmation: {type: string, const: REVOKE_DEVICE}
+      responses:
+        '200': {description: Device revoked; subsequent adapter calls fail authorization.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /v1/devices/{device_id}/read:
+    get:
+      tags: [bridge]
+      operationId: readEnrolledESP32
+      summary: Read one owner-enrolled ESP32 over USB serial
+      description: Requires an active device token with device:read. The adapter opens only the enrolled port and does not enumerate or probe other devices.
+      security: [{DeviceToken: []}]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{24}$'}
+      responses:
+        '200': {description: Bounded response from the enrolled ESP32 protocol.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
+  /v1/devices/{device_id}/act:
+    post:
+      tags: [bridge]
+      operationId: actuateEnrolledESP32
+      summary: Execute one allowlisted GPIO action on an enrolled ESP32
+      description: Tier 2 actions require confirmation=CONFIRM_DEVICE_ACTION on every action. Only set_gpio on curated output pins with value 0 or 1 is supported; arbitrary serial commands and firmware flashing are not exposed.
+      security: [{DeviceToken: []}]
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^[a-f0-9]{24}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeviceActionInput'}
+      responses:
+        '200': {description: ESP32 acknowledged the allowlisted action.}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/health:
     get:
       tags: [system]
@@ -32,6 +171,19 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Health'}
+  /v1/diagnostics:
+    get:
+      tags: [system]
+      operationId: getDiagnostics
+      summary: Run bounded, read-only repository diagnostics
+      security: [{ApiKey: []}]
+      x-required-scope: scan:read
+      responses:
+        '200': {description: Diagnostic evidence and repository baseline status.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/scan:
     get:
       tags: [system]
@@ -47,6 +199,8 @@ paths:
               schema: {$ref: '#/components/schemas/ScanEvidence'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/keys/requests:
     get:
       tags: [forge]
@@ -60,6 +214,22 @@ paths:
           schema: {type: string, enum: [pending_approval, approved, rejected]}
       responses:
         '200': {description: Key-request metadata; no raw API keys are included.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '503': {$ref: '#/components/responses/Unavailable'}
+  /v1/keys/issued:
+    get:
+      tags: [forge]
+      operationId: listIssuedApiKeys
+      summary: List issued-key metadata without exposing key material
+      security: [{AdminToken: []}]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [active, revoked, expired]}
+      responses:
+        '200': {description: Issued-key metadata; plaintext tokens are never returned.}
+        '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '503': {$ref: '#/components/responses/Unavailable'}
   /v1/keys/request:
@@ -170,6 +340,8 @@ paths:
         '401': {$ref: '#/components/responses/Unauthorized'}
         '422':
           description: Invalid country/language or diagnostic library unavailable; fail closed.
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/heal/baseline:
     post:
       tags: [heal]
@@ -193,6 +365,8 @@ paths:
         '201': {description: Proposal and sandbox evidence created.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '409': {$ref: '#/components/responses/Conflict'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/heal/proposals/{proposal_id}/approve:
     post:
       tags: [heal]
@@ -244,6 +418,8 @@ paths:
                   hardware_verified: {type: boolean, const: false}
                   human_review_required: {type: boolean, const: true}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/assemble/templates:
     get:
       tags: [assemble]
@@ -269,6 +445,8 @@ paths:
                   count: {type: integer, minimum: 0}
                   human_review_required: {type: boolean, const: true}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/assemble:
     post:
       tags: [assemble]
@@ -290,6 +468,8 @@ paths:
         '201': {description: Validated, versioned artifacts generated for human review; no hardware touched.}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '422': {description: No curated template exists for the requested target.}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/radar/compare:
     post:
       tags: [radar]
@@ -311,6 +491,8 @@ paths:
         '200': {description: Deterministic comparison and human-review recommendation; no network used.}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/bridge/plan:
     post:
       tags: [bridge]
@@ -331,6 +513,8 @@ paths:
         '200': {description: Review plan; no external device or network access.}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/mind/compile:
     post:
       tags: [mind]
@@ -351,6 +535,8 @@ paths:
         '200': {description: Plan generated, not executed.}
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '429': {description: Per-scope request limit exceeded; retry after 60 seconds.}
+
   /v1/mind/ide:
     get:
       tags: [mind]
@@ -370,6 +556,11 @@ components:
       in: header
       name: X-Admin-Token
       description: Local operator token from USECT_ZERO_ADMIN_TOKEN.
+    DeviceToken:
+      type: apiKey
+      in: header
+      name: X-Device-Token
+      description: One-time-issued token for one enrolled device; plaintext is never persisted.
   parameters:
     RequestId:
       name: request_id
@@ -468,6 +659,29 @@ components:
         api_key: {type: string, writeOnly: true}
         shown_once: {type: boolean, const: true}
         note: {type: string}
+    DeviceEnrollmentInput:
+      type: object
+      additionalProperties: false
+      required: [name, serial_port, scopes, tier, ttl_hours, confirmation]
+      properties:
+        name: {type: string, minLength: 2, maxLength: 120}
+        serial_port: {type: string, pattern: '^/dev/tty(USB|ACM)[0-9]+$'}
+        scopes:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [device:read, device:act]}
+        tier: {type: integer, minimum: 0, maximum: 2}
+        ttl_hours: {type: integer, minimum: 1, maximum: 2160}
+        confirmation: {type: string, const: ENROLL_DEVICE}
+    DeviceActionInput:
+      type: object
+      additionalProperties: false
+      required: [name, pin, value]
+      properties:
+        name: {type: string, const: set_gpio}
+        pin: {type: integer, enum: [4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33]}
+        value: {type: integer, enum: [0, 1]}
+        confirmation: {type: string, description: Required for every Tier 2 action; value CONFIRM_DEVICE_ACTION.}
     AssemblyBoardProfile:
       type: object
       required: [id, family, logic_voltage_mv, typical_input_voltage_mv, pin_map_status, notes, hardware_verified]
@@ -486,23 +700,6 @@ components:
         id: {type: string}
         target: {type: string}
         version: {type: string, pattern: '^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$'}
-        title: {type: string}
-        board_profile_id: {type: string}
-        part_count: {type: integer, minimum: 0}
-        connection_count: {type: integer, minimum: 0}
-        validation_status: {type: string, enum: [valid_curated_template, invalid_template]}
-        electrical_review_required: {type: boolean}
-        human_review_required: {type: boolean, const: true}
-    RadarEvidence:
-      type: object
-      required: [name, version, benchmark]
-      properties:
-        name: {type: string, minLength: 1, maxLength: 200}
-        version: {type: string, pattern: '^v?[0-9]+\\.[0-9]+\\.[0-9]+([+-].*)?$'}
-        benchmark: {type: number, exclusiveMinimum: 0}
-        source: {type: string}
-        evidence_id: {type: string}
-}
         title: {type: string}
         board_profile_id: {type: string}
         part_count: {type: integer, minimum: 0}

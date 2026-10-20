@@ -70,13 +70,35 @@ def _timeout_seconds() -> int:
     return min(max(value, 1), 15)
 
 
-def _base_url() -> str:
-    raw = core_base_url("zero").strip()
-
+def _configured_base_url() -> str:
+    """Resolve the canonical URL and its legacy alias without a production localhost fallback."""
+    primary = os.getenv("USECT_ZERO_URL", "").strip()
+    alias = os.getenv("USECT_ZERO_BASE_URL", "").strip()
+    raw = primary or alias
     if not raw:
-        raise USECTZeroConfigurationError(
-            "USECT_ZERO_URL or USECT_ZERO_BASE_URL is required in production."
+        # A loopback default is convenient for local development only. Render
+        # and other production deployments must configure an explicit service URL.
+        production = (
+            any(os.getenv(name, "").strip() for name in (
+                "RENDER_SERVICE_ID", "RENDER_EXTERNAL_URL", "K_SERVICE", "DYNO"
+            ))
+            or os.getenv("RENDER", "").strip().lower() in _ENABLED_VALUES
         )
+        if production:
+            raise USECTZeroConfigurationError(
+                "Set USECT_ZERO_URL or USECT_ZERO_BASE_URL for the deployed USECT-ZERO service."
+            )
+        raw = "http://127.0.0.1:8780"
+    return raw
+
+
+def _admin_token() -> str:
+    """Read the server-side admin token through one configuration boundary."""
+    return os.getenv("USECT_ZERO_ADMIN_TOKEN", "").strip()
+
+
+def _base_url() -> str:
+    raw = _configured_base_url()
 
     # Render Blueprints expose a service's internal host and port through
     # fromService.property=hostport (for example, "usect-zero-core:10000").
@@ -133,6 +155,7 @@ def request_core(
     query: dict[str, str] | None = None,
     api_key: str | None = None,
     admin: bool = False,
+    device_token: str | None = None,
 ) -> CoreReply:
     """Send one allowlisted, bounded request to the configured Go API.
 
@@ -170,8 +193,14 @@ def request_core(
             raise USECTZeroConfigurationError("Invalid developer API key header.")
         headers["X-API-Key"] = supplied_key
 
+    supplied_device_token = (device_token or "").strip()
+    if supplied_device_token:
+        if len(supplied_device_token) > 256 or "\r" in supplied_device_token or "\n" in supplied_device_token:
+            raise USECTZeroConfigurationError("Invalid enrolled-device token header.")
+        headers["X-Device-Token"] = supplied_device_token
+
     if admin:
-        admin_token = core_admin_token("zero")
+        admin_token = _admin_token()
         if not admin_token:
             raise USECTZeroAdminTokenMissing(
                 "The backend's USECT_ZERO_ADMIN_TOKEN is not configured."
