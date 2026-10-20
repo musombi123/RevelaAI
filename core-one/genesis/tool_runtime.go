@@ -41,7 +41,7 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 		}
 	}
 
-	artifactDir := filepath.Join(root, "versions", name, version, "artifact"
+	artifactDir := filepath.Join(root, "versions", name, version, "artifact")
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(record.Manifest.TimeoutMillis)*time.Millisecond)
 	defer cancel()
 	image := "golang:1.23-alpine"
