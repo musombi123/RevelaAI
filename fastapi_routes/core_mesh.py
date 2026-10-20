@@ -712,11 +712,19 @@ async def core_mesh_tool_activate_api(name: str, version: str, artifact_hash: st
     try:
         record = await run_in_threadpool(get_signed_tool_version, name, version, artifact_hash)
         manifest = record.get("manifest") if isinstance(record, dict) else {}
-        if isinstance(manifest, dict) and int(manifest.get("risk_tier", 0) or 0) > 0:
+        risk_tier = manifest.get("risk_tier", 0) if isinstance(manifest, dict) else 0
+        owner_approval_required = risk_tier in {1, 2}
+        if owner_approval_required:
             owner_error = _genesis_owner_failure(user_id)
             if owner_error:
                 return owner_error
-        result = await run_in_threadpool(activate_signed_tool, name, version, artifact_hash)
+        result = await run_in_threadpool(
+            activate_signed_tool,
+            name,
+            version,
+            artifact_hash,
+            owner_approval_required=owner_approval_required,
+        )
     except GenesisToolRegistryError as exc:
         return _tool_registry_error(exc)
     return {"status": "success", "data": result}
@@ -788,11 +796,19 @@ async def core_mesh_tool_rollback_api(name: str, request: Request):
     try:
         record = await run_in_threadpool(get_signed_tool_version, name, version, artifact_hash)
         manifest = record.get("manifest") if isinstance(record, dict) else {}
-        if isinstance(manifest, dict) and int(manifest.get("risk_tier", 0) or 0) > 0:
+        risk_tier = manifest.get("risk_tier", 0) if isinstance(manifest, dict) else 0
+        owner_approval_required = risk_tier in {1, 2}
+        if owner_approval_required:
             owner_error = _genesis_owner_failure(user_id)
             if owner_error:
                 return owner_error
-        result = await run_in_threadpool(rollback_signed_tool, name, version, artifact_hash)
+        result = await run_in_threadpool(
+            rollback_signed_tool,
+            name,
+            version,
+            artifact_hash,
+            owner_approval_required=owner_approval_required,
+        )
     except GenesisToolRegistryError as exc:
         return _tool_registry_error(exc)
     return {"status": "success", "data": result}
