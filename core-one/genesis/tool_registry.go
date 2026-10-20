@@ -449,10 +449,13 @@ func makeTreeReadOnly(root string) error {
 		if err != nil {
 			return err
 		}
+		// Artifacts must be readable by the sandbox's non-root UID while
+		// remaining non-writable to all users. Parent registry directories and
+		// active pointers remain private to the Genesis process.
 		if entry.IsDir() {
-			return os.Chmod(path, 0o500)
+			return os.Chmod(path, 0o555)
 		}
-		return os.Chmod(path, 0o400)
+		return os.Chmod(path, 0o444)
 	})
 }
 
