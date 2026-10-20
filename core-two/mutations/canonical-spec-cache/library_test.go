@@ -2,6 +2,7 @@ package candidate
 
 import (
 	"encoding/json"
+	"fmt"
 	"errors"
 	"math"
 	"strings"
