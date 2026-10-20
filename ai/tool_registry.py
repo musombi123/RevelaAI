@@ -283,9 +283,9 @@ def get_signed_tool_version(name: str, version: str, artifact_hash: str) -> dict
     """Fetch a specific signed version and let Genesis re-verify its signature/hash."""
     if not _NAME_RE.fullmatch(str(name or "")):
         raise GenesisToolRegistryError("Invalid Genesis tool name.", code="invalid_tool_name", status_code=400)
-    if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._+-]{0,63}", str(version or "")):
+    if not _VERSION_RE.fullmatch(str(version or "")):
         raise GenesisToolRegistryError("Invalid Genesis tool version.", code="invalid_tool_version", status_code=400)
-    if not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+    if not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid Genesis artifact hash.", code="invalid_artifact_hash", status_code=400)
     result = _request(
         "/v1/genesis/registry/tools/" + quote(name, safe="") + "/" + quote(version, safe="") + "/" + quote(artifact_hash, safe="")
@@ -318,7 +318,7 @@ def provider_tool_context(provider: str, tools: list[dict[str, Any]] | None = No
 
 def activate_signed_tool(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
     """Activate a signed version via the Gateway; owner credential stays server-side."""
-    if not _NAME_RE.fullmatch(str(name or "")) or not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+    if not _NAME_RE.fullmatch(str(name or "")) or not _VERSION_RE.fullmatch(str(version or "")) or not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
     owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
     if not owner_token:
@@ -339,7 +339,7 @@ def deactivate_signed_tool(name: str) -> dict[str, Any]:
 
 
 def rollback_signed_tool(name: str, version: str, artifact_hash: str) -> dict[str, Any]:
-    if not _NAME_RE.fullmatch(str(name or "")) or not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+    if not _NAME_RE.fullmatch(str(name or "")) or not _VERSION_RE.fullmatch(str(version or "")) or not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
     owner_token = str(os.getenv("GENESIS_OWNER_APPROVAL_TOKEN") or "").strip()
     if not owner_token:
@@ -371,7 +371,7 @@ def confirm_tier2_action(
     action_approval_token: str,
 ) -> dict[str, Any]:
     """Issue a one-use confirmation for exact Tier 2 arguments after an operator action."""
-    if not _NAME_RE.fullmatch(str(name or "")) or not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+    if not _NAME_RE.fullmatch(str(name or "")) or not _VERSION_RE.fullmatch(str(version or "")) or not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid Genesis artifact reference.", code="invalid_artifact_reference", status_code=400)
     if not action_approval_token:
         raise GenesisToolRegistryError("A separate per-action human approval credential is required.", code="action_approval_required", status_code=403)
@@ -407,7 +407,9 @@ def execute_active_tool(
     """Delegate execution to Genesis; never run generated code in the Python gateway."""
     if not _NAME_RE.fullmatch(str(name or "")):
         raise GenesisToolRegistryError("Invalid Genesis tool name.", code="invalid_tool_name", status_code=400)
-    if not re.fullmatch(r"[0-9a-f]{64}", str(artifact_hash or "")):
+    if not _VERSION_RE.fullmatch(str(version or "")):
+        raise GenesisToolRegistryError("Invalid Genesis tool version.", code="invalid_tool_version", status_code=400)
+    if not _ARTIFACT_HASH_RE.fullmatch(str(artifact_hash or "")):
         raise GenesisToolRegistryError("Invalid signed artifact hash.", code="invalid_artifact_hash", status_code=400)
     if not isinstance(arguments, dict):
         raise GenesisToolRegistryError("Tool arguments must be a JSON object.", code="invalid_tool_arguments", status_code=400)
@@ -436,7 +438,7 @@ def execute_active_tool(
         encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if len(encoded) > _MAX_RESULT_BYTES:
             raise GenesisToolRegistryError("Tool result exceeds the size limit.", code="tool_result_too_large", status_code=502)
-        success = result.get("status") in {"success", "completed"}
+        success = result.get("status") in {"success", "completed", "proposal_only"}
         if not success:
             error_class = str(result.get("error_class") or "tool_execution_failed")[:80]
         return result
