@@ -84,3 +84,32 @@ func TestGeneratedManifestAlwaysValidAndTierDerived(t *testing.T) {
 		t.Fatalf("expected conservative Tier 2 manifest, got %#v", manifest)
 	}
 }
+
+
+func TestManifestRejectsNamesThatPythonGatewayCannotAddress(t *testing.T) {
+	for _, name := range []string{"1tool", "_tool", "Tool", "tool.name"} {
+		m := validManifestForTest()
+		m.Name = name
+		if err := ValidateToolManifest(m); err == nil {
+			t.Errorf("expected non-canonical tool name %q to be rejected", name)
+		}
+	}
+}
+
+func TestManifestEnforcesLanguageSpecificEntrypoints(t *testing.T) {
+	m := validManifestForTest()
+	m.Entrypoint = "src/main.go"
+	if err := ValidateToolManifest(m); err == nil {
+		t.Fatal("Go runtime ABI must use code.go")
+	}
+	m = validManifestForTest()
+	m.Language = "python"
+	m.Entrypoint = "main.py"
+	if err := ValidateToolManifest(m); err != nil {
+		t.Fatalf("Python .py entrypoint should validate: %v", err)
+	}
+	m.Entrypoint = "main.go"
+	if err := ValidateToolManifest(m); err == nil {
+		t.Fatal("Python entrypoint must use .py")
+	}
+}
