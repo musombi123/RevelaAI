@@ -14,7 +14,7 @@ from revelai.core.brain_os import (
     simulate_recovery_action,
     evaluate_routing_shadow,
 )
-from revelai.routers.agi_router import agi_router
+from fastapi_routes.agi import router as agi_router
 
 
 class FakeCursor:
@@ -473,64 +473,12 @@ def test_diagnostics_are_bounded_and_never_claim_automatic_recovery():
 
 
 def test_brain_os_routes_are_registered():
-    assert len(agi_router.deferred_functions) >= 6
+    assert len(agi_router.routes) >= 6
 
-def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails():
-    import sys
-    import types
-    from flask import Flask
-
-    # Keep this regression test isolated from optional provider/scraper SDKs.
-    # The chat route dependencies are replaced with narrow import-time stubs.
-    stubs = {}
-
-    def stub_module(name, **attributes):
-        module = types.ModuleType(name)
-        for key, value in attributes.items():
-            setattr(module, key, value)
-        stubs[name] = module
-        return module
-
-    stub_module("ai.intent_router", classify_intent=lambda message: "general")
-    stub_module(
-        "ai.global_brain_adapter",
-        build_global_context=lambda **kwargs: (
-            {"role": "system", "content": "test"},
-            {
-                "hub": "general", "hubRequested": "auto", "hubDetected": "general",
-                "interactionTone": "clear", "capabilities": [],
-            },
-        ),
-    )
-    stub_module(
-        "ai.hub_prompts",
-        HUB_LABELS={"general": "General"},
-        get_identity_answer=lambda *args, **kwargs: None,
-    )
-    stub_module(
-        "revelai.core.agi_manifest",
-        get_self_description_answer=lambda *args, **kwargs: None,
-    )
-    stub_module(
-        "services.ai_service",
-        process_message=lambda **kwargs: {
-            "response": "The test response is available.",
-            "confidence": "high", "intent": "general",
-            "provider": "test-provider", "model": "test-model",
-        },
-    )
-    stub_module(
-        "routes.memory_routes",
-        _record_messages=lambda **kwargs: {},
-        _require_identity=lambda: ("oid-test", "user-test", None),
-        memories=lambda: None,
-    )
-    with patch.dict(sys.modules, stubs):
-        from routes import chat_routes
-
-    app = Flask(__name__)
-    app.register_blueprint(chat_routes.chat_bp, url_prefix="/api/chat")
-    app.config["TESTING"] = True
+def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails(monkeypatch):
+    from fastapi.testclient import TestClient
+    from asgi import app
+    from fastapi_routes import chat as chat_routes
 
     interaction = {
         "hub": "general",
@@ -539,19 +487,44 @@ def test_chat_endpoint_succeeds_when_brain_os_telemetry_storage_fails():
         "interactionTone": "clear",
         "capabilities": [],
     }
-    with (
-        patch.object(chat_routes, "_require_identity", return_value=("oid-test", "user-test", None)),
-        patch.object(chat_routes, "_load_personalization_context", return_value=None),
-        patch.object(chat_routes, "_persist_turn"),
-        patch("revelai.core.brain_os.record_chat_outcome", side_effect=OSError("telemetry database unavailable")),
+    monkeypatch.setattr(
+        chat_routes,
+        "authenticate_identity",
+        lambda *args, **kwargs: ("oid-test", "user-test", None),
+    )
+    monkeypatch.setattr(chat_routes, "_load_personalization_context", lambda *_: None)
+    monkeypatch.setattr(chat_routes, "classify_intent", lambda _message: "general")
+    monkeypatch.setattr(
+        chat_routes,
+        "build_global_context",
+        lambda **_kwargs: ({"role": "system", "content": "test"}, interaction),
+    )
+    monkeypatch.setattr(chat_routes, "get_identity_answer", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(chat_routes, "get_self_description_answer", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        chat_routes,
+        "process_message",
+        lambda **_kwargs: {
+            "response": "The test response is available.",
+            "confidence": "high",
+            "intent": "general",
+            "provider": "test-provider",
+            "model": "test-model",
+        },
+    )
+    monkeypatch.setattr(chat_routes, "_persist_turn", lambda *_args, **_kwargs: None)
+
+    with patch(
+        "revelai.core.brain_os.record_chat_outcome",
+        side_effect=RuntimeError("telemetry database unavailable"),
     ):
-        response = app.test_client().post(
+        response = TestClient(app).post(
             "/api/chat",
             json={"message": "Please answer this test", "hub": "auto"},
         )
 
     assert response.status_code == 200
-    body = response.get_json()
+    body = response.json()
     assert body["status"] == "success"
     assert body["data"]["reply"].endswith("The test response is available.")
 
