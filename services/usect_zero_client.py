@@ -1,6 +1,6 @@
 """Bounded HTTP client for the model-free USECT-ZERO Go core.
 
-The Flask backend is a gateway only: it never runs candidate code or performs
+The FastAPI gateway is an HTTP proxy only: it never runs candidate code or performs
 engineering operations itself. The Go core remains the source of truth for
 scoped developer API keys and human-gated operation rules.
 """
@@ -131,7 +131,7 @@ def request_core(
 
     Caller-supplied Authorization headers are intentionally not accepted. The
     caller's X-API-Key is forwarded only for the Go core to verify its scope.
-    Admin actions use a separate server-side secret after Flask admin auth.
+    Admin actions use a separate server-side secret after the native FastAPI admin check.
     """
     if not is_enabled():
         raise USECTZeroDisabled("USECT-ZERO is disabled by configuration.")
