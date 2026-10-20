@@ -59,3 +59,32 @@ def test_connection_failure_is_reported_as_zero_unavailable(monkeypatch):
     monkeypatch.setattr(client.requests, "request", fail_request)
     with pytest.raises(client.USECTZeroUnavailable, match="service is unavailable"):
         client.request_core("GET", "/v1/health")
+
+
+def test_device_token_is_forwarded_only_in_its_dedicated_header(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
+    monkeypatch.setenv("USECT_ZERO_URL", "http://zero.internal:8780")
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def iter_content(self, chunk_size):
+            yield b'{"status":"ok"}'
+
+        def close(self):
+            return None
+
+    def fake_request(method, url, **kwargs):
+        captured.update(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(client.requests, "request", fake_request)
+    reply = client.request_core(
+        "GET", "/v1/devices/0123456789abcdef01234567/read",
+        device_token="uzd_test-token",
+    )
+    assert reply.status_code == 200
+    assert captured["headers"]["X-Device-Token"] == "uzd_test-token"
+    assert "Authorization" not in captured["headers"]
+    assert "X-Admin-Token" not in captured["headers"]
