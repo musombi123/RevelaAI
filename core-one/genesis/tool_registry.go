@@ -495,18 +495,7 @@ func readActivePointer(root, name string) (ActiveToolPointer, error) {
 }
 
 func constantTimeStringEqual(a, b string) bool {
-	return len(a) == len(b) && subtleCompare([]byte(a), []byte(b))
-}
-
-func subtleCompare(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	var difference byte
-	for i := range a {
-		difference |= a[i] ^ b[i]
-	}
-	return difference == 0
+	return len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 func makeRegistryError(err error) string {
