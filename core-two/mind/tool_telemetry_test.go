@@ -27,6 +27,7 @@ func telemetryEvents(tool, hash string, count, failures int, includeReplay bool)
 			LatencyMS: int64(80 + (i % 5)),
 			Timestamp: time.Now().UTC().Add(-time.Duration(count-i) * time.Second),
 			SampleKind: kind,
+			EvidenceOrigin: "synthetic_fixture",
 		}
 		if !event.Success {
 			event.ErrorClass = "tool_error"
@@ -46,6 +47,7 @@ func TestTelemetryEndpointRejectsUnauthenticatedWrites(t *testing.T) {
 		LatencyMS: 12,
 		Timestamp: time.Now().UTC(),
 		SampleKind: "runtime",
+		EvidenceOrigin: "synthetic_fixture",
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -186,8 +188,8 @@ func TestCanaryAndHumanFeedbackUseIndependentRankingEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Canary.Decision != "promote" || !result.Scored {
-		t.Fatalf("expected evidence-backed Tier 1 canary result: %+v", result)
+	if result.Canary.Decision != "hold" || !result.Scored || !result.Canary.SyntheticFixture {
+		t.Fatalf("synthetic test evidence must be scored as a fixture but held from promotion: %+v", result)
 	}
 	_, err = service.RecordFeedback(LearningFeedback{
 		CandidateID: candidate.CandidateID,
@@ -207,7 +209,7 @@ func TestCanaryAndHumanFeedbackUseIndependentRankingEntries(t *testing.T) {
 	for _, entry := range summary.Mutations {
 		if entry.Mutation == candidate.CandidateID {
 			found = true
-			if entry.CanaryPromote != 1 || entry.NeedsWork != 1 || entry.HumanDecisions != 1 || entry.Score != 1 {
+			if entry.CanaryHold != 1 || entry.NeedsWork != 1 || entry.HumanDecisions != 1 || entry.Score != -1 {
 				t.Fatalf("human and canary evidence must both influence ranking: %+v", entry)
 			}
 		}
@@ -244,7 +246,20 @@ func TestImprovementMetricsUseTelemetryWithoutLegacyMetricsFile(t *testing.T) {
 	if !ok || len(versions) != 1 {
 		t.Fatalf("expected one per-version metrics record, got %#v", telemetry["versions"])
 	}
-	if payload["synthetic_fixture"] != false || payload["production_verified"] != false {
+	if payload["synthetic_fixture"] != true || payload["production_verified"] != false {
 		t.Fatalf("telemetry must not be mislabeled as verified production evidence: %#v", payload)
+	}
+}
+
+
+func TestSyntheticTelemetryNeverRecommendsPromotion(t *testing.T) {
+	baseline := telemetryEvents("sample_tool", strings.Repeat("a", 64), 30, 0, true)
+	candidate := telemetryEvents("sample_tool", strings.Repeat("b", 64), 30, 0, true)
+	decision := evaluateCanary(baseline, candidate, 30, 1)
+	if decision.Decision != "hold" || decision.AutoPromotionRecommended {
+		t.Fatalf("synthetic fixtures must never be treated as promotion evidence: %+v", decision)
+	}
+	if !decision.SyntheticFixture || decision.ProductionVerified {
+		t.Fatalf("decision must label fixtures explicitly and remain unverified: %+v", decision)
 	}
 }
