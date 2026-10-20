@@ -662,9 +662,9 @@ _MIND_CANDIDATE_FIELDS = frozenset({
     "sandbox_tested",
     "sandbox_evidence_ref",
 })
-_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}\\Z")
-_MIND_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\\Z")
-_MIND_EVIDENCE_RE = re.compile(r"[A-Za-z0-9._:/#-]{1,500}\\Z")
+_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}\Z")
+_MIND_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+_MIND_EVIDENCE_RE = re.compile(r"[A-Za-z0-9._:/#-]{1,500}\Z")
 
 
 def score_mind_foundry_candidate(candidate: dict) -> dict:
