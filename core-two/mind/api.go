@@ -47,7 +47,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var event ToolTelemetryEvent
 		if err := decodeStrictAPIJSON(w, r, &event); err != nil { writeAPIError(w, 400, "invalid_telemetry", "Telemetry must contain only the declared operational fields."); return }
 		if err := s.RecordToolTelemetry(event); err != nil { writeAPIError(w, 422, "telemetry_rejected", err.Error()); return }
-		writeJSON(w, 201, map[string]any{"status": "recorded", "tool_name": event.ToolName, "version_hash": event.VersionHash, "user_content_recorded": false, "synthetic_fixture": false})
+		writeJSON(w, 201, map[string]any{"status": "recorded", "tool_name": event.ToolName, "version_hash": event.VersionHash, "user_content_recorded": false, "synthetic_fixture": event.EvidenceOrigin == "synthetic_fixture", "production_verified": false, "evidence_origin": event.EvidenceOrigin})
 	case r.URL.Path == "/v1/mind/candidates" && r.Method == http.MethodPost:
 		if !s.allowMutation(w, r) { return }
 		var candidate FoundryCandidate
