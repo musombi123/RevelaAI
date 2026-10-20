@@ -110,6 +110,9 @@ def _request(path: str, *, method: str = "GET", payload: dict[str, Any] | None =
             headers=headers,
             timeout=max(1.0, min(float(timeout), 180.0)),
             allow_redirects=False,
+            # Genesis is a private authenticated service. Do not route its
+            # service token through untrusted HTTP(S)_PROXY environment values.
+            proxies={"http": "", "https": ""},
         )
     except requests.RequestException:
         raise GenesisToolRegistryError("Genesis is unavailable; normal RevelaAI chat can continue.", code="genesis_unavailable", status_code=503) from None
