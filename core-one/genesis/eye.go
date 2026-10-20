@@ -61,7 +61,7 @@ var (
 		"repository": true, "kenya": true, "demand": true,
 		"emerging": true, "hardware": true, "integration": true,
 		"standards": true, "innovation": true, "available": true,
-		"recent": true, "search": true, "their": true,
+		"recent": true, "search": true,
 	}
 )
 
