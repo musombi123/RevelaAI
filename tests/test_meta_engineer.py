@@ -12,6 +12,21 @@ def test_requested_health_route_is_generated_as_proposal():
     assert "proposal_only" in result["code"]
     assert result["runtime_integration"] == "disabled_until_human_approval"
 
+
+def test_post_backend_proposal_uses_fastapi_and_validates_json():
+    result = generate_feature(
+        "Add endpoint POST /api/proposals/publish that validates proposal input",
+        target="backend",
+    )
+    code = result["code"]
+    assert result["kind"] == "python_fastapi_route_proposal"
+    assert "from fastapi import APIRouter, Request" in code
+    assert "await request.json()" in code
+    assert '"code": "invalid_json"' in code
+    assert '"code": "invalid_payload"' in code
+    assert "from flask import" not in code
+
+
 def test_generator_rejects_empty_spec():
     try:
         generate_feature("")
