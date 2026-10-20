@@ -72,6 +72,12 @@ func ValidateToolManifest(m ToolManifest) error {
 	if m.Language != "go" && m.Language != "python" {
 		return errors.New("tool language must be go or python")
 	}
+	if m.Language == "go" && m.Entrypoint != "code.go" {
+		return errors.New("Go tools must use the code.go entrypoint")
+	}
+	if m.Language == "python" && path.Ext(m.Entrypoint) != ".py" {
+		return errors.New("Python tools must use a .py entrypoint")
+	}
 	if m.Entrypoint == "" || len(m.Entrypoint) > 240 ||
 		strings.ContainsAny(m.Entrypoint, "\\\r\n") ||
 		path.IsAbs(m.Entrypoint) ||
