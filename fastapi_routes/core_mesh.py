@@ -718,6 +718,9 @@ async def core_mesh_tool_confirm_api(name: str, version: str, artifact_hash: str
     operator_error = _approved_tool_operator(user_id)
     if operator_error:
         return operator_error
+    owner_error = _genesis_owner_failure(user_id)
+    if owner_error:
+        return owner_error
     body = await _body_or_none(request)
     if not isinstance(body, dict) or not isinstance(body.get("arguments"), dict):
         return JSONResponse(
