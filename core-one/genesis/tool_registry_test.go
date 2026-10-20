@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+func registryTestRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	// Published artifact trees are deliberately read-only in production. Make
+	// the test fixture writable before testing.T removes its temporary root.
+	t.Cleanup(func() { _ = makeTreeWritable(root) })
+	return root
+}
+
 func testSigningKey(t *testing.T) {
 	t.Helper()
 	seed := []byte("01234567890123456789012345678901")
@@ -67,7 +76,7 @@ func publishTestArtifact(t *testing.T, coreRoot string, manifest ToolManifest, s
 
 func TestFailedSandboxEvidenceCannotBeSigned(t *testing.T) {
 	testSigningKey(t)
-	coreRoot := t.TempDir()
+	coreRoot := registryTestRoot(t)
 	manifest := validManifestForTest()
 	candidate := writeRegistryCandidate(t, "package candidate\n")
 	_, err := PublishSignedToolArtifact(
