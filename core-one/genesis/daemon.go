@@ -379,11 +379,15 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 				failed,
 				entry.Name(),
 				"oversized-entry",
-			); moveErr != nil && firstErr == nil {
-				firstErr = fmt.Errorf(
-					"quarantine oversized queue entry: %w",
-					moveErr,
-				)
+			); moveErr != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf(
+						"quarantine oversized queue entry: %w",
+						moveErr,
+					)
+				}
+			} else if firstErr == nil {
+				firstErr = fmt.Errorf("oversized queue entry %s was quarantined", entry.Name())
 			}
 			continue
 		}
