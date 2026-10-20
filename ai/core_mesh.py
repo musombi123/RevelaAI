@@ -348,7 +348,6 @@ def propose_genesis_invention(demand: str, country: str = "KE", language: str = 
     demand = str(demand or "").strip()
     if not 3 <= len(demand) <= 500:
         raise CoreMeshError("Demand must contain between 3 and 500 characters.", status_code=400, code="invalid_invention_demand")
-    mind_base = _base_url("MIND_BASE_URL", "http://127.0.0.1:8782")
     if not (os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")):
         raise CoreMeshError("GENESIS_ADMIN_TOKEN is not configured on the RevelaAI service.", status_code=503, code="genesis_admin_token_not_configured")
     genesis_base = _base_url("GENESIS_BASE_URL", "")
