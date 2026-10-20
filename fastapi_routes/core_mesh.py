@@ -459,8 +459,8 @@ async def core_mesh_tool_execute_api(request: Request):
     return {"status": "success", "data": result}
 
 
-@router.post("/api/core-mesh/tools/{name}/{version}/{artifact_hash}/publish")
-async def core_mesh_tool_publish_api(name: str, version: str, artifact_hash: str, request: Request):
+@router.post("/api/core-mesh/tools/{name}/publish")
+async def core_mesh_tool_publish_api(name: str, request: Request):
     user_id = _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
