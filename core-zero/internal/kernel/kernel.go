@@ -251,7 +251,7 @@ func (k *Kernel) relativeSafe(rel string) (string, error) {
 	if k == nil || strings.TrimSpace(k.Root) == "" {
 		return "", errors.New("repository root is not configured")
 	}
-	if rel == "" || strings.ContainsRune(rel, '\x00') || filepath.IsAbs(rel) {
+	if strings.TrimSpace(rel) == "" || strings.ContainsRune(rel, '\x00') || filepath.IsAbs(rel) {
 		return "", errors.New("path must be a non-empty relative path")
 	}
 
