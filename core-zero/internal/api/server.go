@@ -51,8 +51,9 @@ const (
 )
 
 type Server struct {
-	K    *kernel.Kernel
-	Keys *forge.KeyManager
+	K       *kernel.Kernel
+	Keys    *forge.KeyManager
+	Devices *bridge.DeviceRegistry
 
 	rateMu sync.Mutex
 	rates  map[string]rateWindow
@@ -102,6 +103,7 @@ func New(k *kernel.Kernel) *Server {
 	s := &Server{K: k}
 	if k != nil {
 		s.Keys = forge.New(k.CoreRoot)
+		s.Devices = bridge.NewDeviceRegistry(k.CoreRoot)
 	}
 	return s
 }
