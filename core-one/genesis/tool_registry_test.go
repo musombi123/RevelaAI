@@ -32,7 +32,7 @@ func writeRegistryCandidate(t *testing.T, text string) string {
 }
 
 func TestFailedSandboxEvidenceCannotBeSigned(t *testing.T) {
-	t.Setenv("GENESIS_SIGNING_KEY", "unit-test-signing-key-at-least-32-bytes")
+	t.Setenv("GENESIS_SIGNING_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
 	coreRoot := t.TempDir()
 	manifest := validManifestForTest()
 	_, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n"), manifest, registryEvidenceForTest(t, manifest, false))
@@ -45,7 +45,7 @@ func TestFailedSandboxEvidenceCannotBeSigned(t *testing.T) {
 }
 
 func TestApprovalForHashACannotActivateHashB(t *testing.T) {
-	t.Setenv("GENESIS_SIGNING_KEY", "unit-test-signing-key-at-least-32-bytes")
+	t.Setenv("GENESIS_SIGNING_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
 	coreRoot := t.TempDir()
 	manifestA := validManifestForTest()
 	manifestA.Permissions.Network = true
@@ -67,7 +67,7 @@ func TestApprovalForHashACannotActivateHashB(t *testing.T) {
 }
 
 func TestRollbackRestoresPreviousSignedVersion(t *testing.T) {
-	t.Setenv("GENESIS_SIGNING_KEY", "unit-test-signing-key-at-least-32-bytes")
+	t.Setenv("GENESIS_SIGNING_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
 	coreRoot := t.TempDir()
 	manifestA := validManifestForTest()
 	recordA, err := PublishSignedToolArtifact(coreRoot, writeRegistryCandidate(t, "package candidate\n// version A\n"), manifestA, registryEvidenceForTest(t, manifestA, true))
@@ -87,7 +87,7 @@ func TestRollbackRestoresPreviousSignedVersion(t *testing.T) {
 }
 
 func TestTierTwoInvocationRequiresHashBoundPerActionConfirmation(t *testing.T) {
-	t.Setenv("GENESIS_SIGNING_KEY", "unit-test-signing-key-at-least-32-bytes")
+	t.Setenv("GENESIS_SIGNING_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY")
 	coreRoot := t.TempDir()
 	manifest := validManifestForTest()
 	manifest.Permissions.Hardware = true
