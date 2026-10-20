@@ -7,7 +7,23 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"regexp"
 	"strings"
+)
+
+var toolManifestVersionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}package genesis
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"path"
+	"regexp"
+	"strings"
+)
+
 )
 
 const (
@@ -62,7 +78,7 @@ func ValidateToolManifest(m ToolManifest) error {
 	if !validResourceName(m.Name) || len(m.Name) > maxAPIToolName {
 		return errors.New("invalid tool manifest name")
 	}
-	if strings.TrimSpace(m.Version) == "" || len(m.Version) > 64 || strings.ContainsAny(m.Version, "\r\n") {
+	if !toolManifestVersionPattern.MatchString(m.Version) {
 		return errors.New("invalid tool manifest version")
 	}
 	if m.Language != "go" && m.Language != "python" {
