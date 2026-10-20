@@ -2,6 +2,7 @@ package genesis
 
 import (
 	"crypto/ed25519"
+	"crypto/subtle"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
