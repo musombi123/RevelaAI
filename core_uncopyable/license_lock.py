@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from core_billing.licensing import LicenseError, verify_license_token
+from core_uncopyable.hardware_bind import hardware_fingerprint as get_hardware_fingerprint
 
 ENTERPRISE_ENTITLEMENTS = frozenset({
     "factory_build", "seed_create", "evolve", "migrate", "robot_build", "dna_restore",
@@ -22,6 +23,17 @@ def require_entitlement(
     factory_id: str | None = None,
 ) -> dict[str, Any]:
     """Verify signature, expiry, device/factory scope and the requested entitlement."""
+    if hardware_fingerprint is None:
+        # If the issuer chose to bind this license to a device, enforce that claim.
+        try:
+            preliminary = verify_license_token(token, factory_id=factory_id)
+        except LicenseError:
+            raise
+        if preliminary.get("hardware_fingerprint"):
+            try:
+                hardware_fingerprint = get_hardware_fingerprint()
+            except RuntimeError as exc:
+                raise EntitlementError("Hardware-bound license cannot be used without verified device identity.") from exc
     claims = verify_license_token(
         token,
         hardware_fingerprint=hardware_fingerprint,
