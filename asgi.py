@@ -23,6 +23,7 @@ from fastapi_routes.chat import router as chat_router
 from fastapi_routes.core_mesh import router as core_mesh_router
 from fastapi_routes.explain import router as explain_router
 from fastapi_routes.evolve_migrate import router as evolve_migrate_router
+from fastapi_routes.uncopyable import router as uncopyable_router
 from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
@@ -190,6 +191,27 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
+@app.on_event("startup")
+def enforce_uncopyable_startup() -> None:
+    """Enforce owner recipe trust when the deployment explicitly enables strict mode."""
+    if __import__("os").getenv("REVELA_UNCOPYABLE_ENFORCE", "").strip().lower() not in {"1", "true", "yes"}:
+        return
+    from core_uncopyable.hardware_bind import hardware_fingerprint
+    from core_uncopyable.recipe_lock import RecipeLockError, verify_recipe
+    from core_billing.licensing import LicenseError, load_public_key
+
+    try:
+        verify_recipe(strict_path=True)
+        # Strict deployments must provision the verification key independently.
+        if not (__import__("os").getenv("REVELA_LICENSE_PUBLIC_KEY") or __import__("os").getenv("REVELA_LICENSE_PUBLIC_KEY_PATH")):
+            raise RuntimeError("REVELA_LICENSE_PUBLIC_KEY(_PATH) is required in strict mode.")
+        load_public_key()
+        hardware_fingerprint()
+    except (RecipeLockError, LicenseError, RuntimeError) as exc:
+        logger.critical("USECT-UNCOPYABLE startup gate rejected runtime: %s", type(exc).__name__)
+        raise RuntimeError("Need RevelaCode Brain - Contact founder") from exc
+
+
 @app.get("/_fastapi/health", tags=["Operations"])
 async def fastapi_gateway_health() -> dict[str, str]:
     """Check the ASGI process only; provider readiness is reported by /ready."""
@@ -221,6 +243,7 @@ app.include_router(research_router)
 app.include_router(users_router)
 app.include_router(explain_router)
 app.include_router(evolve_migrate_router)
+app.include_router(uncopyable_router)
 app.include_router(fastapi_hub_router)
 app.include_router(living_brain_router)
 app.include_router(vision_router)
