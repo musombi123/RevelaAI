@@ -4,18 +4,17 @@ from __future__ import annotations
 import json
 
 import pytest
-from flask import Flask, jsonify
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 
-from routes import usect_zero_routes as routes
+from asgi import app
+from fastapi_routes import usect_zero as routes
 from services import usect_zero_client as client
 
 
 @pytest.fixture
 def test_client():
-    app = Flask(__name__)
-    app.register_blueprint(routes.usect_zero_bp, url_prefix="/api/usect-zero")
-    app.config.update(TESTING=True, MAX_CONTENT_LENGTH=25 * 1024 * 1024)
-    return app.test_client()
+    return TestClient(app)
 
 
 def test_public_key_request_stays_pending_and_needs_no_platform_admin(monkeypatch, test_client):
@@ -41,7 +40,7 @@ def test_public_key_request_stays_pending_and_needs_no_platform_admin(monkeypatc
     )
 
     assert response.status_code == 202
-    assert response.get_json()["secret_issued"] is False
+    assert response.json()["secret_issued"] is False
     assert observed["method"] == "POST"
     assert observed["path"] == "/v1/keys/request"
     assert observed["admin"] is False
@@ -53,25 +52,25 @@ def test_admin_key_list_fails_closed_before_calling_core(monkeypatch, test_clien
 
     def deny_admin():
         nonlocal called
-        return None, (jsonify({"status": "error", "code": "admin_required"}), 403)
+        return None, JSONResponse({"status": "error", "code": "admin_required"}, status_code=403)
 
     def fake_core(*args, **kwargs):
         nonlocal called
         called = True
         raise AssertionError("core must not be called before admin authentication")
 
-    monkeypatch.setattr(routes, "_require_platform_admin", deny_admin)
+    monkeypatch.setattr(routes, "require_platform_admin", deny_admin)
     monkeypatch.setattr(routes, "request_core", fake_core)
     response = test_client.get("/api/usect-zero/keys/requests")
 
     assert response.status_code == 403
-    assert response.get_json()["code"] == "admin_required"
+    assert response.json()["code"] == "admin_required"
     assert called is False
 
 
 def test_admin_approval_uses_internal_admin_channel(monkeypatch, test_client):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setattr(routes, "_require_platform_admin", lambda: ("admin-user-42", None))
+    monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user-42", None))
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -177,11 +176,11 @@ def test_post_body_is_bounded_and_must_be_json(monkeypatch, test_client):
         content_type="text/plain",
     )
     assert response.status_code == 415
-    assert response.get_json()["code"] == "json_required"
+    assert response.json()["code"] == "json_required"
 
 
 def test_invalid_admin_resource_identifier_is_rejected(monkeypatch, test_client):
-    monkeypatch.setattr(routes, "_require_platform_admin", lambda: ("admin-user", None))
+    monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user", None))
     monkeypatch.setattr(
         routes,
         "request_core",
@@ -237,11 +236,11 @@ def test_health_response_does_not_expose_repository_path(monkeypatch, test_clien
     response = test_client.get("/api/usect-zero/health")
 
     assert response.status_code == 200
-    payload = response.get_json()
+    payload = response.json()
     assert payload["model_free"] is True
     assert payload["offline_mode"] is True
     assert "repository_root" not in payload
-    assert "/srv/private/repository" not in response.get_data(as_text=True)
+    assert "/srv/private/repository" not in response.text
 
 
 def test_health_when_disabled_does_not_call_core(monkeypatch, test_client):
@@ -255,7 +254,7 @@ def test_health_when_disabled_does_not_call_core(monkeypatch, test_client):
     response = test_client.get("/api/usect-zero/health")
 
     assert response.status_code == 503
-    assert response.get_json()["status"] == "disabled"
+    assert response.json()["status"] == "disabled"
 
 
 def test_client_uses_server_side_admin_token_without_forwarding_authorization(monkeypatch):
@@ -290,7 +289,7 @@ def test_client_uses_server_side_admin_token_without_forwarding_authorization(mo
 
 def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypatch, test_client):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setattr(routes, "_require_platform_admin", lambda: ("admin-user-42", None))
+    monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user-42", None))
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -315,8 +314,8 @@ def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypa
     response = test_client.get("/api/usect-zero/keys/issued?status=active")
 
     assert response.status_code == 200
-    assert response.get_json()["keys"][0]["id"] == "key_123"
-    assert "key_hash" not in response.get_data(as_text=True).lower()
+    assert response.json()["keys"][0]["id"] == "key_123"
+    assert "key_hash" not in response.text.lower()
     assert observed["method"] == "GET"
     assert observed["path"] == "/v1/keys/issued"
     assert observed["query"] == {"status": "active"}
@@ -351,7 +350,7 @@ def test_diagnostics_route_uses_scoped_developer_key_channel(monkeypatch, test_c
     )
 
     assert response.status_code == 200
-    assert response.get_json()["schema_version"] == "usect-zero.diagnostics.v1"
+    assert response.json()["schema_version"] == "usect-zero.diagnostics.v1"
     assert observed["method"] == "GET"
     assert observed["path"] == "/v1/diagnostics"
     assert observed["admin"] is False
@@ -389,7 +388,7 @@ def test_assembly_template_catalog_uses_scoped_read_channel(monkeypatch, test_cl
     )
 
     assert response.status_code == 200
-    assert response.get_json()["schema_version"] == "usect-zero.assembly-catalog.v1"
+    assert response.json()["schema_version"] == "usect-zero.assembly-catalog.v1"
     assert observed["method"] == "GET"
     assert observed["path"] == "/v1/assemble/templates"
     assert observed["admin"] is False
@@ -418,7 +417,7 @@ def test_assembly_board_profiles_proxy_through_scoped_gateway(monkeypatch, test_
     )
 
     assert response.status_code == 200
-    assert response.get_json()["hardware_verified"] is False
+    assert response.json()["hardware_verified"] is False
     assert observed["method"] == "GET"
     assert observed["path"] == "/v1/assemble/boards"
     assert observed["api_key"] == "scoped-read-key"
