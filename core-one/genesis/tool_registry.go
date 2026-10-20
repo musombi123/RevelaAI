@@ -66,6 +66,9 @@ func PublishSignedToolArtifact(coreRoot, candidateDir string, manifest ToolManif
 	if err != nil {
 		return SignedToolArtifact{}, err
 	}
+	if evidence.CandidateHash == "" || evidence.CandidateHash != hash {
+		return SignedToolArtifact{}, errors.New("passing sandbox evidence must refer to the exact artifact content hash")
+	}
 	record := SignedToolArtifact{
 		Name: manifest.Name,
 		Version: manifest.Version,
@@ -259,6 +262,7 @@ func loadSignedToolArtifact(coreRoot, name, version, artifactHash string) (Signe
 	}
 	manifestDigest := sha256.Sum256(manifestJSON)
 	if !record.SandboxEvidence.Passed || record.SandboxEvidence.ToolName != name ||
+		record.SandboxEvidence.CandidateHash != artifactHash ||
 		record.SandboxEvidence.ManifestHash != hex.EncodeToString(manifestDigest[:]) {
 		return SignedToolArtifact{}, errors.New("signed artifact does not contain matching passing sandbox evidence")
 	}
