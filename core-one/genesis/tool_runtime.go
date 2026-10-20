@@ -96,16 +96,23 @@ func RunSignedToolInvocation(ctx context.Context, coreRoot, name, version, artif
 		}
 		return nil, errors.New("sandboxed tool execution failed")
 	}
-	if err := validateToolInvocationOutput(result); err != nil {
+	if err := validateToolInvocationOutputForName(result, name); err != nil {
 		return nil, err
+	}
+	return append([]byte(nil), result...), nil
+}
+
+func validateToolInvocationOutputForName(result []byte, name string) error {
+	if err := validateToolInvocationOutput(result); err != nil {
+		return err
 	}
 	var output struct {
 		Tool string `json:"tool"`
 	}
 	if err := json.Unmarshal(result, &output); err != nil || output.Tool != name {
-		return nil, errors.New("sandboxed tool output does not match the signed tool identity")
+		return errors.New("sandboxed tool output does not match the signed tool identity")
 	}
-	return append([]byte(nil), result...), nil
+	return nil
 }
 
 func validateToolInvocationOutput(result []byte) error {
