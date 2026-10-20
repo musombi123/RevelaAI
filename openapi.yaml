@@ -15,6 +15,7 @@ paths:
       operationId: submitUnknownKnowledge
       summary: Submit a teaching packet for an unknown topic
       description: Notes are private by default. Explicit sharing consent may trigger a Genesis proposal, which must be reviewed and merged by a human.
+      parameters:
         - $ref: '#/components/parameters/Country'
         - $ref: '#/components/parameters/Language'
       requestBody:
