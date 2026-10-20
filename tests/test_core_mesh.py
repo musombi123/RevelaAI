@@ -323,3 +323,29 @@ def test_genesis_event_stream_decodes_byte_lines(monkeypatch):
     monkeypatch.setattr(core_mesh.requests, "get", lambda *args, **kwargs: FakeResponse())
     events = list(core_mesh.iter_genesis_events(max_events=1))
     assert events == [{"status": "ok", "type": "status"}]
+
+
+def test_core_mesh_authenticated_requests_bypass_environment_proxies(monkeypatch):
+    observed = {}
+
+    class FakeResponse:
+        content = b'{"status":"ok"}'
+        status_code = 200
+        ok = True
+
+        def json(self):
+            return {"status": "ok"}
+
+    def fake_request(method, url, **kwargs):
+        observed.update(method=method, url=url, kwargs=kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr(core_mesh.requests, "request", fake_request)
+    result = core_mesh._request_json(
+        "https://genesis.example.com",
+        "/v1/genesis/status",
+        headers={"X-Genesis-Token": "test-token"},
+    )
+    assert result == {"status": "ok"}
+    assert observed["kwargs"]["headers"]["X-Genesis-Token"] == "test-token"
+    assert observed["kwargs"]["proxies"] == {"http": "", "https": ""}
