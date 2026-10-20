@@ -16,6 +16,19 @@ from ai.core_mesh import (
     propose_genesis_invention,
     propose_mind_evolution,
 )
+from ai.tool_registry import (
+    GenesisToolRegistryError,
+    activate_signed_tool,
+    confirm_tier2_action,
+    deactivate_signed_tool,
+    execute_active_tool,
+    list_active_tools,
+    list_signed_tools,
+    provider_tool_context,
+    publish_signed_tool,
+    rollback_signed_tool,
+)
+
 from ai.unknown_learning import (
     attach_genesis_proposal,
     attach_improvement_proposal,
@@ -354,6 +367,196 @@ async def core_mesh_mind_evolve_api(request: Request):
     return await run_in_threadpool(
         _proposal, request.headers.get("Authorization", ""), body, "mind"
     )
+
+
+
+
+def _tool_registry_error(exc: GenesisToolRegistryError):
+    return JSONResponse(
+        {"status": "error", "error": {"code": exc.code, "message": str(exc)}},
+        status_code=exc.status_code,
+    )
+
+
+def _authenticated_tool_user(request: Request) -> str | JSONResponse:
+    user_id = _resolve_user(request.headers.get("Authorization", ""))
+    if not user_id:
+        return _auth_failure()
+    return user_id
+
+
+def _approved_tool_operator(user_id: str):
+    return _operator_failure(user_id)
+
+
+@router.get("/api/core-mesh/tools")
+async def core_mesh_tools_api(request: Request, provider: str = ""):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    configured_order = [
+        item.strip().lower()
+        for item in os.getenv("REVELAAI_TEXT_PROVIDERS", "gemini").split(",")
+        if item.strip()
+    ]
+    selected_provider = (
+        str(provider or os.getenv("REVELAAI_ACTIVE_TEXT_PROVIDER") or "").strip().lower()
+        or (configured_order[0] if configured_order else "gemini")
+    )
+    try:
+        tools = await run_in_threadpool(list_active_tools)
+        context = await run_in_threadpool(provider_tool_context, selected_provider, tools)
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return {
+        "status": "success",
+        "data": {
+            "provider": selected_provider,
+            "active_tools": tools,
+            "tool_context": context,
+            "execution_policy": "signed-artifacts-only; generated source never runs in the gateway",
+        },
+    }
+
+
+@router.get("/api/core-mesh/tools/registry")
+async def core_mesh_tool_registry_api(request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
+    try:
+        records = await run_in_threadpool(list_signed_tools)
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return {"status": "success", "data": {"count": len(records), "tools": records}}
+
+
+@router.post("/api/core-mesh/tools/execute")
+async def core_mesh_tool_execute_api(request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    body = await _body_or_none(request)
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_json", "message": "Send a JSON object with name, version, artifact_hash and arguments."}},
+            status_code=400,
+        )
+    try:
+        result = await run_in_threadpool(
+            execute_active_tool,
+            str(body.get("name") or ""),
+            str(body.get("version") or ""),
+            str(body.get("artifact_hash") or ""),
+            body.get("arguments"),
+            confirmation_token=str(body.get("confirmation_token") or "") or None,
+        )
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.post("/api/core-mesh/tools/{name}/{version}/{artifact_hash}/publish")
+async def core_mesh_tool_publish_api(name: str, version: str, artifact_hash: str, request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
+    try:
+        result = await run_in_threadpool(publish_signed_tool, name)
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return JSONResponse({"status": "success", "data": result}, status_code=201)
+
+
+@router.post("/api/core-mesh/tools/{name}/{version}/{artifact_hash}/activate")
+async def core_mesh_tool_activate_api(name: str, version: str, artifact_hash: str, request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
+    try:
+        result = await run_in_threadpool(activate_signed_tool, name, version, artifact_hash)
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.post("/api/core-mesh/tools/{name}/{version}/{artifact_hash}/confirm")
+async def core_mesh_tool_confirm_api(name: str, version: str, artifact_hash: str, request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
+    body = await _body_or_none(request)
+    if not isinstance(body, dict) or not isinstance(body.get("arguments"), dict):
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_json", "message": "Confirmation requires the exact tool arguments."}},
+            status_code=400,
+        )
+    action_approval = os.getenv("GENESIS_ACTION_APPROVAL_TOKEN", "").strip()
+    try:
+        result = await run_in_threadpool(
+            confirm_tier2_action,
+            name,
+            version,
+            artifact_hash,
+            body["arguments"],
+            action_approval_token=action_approval,
+        )
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return JSONResponse({"status": "success", "data": result}, status_code=201)
+
+
+@router.post("/api/core-mesh/tools/{name}/deactivate")
+async def core_mesh_tool_deactivate_api(name: str, request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
+    try:
+        result = await run_in_threadpool(deactivate_signed_tool, name)
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return {"status": "success", "data": result}
+
+
+@router.post("/api/core-mesh/tools/{name}/rollback")
+async def core_mesh_tool_rollback_api(name: str, request: Request):
+    user_id = _authenticated_tool_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
+    body = await _body_or_none(request)
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": "error", "error": {"code": "invalid_json", "message": "Rollback requires version and artifact_hash."}},
+            status_code=400,
+        )
+    try:
+        result = await run_in_threadpool(
+            rollback_signed_tool,
+            name,
+            str(body.get("version") or ""),
+            str(body.get("artifact_hash") or ""),
+        )
+    except GenesisToolRegistryError as exc:
+        return _tool_registry_error(exc)
+    return {"status": "success", "data": result}
 
 
 @router.post("/v1/learn/unknown")
