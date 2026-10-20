@@ -125,6 +125,7 @@ def _request_json(
             headers=request_headers,
             timeout=timeout,
             allow_redirects=False,
+            proxies={"http": "", "https": ""},
         )
     except requests.RequestException:
         raise CoreMeshError("Core service is unreachable.", status_code=502, code="core_service_unreachable") from None
@@ -570,6 +571,7 @@ def iter_genesis_events(*, max_events: int = 100):
             timeout=(3.0, 25.0),
             allow_redirects=False,
             stream=True,
+            proxies={"http": "", "https": ""},
         ) as response:
             if response.status_code in {401, 403}:
                 raise CoreMeshError("Genesis rejected the server credential.", status_code=response.status_code, code="genesis_auth_rejected")
