@@ -96,7 +96,7 @@ AGI_MANIFEST: dict[str, Any] = {
         {
             "phase": "Phase 1 — Chat and Memory",
             "upgrades": [
-                "The production API is an existing Flask application served by a production WSGI server, not a separate FastAPI application.",
+                "The production API is the native FastAPI ASGI application; older blueprint source files are not mounted.",
                 "The React frontend uses the application API for chat and provider-backed responses.",
                 "Conversation and personalization memory depend on authentication, database reachability and the relevant request path.",
             ],
