@@ -568,6 +568,10 @@ func (e *Engine) forge(
 	}
 
 	expansionPlan := makeExpansionPlan(spec, coreRoot)
+	toolManifest, manifestErr := validateGeneratedToolManifest(spec)
+	if manifestErr != nil {
+		return Invention{}, fmt.Errorf("validate generated tool manifest: %w", manifestErr)
+	}
 
 	files := []string{
 		"code.go",
@@ -576,6 +580,7 @@ func (e *Engine) forge(
 		"README.md",
 		"hardware_guide.md",
 		"test.go",
+		"tool_manifest.json",
 		"evidence.json",
 		"capability_plan.json",
 		"expansion_plan.json",
@@ -597,6 +602,7 @@ func (e *Engine) forge(
 		"README.md":        generatedREADME(spec, evidence) + generatedCapabilityPlanNote(capabilityPlan),
 		"hardware_guide.md": generatedHardwareGuide(spec),
 		"test.go":           generatedTest(spec),
+		"tool_manifest.json": string(mustJSON(toolManifest)),
 
 		"evidence.json": string(mustJSON(map[string]any{
 			"schema_version": "genesis.invention-evidence.v2",
