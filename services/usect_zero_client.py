@@ -153,6 +153,7 @@ def request_core(
     query: dict[str, str] | None = None,
     api_key: str | None = None,
     admin: bool = False,
+    device_token: str | None = None,
 ) -> CoreReply:
     """Send one allowlisted, bounded request to the configured Go API.
 
@@ -189,6 +190,12 @@ def request_core(
         if len(supplied_key) > 4096 or "\r" in supplied_key or "\n" in supplied_key:
             raise USECTZeroConfigurationError("Invalid developer API key header.")
         headers["X-API-Key"] = supplied_key
+
+    supplied_device_token = (device_token or "").strip()
+    if supplied_device_token:
+        if len(supplied_device_token) > 256 or "\\r" in supplied_device_token or "\\n" in supplied_device_token:
+            raise USECTZeroConfigurationError("Invalid enrolled-device token header.")
+        headers["X-Device-Token"] = supplied_device_token
 
     if admin:
         admin_token = _admin_token()
