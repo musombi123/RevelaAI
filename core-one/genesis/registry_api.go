@@ -110,7 +110,16 @@ func (s *Server) serveRegistry(w http.ResponseWriter, r *http.Request, path stri
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(MaxToolTimeoutMillis)*time.Millisecond)
 		defer cancel()
-		evidence, err := RunCandidateSandbox(ctx, candidateDir, filepath.Join(s.Engine.CoreRoot, "state", "sandbox-evidence", name, manifest.Version), manifest)
+		evidence, err := runCandidateSandboxWithValidator(
+			ctx,
+			candidateDir,
+			filepath.Join(s.Engine.CoreRoot, "state", "sandbox-evidence", name, manifest.Version),
+			manifest,
+			runSandboxCommand,
+			func(stagedCandidate string) error {
+				return screenCandidateForPublication(s.Engine, stagedCandidate, manifest)
+			},
+		)
 		if err != nil {
 			writeAPIJSON(w, http.StatusUnprocessableEntity, map[string]any{
 				"status": "sandbox_failed", "tool": name, "evidence": evidence,
