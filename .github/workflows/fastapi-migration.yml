@@ -8,6 +8,13 @@ on:
       - "requirements.txt"
       - "render.yaml"
       - "revela_platform/**"
+      - "meta_engineer/**"
+      - "revelai/core/brain_os.py"
+      - "tests/test_meta_engineer.py"
+      - "tests/test_self_building_core.py"
+      - "tests/test_brain_os.py"
+      - "tests/test_agi_manifest.py"
+      - "tests/test_sci_core.py"
       - "routes/**"
       - "fastapi_routes/**"
       - "services/**"
@@ -88,5 +95,12 @@ jobs:
 
           print("FastAPI-only runtime contract verified.")
           PY
-      - name: Run FastAPI gateway regression tests
-        run: python -m pytest -q tests/test_fastapi_entrypoint.py
+      - name: Run native FastAPI and Meta-Engineer regressions
+        run: >-
+          python -m pytest -q
+          tests/test_fastapi_entrypoint.py
+          tests/test_meta_engineer.py
+          tests/test_self_building_core.py
+          tests/test_brain_os.py
+          tests/test_agi_manifest.py
+          tests/test_sci_core.py
