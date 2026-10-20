@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"usect-zero.local/core-zero/assemble"
@@ -38,9 +39,58 @@ type apiError struct {
 	Message string `json:"message"`
 }
 
+type rateWindow struct {
+	started time.Time
+	count   int
+}
+
+const (
+	scopeRateWindow = time.Minute
+	scopeRateLimit  = 60
+	maxRateBuckets  = 10000
+)
+
 type Server struct {
 	K    *kernel.Kernel
 	Keys *forge.KeyManager
+
+	rateMu sync.Mutex
+	rates  map[string]rateWindow
+}
+
+func (s *Server) allowScopeRate(keyID, scope string) bool {
+	if s == nil || keyID == "" || scope == "" {
+		return false
+	}
+	now := time.Now()
+	bucket := keyID + ":" + scope
+
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	if s.rates == nil {
+		s.rates = make(map[string]rateWindow)
+	}
+	window, exists := s.rates[bucket]
+	if !exists || now.Sub(window.started) >= scopeRateWindow || now.Before(window.started) {
+		if len(s.rates) >= maxRateBuckets {
+			for name, candidate := range s.rates {
+				if now.Sub(candidate.started) >= scopeRateWindow || now.Before(candidate.started) {
+					delete(s.rates, name)
+				}
+			}
+			if len(s.rates) >= maxRateBuckets {
+				return false
+			}
+		}
+		s.rates[bucket] = rateWindow{started: now, count: 1}
+		return true
+	}
+	if window.count >= scopeRateLimit {
+		return false
+	}
+	window.count++
+	s.rates[bucket] = window
+	return true
 }
 
 // New constructs the HTTP API server.
@@ -287,6 +337,15 @@ func (s *Server) requireScope(
 			Status:  "error",
 			Code:    "api_key_or_scope_required",
 			Message: "Supply an active X-API-Key with scope " + scope + ". Key requests remain pending until human approval.",
+		})
+		return "", false
+	}
+	if !s.allowScopeRate(id, scope) {
+		w.Header().Set("Retry-After", "60")
+		replyJSON(w, http.StatusTooManyRequests, apiError{
+			Status: "error",
+			Code: "scope_rate_limit_exceeded",
+			Message: "The approved key has exceeded the request limit for this scope; retry after the rate-limit window.",
 		})
 		return "", false
 	}
