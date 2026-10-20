@@ -237,4 +237,7 @@ def test_genesis_gateway_routes_are_registered():
         "/api/core-mesh/tools/{name}/rollback": {"POST"},
     }
     for path, methods in expected.items():
-        assert methods_by_path.get(path) == methods, f"route contract mismatch for {path}"
+        actual = methods_by_path.get(path)
+        if actual is not None:
+            actual = actual - {"HEAD"}  # Starlette may add HEAD automatically for GET routes.
+        assert actual == methods, f"route contract mismatch for {path}: got {actual}"
