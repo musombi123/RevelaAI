@@ -79,8 +79,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			writeAPIError(w, 503, "metrics_unavailable", "The stored improvement record is unavailable or unsafe."); return
 		}
-		detail["tool_telemetry"] = map[string]any{"status": snapshot["status"], "versions": versions, "provenance": "recorded_tool_runner_events"}
-		detail["synthetic_fixture"] = false
+		detail["tool_telemetry"] = map[string]any{"status": snapshot["status"], "versions": versions, "provenance": telemetryProvenanceForVersions(versions)}
+		syntheticFixture := detail["synthetic_fixture"] == true
+		for _, metric := range versions { if metric.SyntheticFixture { syntheticFixture = true } }
+		detail["synthetic_fixture"] = syntheticFixture
 		detail["production_verified"] = false
 		writeJSON(w, 200, detail)
 	case r.URL.Path == "/v1/mind/key" && r.Method == http.MethodGet:
@@ -177,4 +179,11 @@ func decodeStrictAPIJSON(w http.ResponseWriter, r *http.Request, target any) err
 		return err
 	}
 	return nil
+}
+
+
+func telemetryProvenanceForVersions(versions []ToolVersionMetrics) string {
+	if len(versions) == 0 { return "not_observed" }
+	for _, version := range versions { if version.SyntheticFixture { return "synthetic_fixture" } }
+	return "declared_tool_runner_and_replay_harness"
 }
