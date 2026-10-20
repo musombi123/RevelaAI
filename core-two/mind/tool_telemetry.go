@@ -306,7 +306,6 @@ func summarizeTelemetry(events []ToolTelemetryEvent) CanaryStats {
 		if stats.VersionHash == "" { stats.VersionHash = event.VersionHash }
 		stats.SampleCount++
 		if event.SampleKind == "replay" { stats.ReplaySamples++ } else { stats.RuntimeSamples++ }
-		if event.EvidenceOrigin == "synthetic_fixture" { stats.SyntheticFixture = true }
 		if event.Success { stats.SuccessCount++ } else { stats.FailureCount++ }
 		if event.Timestamp.After(stats.LastEventAt) { stats.LastEventAt = event.Timestamp }
 		if event.EvidenceOrigin == "synthetic_fixture" { stats.SyntheticFixture = true }
@@ -366,12 +365,14 @@ func evaluateCanary(baselineEvents, candidateEvents []ToolTelemetryEvent, minSam
 
 func (s *Service) ToolTelemetrySnapshot() map[string]any {
 	events, err := s.readToolTelemetry()
-	if err != nil { return map[string]any{"status":"unavailable","reason":"telemetry_history_invalid","provenance":"recorded_tool_runner_events","synthetic_fixture":false,"production_verified":false} }
+	if err != nil { return map[string]any{"status":"unavailable","reason":"telemetry_history_invalid","provenance":"unavailable","synthetic_fixture":false,"production_verified":false} }
 	tools := make(map[string][]ToolVersionMetrics)
 	for _, metric := range aggregateToolTelemetry(events) { tools[metric.ToolName] = append(tools[metric.ToolName], metric) }
 	status := "observed"
 	if len(events)==0 { status="not_observed" }
-	return map[string]any{"status":status,"tools":tools,"event_count":len(events),"provenance":"recorded_tool_runner_events","synthetic_fixture":false,"production_verified":false}
+	synthetic := false
+	for _, event := range events { if event.EvidenceOrigin == "synthetic_fixture" { synthetic = true; break } }
+	return map[string]any{"status":status,"tools":tools,"event_count":len(events),"provenance":telemetryProvenance(events),"synthetic_fixture":synthetic,"production_verified":false}
 }
 
 func (s *Service) ScoreFoundryCandidate(ctx context.Context, candidate FoundryCandidate, source CandidateSource) (CandidateScoreResult, error) {
