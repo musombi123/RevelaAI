@@ -53,9 +53,10 @@ def load_master_key(path: str | Path | None = None) -> bytes:
             "Generate it locally with python -m recipe.cli init."
         ) from exc
     # Render Secret Files are text files, so deployments may provision the
-    # raw 512-byte owner key as Base64. Decode only when explicitly enabled;
-    # never guess the format, since accepting ambiguous key material is unsafe.
-    decode_base64 = os.getenv("REVELA_MASTER_KEY_BASE64", "").strip().lower() in {
+    # raw 512-byte owner key as Base64. This is a separate switch from
+    # REVELA_MASTER_KEY_BASE64, which the ASGI startup gate validates as key
+    # material. Never overload one variable as both a key and a boolean flag.
+    decode_base64 = os.getenv("REVELA_MASTER_KEY_FILE_BASE64", "").strip().lower() in {
         "1", "true", "yes", "on"
     }
     if decode_base64:
