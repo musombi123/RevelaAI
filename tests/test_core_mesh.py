@@ -210,3 +210,30 @@ def test_mind_foundry_candidate_bridge_rejects_source_code_and_bad_hash(monkeypa
         core_mesh.score_mind_foundry_candidate(candidate)
     assert error.value.code == "invalid_mind_candidate"
 
+def test_mind_evolution_proposal_is_explicitly_targeted_at_core_one(monkeypatch):
+    monkeypatch.setenv("MIND_BASE_URL", "http://127.0.0.1:8782")
+    monkeypatch.setattr(core_mesh, "_upstream_headers", lambda **kwargs: {"X-Mind-Token": "internal-test"})
+    monkeypatch.setattr(
+        core_mesh,
+        "_request_json",
+        lambda *args, **kwargs: {
+            "status": "await_merge",
+            "version": "v1-test",
+            "tool_name": "school_doc_summary",
+            "selected_mutation": "bounded-input-guard",
+            "await_merge_path": "core-two/evolutions/v1-test/AWAIT_MERGE.md",
+        },
+    )
+
+    result = core_mesh.propose_mind_evolution(
+        "Improve Core-One tool reliability using reviewed evidence.",
+        "school_doc_summary",
+    )
+
+    assert result["target_core"] == "core-one"
+    assert result["operation_kind"] == "core_one_improvement_proposal"
+    assert result["target_modified"] is False
+    assert result["human_approval_required"] is True
+    assert result["automatic_merge"] is False
+    assert result["automatic_execution"] is False
+
