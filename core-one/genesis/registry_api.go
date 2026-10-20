@@ -318,8 +318,35 @@ func screenCandidateForPublication(engine *Engine, candidateDir string, manifest
 		_ = engine.Guardian.LogBlocked("tool_manifest_publish", string(manifestRaw), decision.Reason)
 		return errors.New("Guardian blocked the tool manifest at publication")
 	}
+	relativeFiles := []string{manifest.Entrypoint}
+	if manifest.Language == "go" {
+		relativeFiles = append(relativeFiles, "code.go", "library.go", "test.go")
+	} else {
+		err := filepath.WalkDir(candidateDir, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return errors.New("candidate symlinks are forbidden")
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if entry.Type().IsRegular() && strings.HasPrefix(entry.Name(), "test") && strings.HasSuffix(entry.Name(), ".py") {
+				relative, err := filepath.Rel(candidateDir, path)
+				if err != nil {
+					return err
+				}
+				relativeFiles = append(relativeFiles, filepath.ToSlash(relative))
+			}
+			return nil
+		})
+		if err != nil {
+			return errors.New("candidate Python test discovery failed")
+		}
+	}
 	seen := make(map[string]struct{})
-	for _, relative := range []string{manifest.Entrypoint, "code.go", "library.go", "test.go"} {
+	for _, relative := range relativeFiles {
 		if _, ok := seen[relative]; ok {
 			continue
 		}
