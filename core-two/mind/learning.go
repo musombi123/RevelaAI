@@ -29,7 +29,9 @@ const (
 var learningAppendMu sync.Mutex
 
 type LearningFeedback struct {
-	Version     string    `json:"version"`
+	Version     string    `json:"version,omitempty"`
+	CandidateID string    `json:"candidate_id,omitempty"`
+	Source      string    `json:"source,omitempty"`
 	ToolName    string    `json:"tool_name"`
 	Mutation    string    `json:"mutation"`
 	Outcome     string    `json:"outcome"`
@@ -39,13 +41,17 @@ type LearningFeedback struct {
 }
 
 type mutationLearning struct {
-	Mutation      string  `json:"mutation"`
-	Merged        int     `json:"merged"`
-	Rejected      int     `json:"rejected"`
-	Reverted      int     `json:"reverted"`
-	NeedsWork     int     `json:"needs_work"`
-	Score         float64 `json:"score"`
-	FeedbackCount int     `json:"feedback_count"`
+	Mutation       string  `json:"mutation"`
+	Merged         int     `json:"merged"`
+	Rejected       int     `json:"rejected"`
+	Reverted       int     `json:"reverted"`
+	NeedsWork      int     `json:"needs_work"`
+	CanaryPromote  int     `json:"canary_promote"`
+	CanaryHold     int     `json:"canary_hold"`
+	CanaryRollback int     `json:"canary_rollback"`
+	HumanDecisions int     `json:"human_decisions"`
+	Score          float64 `json:"score"`
+	FeedbackCount  int     `json:"feedback_count"`
 }
 
 type LearningSummary struct {
@@ -74,11 +80,22 @@ func (s *Service) RecordFeedback(
 	defer s.learningMu.Unlock()
 
 	feedback.Version = strings.TrimSpace(feedback.Version)
+	feedback.CandidateID = strings.TrimSpace(feedback.CandidateID)
+	feedback.Source = strings.ToLower(strings.TrimSpace(feedback.Source))
 	feedback.ToolName = strings.TrimSpace(feedback.ToolName)
 	feedback.Mutation = strings.TrimSpace(feedback.Mutation)
 	feedback.Outcome = strings.ToLower(strings.TrimSpace(feedback.Outcome))
 	feedback.Note = strings.TrimSpace(feedback.Note)
 	feedback.EvidenceRef = strings.TrimSpace(feedback.EvidenceRef)
+
+	// Public API submissions may contain human decisions only.
+	if feedback.Source != "" && feedback.Source != "human" {
+		return LearningSummary{}, errors.New("feedback source is reserved for Mind's internal canary ledger")
+	}
+	feedback.Source = "human"
+	if feedback.CandidateID != "" {
+		return s.recordCandidateFeedbackLocked(feedback)
+	}
 
 	if !validEvolutionVersion(feedback.Version) {
 		return LearningSummary{}, errors.New(
@@ -219,6 +236,117 @@ func (s *Service) RecordFeedback(
 	}
 
 	return s.learningSummaryUnlocked()
+}
+
+
+func (s *Service) recordCandidateFeedbackLocked(feedback LearningFeedback) (LearningSummary, error) {
+	if feedback.Version != "" {
+		return LearningSummary{}, errors.New("candidate feedback must not include an evolution version")
+	}
+	if !toolNamePattern.MatchString(feedback.CandidateID) || feedback.Mutation != feedback.CandidateID {
+		return LearningSummary{}, errors.New("candidate_id and mutation must match a scored candidate")
+	}
+	if !validName(feedback.ToolName) || !safeMindToolName(feedback.ToolName) {
+		return LearningSummary{}, errors.New("invalid tool_name")
+	}
+	switch feedback.Outcome {
+	case "merged", "rejected", "reverted", "needs_work":
+	default:
+		return LearningSummary{}, errors.New("outcome must be merged, rejected, reverted, or needs_work")
+	}
+	if err := validateHumanFeedbackFields(feedback); err != nil {
+		return LearningSummary{}, err
+	}
+
+	relative := filepath.Join("state", "candidates", feedback.CandidateID+".json")
+	raw, err := readMindFileWithinRoot(s.CoreRoot, relative, 128*1024)
+	if err != nil {
+		return LearningSummary{}, errors.New("candidate scoring evidence is missing, unreadable, or unsafe")
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return LearningSummary{}, errors.New("candidate scoring evidence is invalid JSON")
+	}
+	candidate, ok := stored["candidate"].(map[string]any)
+	if !ok {
+		return LearningSummary{}, errors.New("candidate evidence is missing candidate metadata")
+	}
+	candidateID, _ := candidate["candidate_id"].(string)
+	toolName, _ := candidate["tool_name"].(string)
+	result, ok := stored["result"].(map[string]any)
+	if !ok || result["guardian_passed"] != true || candidateID != feedback.CandidateID || toolName != feedback.ToolName {
+		return LearningSummary{}, errors.New("human feedback does not match a Guardian-cleared scored candidate")
+	}
+
+	records, err := s.readLearningRecordsUnlocked()
+	if err != nil {
+		return LearningSummary{}, fmt.Errorf("read existing feedback ledger: %w", err)
+	}
+	if err := validateFeedbackTransition(records, feedback); err != nil {
+		return LearningSummary{}, err
+	}
+	feedback.RecordedAt = time.Now().UTC()
+	if err := appendJSONLine(filepath.Join(s.CoreRoot, "state", "learning.jsonl"), feedback); err != nil {
+		return LearningSummary{}, fmt.Errorf("append candidate human feedback: %w", err)
+	}
+	return s.learningSummaryUnlocked()
+}
+
+func validateHumanFeedbackFields(feedback LearningFeedback) error {
+	if !utf8.ValidString(feedback.Note) || len(feedback.Note) < minLearningNoteBytes || len(feedback.Note) > maxLearningNoteBytes {
+		return fmt.Errorf("feedback note must be valid UTF-8 and %d–%d bytes", minLearningNoteBytes, maxLearningNoteBytes)
+	}
+	if strings.ContainsRune(feedback.Note, rune(0)) {
+		return errors.New("feedback note must not contain NUL characters")
+	}
+	if len(feedback.EvidenceRef) > maxLearningEvidenceBytes || !utf8.ValidString(feedback.EvidenceRef) {
+		return errors.New("evidence_ref must be valid UTF-8 and no more than 500 bytes")
+	}
+	if feedback.EvidenceRef != "" {
+		if err := validateLearningEvidenceRef(feedback.EvidenceRef); err != nil {
+			return fmt.Errorf("invalid evidence_ref: %w", err)
+		}
+	}
+	if feedback.Outcome == "merged" && feedback.EvidenceRef == "" {
+		return errors.New("merged feedback requires an evidence_ref for the human-reviewed merge record")
+	}
+	return nil
+}
+
+// recordCanaryOutcome is an internal path, not accepted by the public feedback API.
+func (s *Service) recordCanaryOutcome(candidate FoundryCandidate, decision CanaryDecision) error {
+	if s == nil {
+		return errors.New("Core-Two service is required")
+	}
+	if decision.Decision != "promote" && decision.Decision != "hold" && decision.Decision != "rollback" {
+		return errors.New("unsupported automatic canary outcome")
+	}
+	s.learningMu.Lock()
+	defer s.learningMu.Unlock()
+	records, err := s.readLearningRecordsUnlocked()
+	if err != nil {
+		return fmt.Errorf("read existing canary feedback ledger: %w", err)
+	}
+	entry := LearningFeedback{
+		CandidateID: candidate.CandidateID,
+		Source: "canary",
+		ToolName: candidate.ToolName,
+		Mutation: candidate.CandidateID,
+		Outcome: decision.Decision,
+		Note: limitLabel(decision.Reason, maxLearningNoteBytes),
+		EvidenceRef: candidate.CandidateID,
+		RecordedAt: time.Now().UTC(),
+	}
+	if len(entry.Note) < minLearningNoteBytes {
+		entry.Note = "Canary outcome recorded by Mind."
+	}
+	if err := validateStoredLearningRecord(entry); err != nil {
+		return fmt.Errorf("validate internal canary outcome: %w", err)
+	}
+	if err := validateFeedbackTransition(records, entry); err != nil {
+		return err
+	}
+	return appendJSONLine(filepath.Join(s.CoreRoot, "state", "learning.jsonl"), entry)
 }
 
 func validateFeedbackTransition(
