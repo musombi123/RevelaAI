@@ -24,6 +24,12 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
 
     app_source = Path("app.py").read_text(encoding="utf-8")
     asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
+    platform_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+    active_sources = [
+        ("ai/raw_reply.py", Path("ai/raw_reply.py").read_text(encoding="utf-8")),
+        ("meta_engineer/generator.py", Path("meta_engineer/generator.py").read_text(encoding="utf-8")),
+        ("revelai/core/brain_os.py", Path("revelai/core/brain_os.py").read_text(encoding="utf-8")),
+    ]
     requirements = Path("requirements.txt").read_text(encoding="utf-8").lower()
 
     assert "WSGIMiddleware" not in asgi_source
@@ -31,7 +37,8 @@ def test_runtime_has_no_flask_wsgi_compatibility_mount() -> None:
     assert "WSGIMiddleware" not in app_source
     assert not Path("legacy_flask_app.py").exists()
 
-    for filename, source in (("app.py", app_source), ("asgi.py", asgi_source)):
+    entry_sources = [("app.py", app_source), ("asgi.py", asgi_source), ("revela_platform/fastapi_app.py", platform_source)] + active_sources
+    for filename, source in entry_sources:
         tree = ast.parse(source, filename=filename)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
