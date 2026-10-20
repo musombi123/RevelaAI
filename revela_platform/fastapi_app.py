@@ -25,7 +25,6 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
-from starlette.middleware.wsgi import WSGIMiddleware
 
 from core_billing.licensing import LicenseError, create_license_token, verify_license_token
 from core_billing.payments import (
