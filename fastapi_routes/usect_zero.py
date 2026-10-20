@@ -105,6 +105,7 @@ def _proxy(
     admin: bool = False,
     query: dict[str, str] | None = None,
     forward_api_key: bool = True,
+    forward_device_token: bool = False,
     body: bytes | None = None,
 ):
     # Only X-API-Key may be passed through for scoped developer operations.
@@ -118,6 +119,7 @@ def _proxy(
             query=query,
             api_key=api_key,
             admin=admin,
+            device_token=request.headers.get("X-Device-Token") if forward_device_token else None,
         )
         return JSONResponse(reply.payload, status_code=reply.status_code)
     except USECTZeroDisabled:
@@ -341,6 +343,75 @@ async def revoke_developer_key(key_id: str, request: Request):
         "POST",
         f"/v1/keys/issued/{key_id}/revoke",
         body=body,
+    )
+
+
+@router.get("/supervisor/status")
+async def usect_zero_supervisor_status(request: Request):
+    return await run_in_threadpool(
+        _admin_proxy, request, "GET", "/v1/supervisor/status"
+    )
+
+
+@router.post("/supervisor/kill-switch")
+async def usect_zero_global_kill_switch(request: Request):
+    body, error = await _validate_post_body(request)
+    if error:
+        return error
+    return await run_in_threadpool(
+        _admin_proxy, request, "POST", "/v1/supervisor/kill-switch", body=body
+    )
+
+
+@router.get("/devices")
+async def list_enrolled_devices(request: Request):
+    return await run_in_threadpool(
+        _admin_proxy, request, "GET", "/v1/devices"
+    )
+
+
+@router.post("/devices/enroll")
+async def enroll_esp32_device(request: Request):
+    body, error = await _validate_post_body(request)
+    if error:
+        return error
+    return await run_in_threadpool(
+        _admin_proxy, request, "POST", "/v1/devices/enroll", body=body
+    )
+
+
+@router.post("/devices/{device_id}/revoke")
+async def revoke_enrolled_device(device_id: str, request: Request):
+    if not _valid_resource_id(device_id):
+        return _error("invalid_device_id", "Invalid device identifier.", 400)
+    body, error = await _validate_post_body(request)
+    if error:
+        return error
+    return await run_in_threadpool(
+        _admin_proxy, request, "POST", f"/v1/devices/{device_id}/revoke", body=body
+    )
+
+
+@router.get("/devices/{device_id}/read")
+async def read_enrolled_device(device_id: str, request: Request):
+    if not _valid_resource_id(device_id):
+        return _error("invalid_device_id", "Invalid device identifier.", 400)
+    return await run_in_threadpool(
+        _proxy, "GET", f"/v1/devices/{device_id}/read",
+        request=request, forward_api_key=False, forward_device_token=True,
+    )
+
+
+@router.post("/devices/{device_id}/act")
+async def act_on_enrolled_device(device_id: str, request: Request):
+    if not _valid_resource_id(device_id):
+        return _error("invalid_device_id", "Invalid device identifier.", 400)
+    body, error = await _validate_post_body(request)
+    if error:
+        return error
+    return await run_in_threadpool(
+        _proxy, "POST", f"/v1/devices/{device_id}/act",
+        request=request, forward_api_key=False, forward_device_token=True, body=body,
     )
 
 
