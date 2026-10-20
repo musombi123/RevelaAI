@@ -1,0 +1,58 @@
+name: Mind Core-Two CI
+
+on:
+  push:
+    paths:
+      - "core-two/**"
+      - "ai/core_mesh.py"
+      - "fastapi_routes/core_mesh.py"
+      - "render.yaml"
+      - ".github/workflows/mind-core-two-ci.yml"
+  pull_request:
+    paths:
+      - "core-two/**"
+      - "ai/core_mesh.py"
+      - "fastapi_routes/core_mesh.py"
+      - "render.yaml"
+      - ".github/workflows/mind-core-two-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  go-test:
+    name: Go tests (Core-Two)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: core-two/go.sum
+      - name: Run all Core-Two Go tests
+        working-directory: core-two
+        run: go test ./...
+
+  go-vet:
+    name: Go vet (Core-Two)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: core-two/go.sum
+      - name: Vet all Core-Two packages
+        working-directory: core-two
+        run: go vet ./...
+
+  openapi-lint:
+    name: OpenAPI lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lint the Core-Two gateway contract
+        run: npx --yes @redocly/cli@latest lint core-two/openapi.yaml
