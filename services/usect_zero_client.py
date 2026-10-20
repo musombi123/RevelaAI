@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from services.core_config import core_base_url, core_admin_token
+
 MAX_REQUEST_BYTES = 1 * 1024 * 1024
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 DEFAULT_TIMEOUT_SECONDS = 5

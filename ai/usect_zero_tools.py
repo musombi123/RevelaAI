@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from threading import Lock
 from typing import Any
 
+from services.core_config import core_is_configured
 from services.usect_zero_client import (
     USECTZeroAdminTokenMissing,
     USECTZeroConfigurationError,
@@ -160,6 +161,7 @@ _BRIDGE_TARGETS = {
 
 
 def tool_catalog_prompt() -> str:
+    """Describe model-callable USECT-ZERO operations with safe availability context."""
     """Return concise instructions embedded in every model turn."""
     lines = [
         "FIRST-CLASS ENGINEERING TOOL — USECT-ZERO",

@@ -8,8 +8,8 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
-      - key: GROQ_API_KEY
-        sync: false
+      - key: REVELAAI_TEXT_PROVIDERS
+        value: "gemini,hf,mvi"
       # Authoritative platform-admin verifier used by routes/meta_engineer_routes.py.
       # Keep this server-side; bearer JWTs are never sent to the Go core.
       - key: REVELACODE_BACKEND_URL
