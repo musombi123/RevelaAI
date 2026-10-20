@@ -11,7 +11,7 @@ type countingResearcher struct {
 }
 
 func (r countingResearcher) Research(context.Context, string) (ResearchEvidence, error) {
-	*r.calls++
+	(*r.calls)++
 	return ResearchEvidence{Mode: ResearchModeOffline}, nil
 }
 
@@ -20,7 +20,7 @@ type countingModelAdapter struct {
 }
 
 func (m countingModelAdapter) Suggest(_ context.Context, _ string, _ ResearchEvidence, fallback ToolSpec) (ToolSpec, error) {
-	*m.calls++
+	(*m.calls)++
 	return fallback, nil
 }
 
