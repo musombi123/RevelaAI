@@ -72,21 +72,17 @@ def test_admin_verification_uses_authoritative_backend_and_bounded_timeout(monke
             "role": "platform_admin",
         },
     )
-    result, observed = call_verifier(monkeypatch, upstream)
+    token = f"Bearer {_token()}"
+    result, observed = call_verifier(monkeypatch, upstream, authorization=token)
 
     actor, error = result
     assert actor == ADMIN_ID
     assert error is None
     assert observed["url"] == "https://backend.example.test/api/auth/verify-admin"
-    assert observed["headers"] == {"Authorization": f"Bearer {_token_for_observed(observed)}"} if False else True
+    assert observed["headers"] == {"Authorization": token}
     assert observed["allow_redirects"] is False
     assert observed["timeout"] == (3.05, admin_auth.ADMIN_TIMEOUT)
     assert 5 <= admin_auth.ADMIN_TIMEOUT <= 30
-
-
-def _token_for_observed(_observed):
-    # Kept as a named helper only to make any future header assertion explicit.
-    return ""
 
 
 def test_admin_verification_fails_closed_and_logs_upstream_reason(monkeypatch, caplog):
