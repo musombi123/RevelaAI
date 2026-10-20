@@ -15,6 +15,7 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 
@@ -160,23 +161,28 @@ async def asgi_security_and_throttle(request: Request, call_next):
     # Normalize JSON error responses from route handlers so every failed request
     # has a stable envelope and correlation ID, not only an X-Request-ID header.
     if response.status_code >= 400 and "application/json" in response.headers.get("content-type", ""):
+        raw_body = b""
+        status_code = response.status_code
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        headers.pop("content-type", None)
         try:
             raw_body = b"".join([chunk async for chunk in response.body_iterator])
             payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
             if isinstance(payload, dict):
                 existing_error = payload.get("error")
                 if not isinstance(existing_error, dict):
-                    code = payload.get("code") or payload.get("error_code") or f"HTTP_{response.status_code}"
+                    code = payload.get("code") or payload.get("error_code") or f"HTTP_{status_code}"
                     message = payload.get("message") or payload.get("detail") or "Request could not be completed."
                     payload["error"] = {"code": str(code), "message": str(message)}
                 payload.setdefault("status", "error")
                 payload.setdefault("request_id", request_id)
-                headers = dict(response.headers)
-                headers.pop("content-length", None)
-                headers.pop("content-type", None)
-                response = JSONResponse(payload, status_code=response.status_code, headers=headers)
+                response = JSONResponse(payload, status_code=status_code, headers=headers)
+            else:
+                response = Response(content=raw_body, status_code=status_code, headers=headers)
         except (ValueError, UnicodeDecodeError, TypeError):
             logger.warning("Could not normalize JSON error response | request_id=%s", request_id)
+            response = Response(content=raw_body, status_code=status_code, headers=headers)
     return _secure_response(response, request_id)
 
 
