@@ -194,10 +194,19 @@ func validateDeviceAction(device Device, action DeviceAction) error {
 	if device.Tier == 2 && action.Confirmation != deviceConfirmation {
 		return errors.New("Tier 2 action requires confirmation=CONFIRM_DEVICE_ACTION for this action")
 	}
-	if action.Name != "set_gpio" || action.Pin < 0 || action.Pin > 39 || (action.Value != 0 && action.Value != 1) {
-		return errors.New("unsupported ESP32 action; only set_gpio with pin 0-39 and value 0 or 1 is permitted")
+	if action.Name != "set_gpio" || !safeESP32OutputPin(action.Pin) || (action.Value != 0 && action.Value != 1) {
+		return errors.New("unsupported ESP32 action; only set_gpio on approved output pins with value 0 or 1 is permitted")
 	}
 	return nil
+}
+
+func safeESP32OutputPin(pin int) bool {
+	switch pin {
+	case 4, 5, 13, 14, 16, 17, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33:
+		return true
+	default:
+		return false
+	}
 }
 
 func writeDeviceFrame(w io.Writer, value any) error {
