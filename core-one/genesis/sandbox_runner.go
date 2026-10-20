@@ -23,6 +23,7 @@ const maxSandboxLogBytes = 1 << 20
 // has been independently verified.
 type SandboxEvidence struct {
 	ToolName       string    `json:"tool_name"`
+	CandidateHash   string    `json:"candidate_hash"`
 	ManifestHash   string    `json:"manifest_hash"`
 	StartedAt      time.Time `json:"started_at"`
 	FinishedAt     time.Time `json:"finished_at"`
@@ -182,6 +183,7 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 	}
 	manifestJSON, _ := json.Marshal(manifest)
 	manifestDigest := sha256.Sum256(manifestJSON)
+	candidateDigest, candidateErr := hashArtifactTree(sourceDir)
 	logText := string(log)
 	testLog, buildLog := logText, ""
 	if split := strings.Index(logText, "GENESIS_BUILD_BEGIN"); split >= 0 {
@@ -203,10 +205,11 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 	}
 	evidence := SandboxEvidence{
 		ToolName: manifest.Name,
+		CandidateHash: candidateDigest,
 		ManifestHash: hex.EncodeToString(manifestDigest[:]),
 		StartedAt: started,
 		FinishedAt: finished,
-		Passed: runErr == nil,
+		Passed: runErr == nil && candidateErr == nil && candidateDigest != "",
 		ExitCode: exitCode,
 		IsolationLevel: isolation,
 		BuildLog: buildLog,
@@ -220,8 +223,8 @@ func runCandidateSandbox(ctx context.Context, candidateDir, evidenceDir string, 
 	if err := atomicWrite(filepath.Join(evidenceDir, "sandbox_evidence.json"), raw, 0o600); err != nil {
 		return evidence, errors.New("sandbox evidence could not be persisted")
 	}
-	if runErr != nil {
-		return evidence, errors.New("sandbox build/test did not pass; candidate must not be signed")
+	if runErr != nil || candidateErr != nil || candidateDigest == "" {
+		return evidence, errors.New("sandbox build/test or candidate hashing did not pass; candidate must not be signed")
 	}
 	return evidence, nil
 }
