@@ -744,7 +744,7 @@ paths:
       tags: [Tools]
       operationId: activateSignedGenesisTool
       summary: Activate a verified signed version
-      description: Tier 1-2 activation requires owner_approval_hash to equal the exact artifact_hash.
+      description: Tier 1-2 activation requires owner_approval_hash to equal the exact artifact_hash and the separate X-Genesis-Owner-Approval credential.
       parameters:
         - $ref: "#/components/parameters/ToolName"
         - name: version
@@ -774,6 +774,66 @@ paths:
           $ref: "#/components/responses/AuthenticationRequired"
         "403":
           description: Signature verification or hash-bound approval failed.
+
+  /v1/genesis/registry/tools/{name}/{version}/{artifact_hash}/confirm:
+    post:
+      tags: [Tools]
+      operationId: confirmTier2GenesisToolAction
+      summary: Issue a one-use human confirmation bound to exact Tier 2 arguments
+      description: |
+        Requires the separate X-Genesis-Action-Approval credential. Genesis
+        verifies that the selected signed Tier 2 version is active and owner
+        approved, then returns a one-use token bound to the exact arguments.
+        The token expires after two minutes and is consumed by one invocation.
+      parameters:
+        - $ref: "#/components/parameters/ToolName"
+        - name: version
+          in: path
+          required: true
+          schema: { type: string, maxLength: 64 }
+        - name: artifact_hash
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [arguments]
+              properties:
+                arguments:
+                  type: object
+                  required: [action]
+                  additionalProperties: false
+                  properties:
+                    action: { type: string, maxLength: 2000 }
+                    inputs:
+                      type: object
+                      maxProperties: 100
+                      additionalProperties: { type: string, maxLength: 4000 }
+                    consent: { type: boolean }
+      responses:
+        "201":
+          description: One-use confirmation token; treat it as a secret and do not log it.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, confirmation_token, expires_at, tool, version, artifact_hash]
+                properties:
+                  status: { const: confirmed, type: string }
+                  confirmation_token: { type: string, pattern: "^[a-f0-9]{64}$" }
+                  expires_at: { type: string, format: date-time }
+                  tool: { type: string }
+                  version: { type: string }
+                  artifact_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+        "401":
+          $ref: "#/components/responses/AuthenticationRequired"
+        "403":
+          description: Missing action-approval credential or target is not an active owner-approved Tier 2 version.
 
   /v1/genesis/registry/tools/{name}/{version}/{artifact_hash}/invoke:
     post:
@@ -811,7 +871,7 @@ paths:
                       maxProperties: 100
                       additionalProperties: { type: string, maxLength: 4000 }
                     consent: { type: boolean }
-                confirmation_hash: { type: string, pattern: "^[a-f0-9]{64}$" }
+                confirmation_token: { type: string, pattern: "^[a-f0-9]{64}$" }
       responses:
         "200":
           description: Bounded result from the sandboxed tool process.
