@@ -76,7 +76,7 @@ func candidateBuildScript(language string, timeoutSeconds int, memoryBytes int64
 	if language == "python" {
 		return "set -eu; " + limits + "mkdir -p /tmp/work && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && echo GENESIS_TESTS_BEGIN && python -m compileall -q . && python -m unittest discover -v"
 	}
-	return "set -eu; " + limits + "mkdir -p /tmp/work /tmp/gocache && cp -R /candidate/. /tmp/work/ && chmod -R u+rwX /tmp/work && cd /tmp/work && if [ -f test.go ]; then mv test.go candidate_generated_test.go; fi && echo GENESIS_TESTS_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go test . && echo GENESIS_BUILD_BEGIN && GO111MODULE=off GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate ."
+	return "set -eu; " + limits + "mkdir -p /tmp/work/toolimpl /tmp/gocache && cp -R /candidate/. /tmp/work/toolimpl/ && chmod -R u+rwX /tmp/work && if [ -f /tmp/work/toolimpl/test.go ]; then mv /tmp/work/toolimpl/test.go /tmp/work/toolimpl/candidate_generated_test.go; fi && printf 'module genesiscandidate\\n\\ngo 1.23\\n' > /tmp/work/go.mod && cat > /tmp/work/main.go <<'GENESIS_MAIN'\npackage main\nimport (\"encoding/json\"; \"os\"; toolimpl \"genesiscandidate/toolimpl\")\nfunc main() { var in struct { Action string; Inputs map[string]string; Consent bool }; if json.NewDecoder(os.Stdin).Decode(&in) != nil { os.Exit(2) }; out, err := (toolimpl.Tool{}).Run(toolimpl.Request{Action: in.Action, Inputs: in.Inputs, Consent: in.Consent}); if err != nil { _ = json.NewEncoder(os.Stdout).Encode(map[string]string{\"status\":\"error\",\"error_class\":\"tool_rejected\"}); os.Exit(3) }; _ = json.NewEncoder(os.Stdout).Encode(map[string]any{\"status\": out.Status, \"tool\": out.Tool, \"summary\": out.Summary, \"created_at\": out.CreatedAt, \"evidence\": out.Evidence}) }\nGENESIS_MAIN\ncd /tmp/work && echo GENESIS_TESTS_BEGIN && GOTOOLCHAIN=local GOCACHE=/tmp/gocache go test ./... && echo GENESIS_BUILD_BEGIN && GOTOOLCHAIN=local GOCACHE=/tmp/gocache go build -o /tmp/genesis-candidate .
 }
 
 func dockerSandboxArgs(candidateDir string, manifest ToolManifest) []string {
@@ -343,8 +343,15 @@ func validateSandboxCandidate(root string, manifest ToolManifest) error {
 		return errors.New("manifest entrypoint must exist as a regular file in the staged candidate")
 	}
 	if manifest.Language == "go" {
-		if filepath.Ext(entry) != ".go" {
-			return errors.New("Go manifest entrypoint must be a .go file")
+		if manifest.Entrypoint != "code.go" || filepath.Ext(entry) != ".go" {
+			return errors.New("Go manifest entrypoint must be code.go")
+		}
+		for _, required := range []string{"code.go", "library.go"} {
+			requiredPath := filepath.Join(root, required)
+			requiredInfo, statErr := os.Lstat(requiredPath)
+			if statErr != nil || requiredInfo.Mode()&os.ModeSymlink != 0 || !requiredInfo.Mode().IsRegular() {
+				return errors.New("Go candidate must include regular code.go and library.go runtime sources")
+			}
 		}
 		hasTest := false
 		err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
