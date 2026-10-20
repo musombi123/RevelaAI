@@ -348,10 +348,9 @@ func (s *Service) IntegrationStatus() map[string]any {
 			"evolution_outputs":  "core-two/evolutions/",
 		},
 		"provider": map[string]any{
-			"provider_url_env":             "REVELACODE_PROVIDER_URL",
-			"provider_key_env":             "REVELACODE_PROVIDER_KEY",
-			"same_credential_names_as_core_one": true,
-			"secret_disclosed":             false,
+			"provider_key_env": "REVELACODE_PROVIDER_KEY",
+			"credential_sharing": "not_independently_verified",
+			"secret_disclosed": false,
 		},
 	}
 }
@@ -586,6 +585,7 @@ func (s *Service) Scan(ctx context.Context) (map[string]any, error) {
 		"status":             "ok",
 		"observed_tool_count": len(items),
 		"metrics":            metrics,
+		"tool_telemetry":      s.ToolTelemetrySnapshot(),
 		"research_evidence_path": filepath.Join(
 			"core-two",
 			"research_evidence.json",

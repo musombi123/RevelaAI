@@ -1,6 +1,7 @@
 package mind
 
 import (
+	"encoding/json"
 	"bufio"
 	"context"
 	"errors"
@@ -367,7 +368,7 @@ func (s *Service) countCoreOneEvidenceRecords() int {
 		}
 
 		var record map[string]any
-		if jsonErr := jsonUnmarshal(raw, &record); jsonErr == nil && record != nil {
+		if jsonErr := json.Unmarshal(raw, &record); jsonErr == nil && record != nil {
 			count++
 		}
 	}

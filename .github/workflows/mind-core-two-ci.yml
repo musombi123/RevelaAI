@@ -1,0 +1,101 @@
+name: Mind Core-Two CI
+
+on:
+  push:
+    paths:
+      - "core-two/**"
+      - "ai/core_mesh.py"
+      - "fastapi_routes/core_mesh.py"
+      - "render.yaml"
+      - ".github/workflows/mind-core-two-ci.yml"
+  pull_request:
+    paths:
+      - "core-two/**"
+      - "ai/core_mesh.py"
+      - "fastapi_routes/core_mesh.py"
+      - "render.yaml"
+      - ".github/workflows/mind-core-two-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  go-test:
+    name: Go tests (Core-Two, OpenAPI and telemetry regression coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: core-two/go.sum
+      - name: Run all Core-Two Go tests
+        working-directory: core-two
+        run: go test ./...
+
+  go-vet:
+    name: Go vet (Core-Two)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: core-two/go.sum
+      - name: Vet all Core-Two packages
+        working-directory: core-two
+        run: go vet ./...
+
+  openapi-lint:
+    name: OpenAPI contract lint (Core-Two, updated provenance schema)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lint the Core-Two gateway contract
+        run: npx --yes @redocly/cli@latest lint core-two/openapi.yaml
+
+  mind-startup-smoke:
+    name: Mind health, fail-closed writes, and Render-compatible startup smoke test
+    runs-on: ubuntu-latest
+    env:
+      MIND_ADMIN_TOKEN: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+      - name: Build Mind daemon
+        run: go -C core-two build -o /tmp/revela-mind ./cmd/revela-mind
+      - name: Boot Mind and check health and write protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          cp -a core-one "$scratch/core-one"
+          cp -a core-zero "$scratch/core-zero"
+          mkdir -p "$scratch/core-two/guardian"
+          cp core-two/guardian/rules.yaml "$scratch/core-two/guardian/rules.yaml"
+          /tmp/revela-mind -daemon -repo-root "$scratch" -listen 127.0.0.1:18782 -interval 24h >/tmp/revela-mind-smoke.log 2>&1 &
+          pid=$!
+          cleanup() {
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            rm -rf "$scratch"
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --show-error --fail http://127.0.0.1:18782/v1/mind/health >/tmp/mind-health.json; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          grep -q '"status":"ok"' /tmp/mind-health.json
+          status="$(curl --silent --output /tmp/mind-write.json --write-out '%{http_code}' -X POST http://127.0.0.1:18782/v1/mind/feedback -H 'Content-Type: application/json' --data '{}')"
+          test "$status" = "503"
+          grep -q 'mind_mutations_disabled' /tmp/mind-write.json

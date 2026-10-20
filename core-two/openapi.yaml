@@ -1,45 +1,561 @@
 openapi: 3.1.0
 info:
   title: Revela Infinite Mind Integrated Gateway
-  version: 0.1.0-alpha
-  summary: Additive API contract for existing Core-Zero, Core-One, and Core-Two.
-  description: |
-    Source contracts remain unchanged at core-zero/openapi.yaml and core-one/openapi.yaml.
-    Core-Two exposes Mind routes, proxies the existing Genesis API, and maps /v1/zero/*
-    aliases to the existing Core-Zero /v1/* routes. Proposals remain human-reviewed.
+  version: 0.2.0
+  summary: Additive API contract for Core-Zero, Core-One, and Core-Two.
+  license:
+    name: Apache 2.0
+    identifier: Apache-2.0
+  description: >
+    Core-Two routes are implemented by Infinite Mind. Core-One and Core-Zero
+    routes are namespaced proxies. Mind only recommends changes; it never merges
+    code, actuates hardware, or executes submitted candidate source.
 servers:
   - url: http://127.0.0.1:8782
-    description: Loopback default; public deployment needs TLS, authorization and rate limits.
+    description: Local development. Public deployment requires TLS and rate limiting.
+security: []
 tags:
   - name: mind
-    description: Read-only repository mirror, Guardian-gated evolution and review queue.
+    description: Read-only observations, Guardian-gated proposals, telemetry and canary recommendations.
   - name: zero
-    description: Namespaced aliases for the existing Core-Zero local API.
+    description: Namespaced proxy routes to existing Core-Zero endpoints.
   - name: genesis
-    description: Existing Core-One Genesis API, proxied without duplicating its engine.
+    description: Namespaced proxy routes to existing Core-One endpoints.
 paths:
   /v1/mind/health:
     get:
       tags: [mind]
       operationId: getMindHealth
-      summary: Check integration of all three cores and disclose policy gaps
+      summary: Check Mind and core integration status
       responses:
-        '200': {description: Integration status; a missing ZERO Guardian policy is reported.}
+        '200':
+          description: Health and integration state; secrets are never returned.
   /v1/mind/metrics:
     get:
       tags: [mind]
-      operationId: scanMindMetrics
-      summary: Inventory ZERO/ONE evidence, consume operational logs incrementally, and record metrics
+      operationId: getMindMetrics
+      summary: Observe repository evidence and recorded telemetry
       responses:
-        '200': {description: Metrics; values not found in evidence remain null.}
-        '503': {$ref: '#/components/responses/Unavailable'}
+        '200':
+          description: Evidence-backed operational metrics; unknown production values remain null.
+        '503':
+          $ref: '#/components/responses/Unavailable'
   /v1/mind/evolve:
     post:
       tags: [mind]
       operationId: proposeMindEvolution
-      summary: Evaluate ten curated library variants and stage a guarded proposal
-      security: [{MindToken: []}]
-      description: Blocks harmful objectives before mutation directories are created. Fixed allowlisted candidate templates run bounded tests in temporary offline Go modules; repository-sourced invention code is not executed. This is not an OS-level sandbox. Result awaits human merge.
+      summary: Run guarded deterministic candidate evaluation and stage a review-only proposal
+      description: This action fails closed without MIND_ADMIN_TOKEN. It never merges code or changes Core-One/Core-Zero files.
+      security:
+        - MindToken: []
+        - MindHeaderToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool_name, objective]
+              additionalProperties: false
+              properties:
+                tool_name:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+                objective:
+                  type: string
+                  minLength: 3
+                  maxLength: 4096
+                reason:
+                  type: string
+                  maxLength: 2048
+      responses:
+        '202':
+          description: Review-only evolution proposal.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Core-Two or Core-One Guardian blocked the request.
+        '422':
+          description: No candidate passed qualification.
+  /v1/mind/evolutions:
+    get:
+      tags: [mind]
+      operationId: listMindEvolutions
+      summary: List proposals and recorded evidence
+      responses:
+        '200':
+          description: Proposals awaiting human review; no merge is performed.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/mind/learning:
+    get:
+      tags: [mind]
+      operationId: getMindLearning
+      summary: Read human feedback and recorded canary outcomes
+      responses:
+        '200':
+          description: Ranking evidence; neither feedback nor canary results bypass tests or Guardian.
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /v1/mind/feedback:
+    post:
+      tags: [mind]
+      operationId: recordMindFeedback
+      summary: Record a human decision about a staged evolution or scored candidate
+      security:
+        - MindToken: []
+        - MindHeaderToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tool_name, mutation, outcome, note]
+              additionalProperties: false
+              properties:
+                version:
+                  type: string
+                  pattern: '^v0\.1\.[0-9]+$'
+                candidate_id:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+                tool_name:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+                mutation:
+                  type: string
+                  pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+                outcome:
+                  type: string
+                  enum: [merged, rejected, reverted, needs_work]
+                note:
+                  type: string
+                  minLength: 8
+                  maxLength: 1200
+                evidence_ref:
+                  type: string
+                  maxLength: 500
+      responses:
+        '201':
+          description: Human decision recorded for ranking; no source files merged.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Feedback does not match a staged evolution or scored candidate.
+  /v1/mind/telemetry/events:
+    post:
+      tags: [mind]
+      operationId: recordToolTelemetry
+      summary: Record bounded tool execution telemetry without user content
+      security:
+        - MindToken: []
+        - MindHeaderToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolTelemetryEvent'
+      responses:
+        '201':
+          description: Operational event recorded; request content is not accepted or stored.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Event fails schema or validation.
+  /v1/mind/candidates:
+    post:
+      tags: [mind]
+      operationId: scoreFoundryCandidate
+      summary: Guardian-gate a sandbox-tested Core-One Foundry candidate and score recorded telemetry
+      description: Mind accepts candidate metadata, hashes and evidence references only. It never writes or executes candidate source.
+      security:
+        - MindToken: []
+        - MindHeaderToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FoundryCandidate'
+      responses:
+        '200':
+          description: Canary recommendation with evidence; promotion and rollback are not executed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CandidateScoreResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Mind or Core-One Guardian blocked the candidate before scoring.
+        '422':
+          description: Candidate metadata or evidence is invalid.
+  /v1/mind/tools/{name}/improvement:
+    get:
+      tags: [mind]
+      operationId: getToolImprovement
+      summary: Read per-tool, per-version telemetry and improvement metrics
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+      responses:
+        '200':
+          description: Provenance-aware improvement metrics.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: No metrics have been recorded for this tool.
+  /v1/mind/stream:
+    get:
+      tags: [mind]
+      operationId: streamMindStatus
+      summary: Stream periodic Mind and integration status as server-sent events
+      responses:
+        '200':
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /v1/mind/key:
+    get:
+      tags: [mind]
+      operationId: getMindProviderKeyStatus
+      summary: Read shared provider configuration status without disclosing credentials
+      responses:
+        '200':
+          description: Reports whether provider environment variables are configured.
+    post:
+      tags: [mind]
+      operationId: requestMindProviderKey
+      summary: Submit a key access request for human review; no secret is issued
+      security:
+        - MindToken: []
+        - MindHeaderToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id, reason]
+              additionalProperties: false
+              properties:
+                client_id:
+                  type: string
+                  maxLength: 120
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '202':
+          description: Request queued for human approval.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /v1/zero/status:
+    get:
+      tags: [zero]
+      operationId: getZeroIntegrationStatus
+      summary: Read combined Core-Zero integration status
+      responses:
+        '200':
+          description: Status observation.
+  /v1/zero/health:
+    get:
+      tags: [zero]
+      operationId: proxyZeroHealth
+      summary: Proxy Core-Zero health
+      responses:
+        '200':
+          description: Existing Core-Zero health payload.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/scan:
+    get:
+      security:
+        - ZeroAPIKey: []
+      tags: [zero]
+      operationId: proxyZeroScan
+      summary: Proxy Core-Zero evidence scan
+      responses:
+        '200':
+          description: Existing Core-Zero scan result.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/keys/request:
+    post:
+      tags: [zero]
+      operationId: proxyZeroKeyRequest
+      summary: Proxy a Core-Zero key request
+      security:
+        - MindToken: []
+          ZeroAPIKey: []
+        - MindHeaderToken: []
+          ZeroAPIKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/keys/requests:
+    get:
+      security:
+        - ZeroAdminToken: []
+      tags: [zero]
+      operationId: proxyZeroKeyRequests
+      summary: Proxy the Core-Zero pending key request list
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/keys/requests/{request_id}/approve:
+    post:
+      tags: [zero]
+      operationId: approveZeroKeyRequest
+      summary: Proxy a key approval request to Core-Zero
+      security:
+        - MindToken: []
+          ZeroAdminToken: []
+        - MindHeaderToken: []
+          ZeroAdminToken: []
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/keys/issued/{key_id}/revoke:
+    post:
+      tags: [zero]
+      operationId: revokeZeroKey
+      summary: Proxy key revocation to Core-Zero
+      security:
+        - MindToken: []
+          ZeroAdminToken: []
+        - MindHeaderToken: []
+          ZeroAdminToken: []
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/heal/baseline:
+    get:
+      security:
+        - ZeroAPIKey: []
+      tags: [zero]
+      operationId: proxyZeroHealingBaseline
+      summary: Read the Core-Zero healing baseline
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/heal/proposals:
+    get:
+      security:
+        - ZeroAPIKey: []
+      tags: [zero]
+      operationId: proxyZeroHealingProposals
+      summary: Read Core-Zero healing proposals
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/heal/proposals/{proposal_id}/approve:
+    post:
+      tags: [zero]
+      operationId: approveZeroHealingProposal
+      summary: Proxy proposal approval to Core-Zero
+      security:
+        - MindToken: []
+          ZeroAdminToken: []
+        - MindHeaderToken: []
+          ZeroAdminToken: []
+      parameters:
+        - name: proposal_id
+          in: path
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/assemble/templates:
+    get:
+      security:
+        - ZeroAPIKey: []
+      tags: [zero]
+      operationId: proxyZeroAssemblyTemplates
+      summary: List Core-Zero assembly templates
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/assemble:
+    post:
+      tags: [zero]
+      operationId: proxyZeroAssembly
+      summary: Proxy a guarded assembly request to Core-Zero
+      security:
+        - MindToken: []
+          ZeroAPIKey: []
+        - MindHeaderToken: []
+          ZeroAPIKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/radar/compare:
+    post:
+      tags: [zero]
+      operationId: proxyZeroRadarCompare
+      summary: Proxy a comparison request to Core-Zero
+      security:
+        - MindToken: []
+          ZeroAPIKey: []
+        - MindHeaderToken: []
+          ZeroAPIKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/bridge/plan:
+    post:
+      tags: [zero]
+      operationId: proxyZeroBridgePlan
+      summary: Proxy a bridge planning request to Core-Zero
+      security:
+        - MindToken: []
+          ZeroAPIKey: []
+        - MindHeaderToken: []
+          ZeroAPIKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/mind/compile:
+    post:
+      tags: [zero]
+      operationId: proxyZeroRVXCompile
+      summary: Proxy the existing Core-Zero RVX compile endpoint
+      security:
+        - MindToken: []
+          ZeroAPIKey: []
+        - MindHeaderToken: []
+          ZeroAPIKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/zero/mind/ide:
+    get:
+      security:
+        - ZeroAPIKey: []
+      tags: [zero]
+      operationId: proxyZeroMindIDE
+      summary: Proxy the Core-Zero IDE endpoint
+      responses:
+        '200':
+          description: Existing Core-Zero response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/health:
+    get:
+      tags: [genesis]
+      operationId: proxyGenesisHealth
+      summary: Proxy the existing Core-One health endpoint
+      responses:
+        '200':
+          description: Existing Core-One response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/invent:
+    post:
+      tags: [genesis]
+      operationId: proxyGenesisInvent
+      summary: Proxy a guarded invention proposal request to Core-One
+      security:
+        - MindToken: []
+          GenesisToken: []
+        - MindHeaderToken: []
+          GenesisToken: []
       requestBody:
         required: true
         content:
@@ -47,75 +563,128 @@ paths:
             schema:
               type: object
               additionalProperties: false
+              required: [demand]
               properties:
-                tool_name: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}
-                objective: {type: string, minLength: 1, maxLength: 4000}
-                reason: {type: string, maxLength: 1000}
+                demand:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+                country:
+                  type: string
+                  maxLength: 80
+                  default: KE
+                language:
+                  type: string
+                  maxLength: 20
       responses:
-        '202': {description: Mutation batch and evolution staged in core-two/ for review.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '403': {description: Guardian blocked before mutation or evolution files were created.}
-        '422': {description: No validated candidate met the evolution gate.}
-  /v1/mind/learning:
+        '202':
+          description: Existing Core-One response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/queue:
     get:
-      tags: [mind]
-      operationId: getMindLearningLedger
-      summary: Read the human-reviewed evolution feedback ledger and bounded candidate ranking scores
+      tags: [genesis]
+      operationId: proxyGenesisQueue
+      summary: Proxy the Core-One review queue
+      security:
+        - GenesisToken: []
       responses:
-        '200': {description: Current feedback summary; no automatic merge is performed.}
-        '503': {$ref: '#/components/responses/Unavailable'}
-  /v1/mind/feedback:
-    post:
-      tags: [mind]
-      operationId: recordMindEvolutionFeedback
-      summary: Record the owner's review of a staged evolution
-      security: [{MindToken: []}]
-      description: Feedback must match the staged version, tool and selected mutation. Merged outcomes require an evidence reference. Feedback changes ranking only and cannot bypass safety or test gates.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [version, tool_name, mutation, outcome, note]
-              properties:
-                version: {type: string, pattern: '^v0\.1\.[0-9]+    get:
-      tags: [mind]
-      operationId: listMindEvolutions
-      summary: List Core-Two proposals and recorded evidence
-      responses:
-        '200': {description: Proposal inventory; no merge is performed.}
-  /v1/mind/tools/{name}/improvement:
+        '200':
+          description: Existing Core-One response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/status:
     get:
-      tags: [mind]
-      operationId: getToolImprovement
-      summary: Read per-tool improvement metrics
+      tags: [genesis]
+      operationId: proxyGenesisStatus
+      summary: Proxy Core-One service status
+      security:
+        - GenesisToken: []
+      responses:
+        '200':
+          description: Existing Core-One response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/tools:
+    get:
+      tags: [genesis]
+      operationId: proxyGenesisTools
+      summary: Proxy the Core-One tool inventory
+      security:
+        - GenesisToken: []
+      responses:
+        '200':
+          description: Existing Core-One response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/tools/{name}:
+    get:
+      tags: [genesis]
+      operationId: proxyGenesisTool
+      summary: Proxy a Core-One tool detail endpoint
+      security:
+        - GenesisToken: []
       parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
       responses:
-        '200': {description: Provenance-aware tool metrics.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '404': {description: No metrics were recorded for this tool.}
-  /v1/mind/stream:
+        '200':
+          description: Existing Core-One response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/tools/{name}/hardware_guide:
     get:
-      tags: [mind]
-      operationId: streamMindStatus
-      summary: Stream periodic integration/evolution status as SSE
+      tags: [genesis]
+      operationId: proxyGenesisHardwareGuide
+      summary: Proxy a Core-One hardware guide
+      security:
+        - GenesisToken: []
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: {type: string}
       responses:
-        '200': {description: text/event-stream}
-  /v1/mind/key:
+        '200':
+          description: Existing Core-One response.
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/stream:
     get:
-      tags: [mind]
-      operationId: getMindProviderKeyStatus
-      summary: Read shared provider key configuration without disclosing secrets
+      tags: [genesis]
+      operationId: proxyGenesisStream
+      summary: Proxy the Core-One server-sent event stream
+      security:
+        - GenesisToken: []
       responses:
-        '200': {description: Reports whether the shared provider URL/key environment settings exist.}
+        '200':
+          description: Event stream.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '502':
+          $ref: '#/components/responses/Unavailable'
+  /v1/genesis/key:
+    get:
+      tags: [genesis]
+      operationId: proxyGenesisKeyStatus
+      summary: Read the Core-One shared provider-key status
+      responses:
+        '200':
+          description: Existing Core-One response.
     post:
-      tags: [mind]
-      operationId: requestMindProviderKey
-      summary: Submit a key-access request for human approval; no key is issued
-      security: [{MindToken: []}]
+      tags: [genesis]
+      operationId: proxyGenesisKeyRequest
+      summary: Proxy a key access request to Core-One for human approval
+      security:
+        - MindToken: []
+          GenesisToken: []
+        - MindHeaderToken: []
+          GenesisToken: []
       requestBody:
         required: true
         content:
@@ -124,292 +693,61 @@ paths:
               type: object
               required: [client_id, reason]
               properties:
-                client_id: {type: string, minLength: 1, maxLength: 120}
-                reason: {type: string, minLength: 1, maxLength: 500}
+                client_id: {type: string, maxLength: 120}
+                reason: {type: string, maxLength: 500}
       responses:
-        '202': {description: Request is pending_approval and secret_issued=false.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/status:
-    get:
-      tags: [zero]
-      operationId: getZeroIntegrationStatus
-      summary: Observe Core-Zero integration and healing-log availability
-      responses:
-        '200': {description: Read-only integration evidence.}
-  /v1/zero/health:
-    get:
-      tags: [zero]
-      operationId: getZeroHealth
-      summary: Proxy Core-Zero GET /v1/health
-      responses:
-        '200': {description: Existing Core-Zero health response.}
-  /v1/zero/scan:
-    get:
-      tags: [zero]
-      operationId: scanZeroRepository
-      summary: Proxy Core-Zero repository scan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing source inventory.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/keys/request:
-    post:
-      tags: [zero]
-      operationId: requestZeroKey
-      summary: Proxy Core-Zero pending API-key workflow
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object}
-      responses:
-        '202': {description: Existing request-awaiting-approval response.}
-  /v1/zero/keys/requests:
-    get:
-      tags: [zero]
-      operationId: listZeroKeyRequests
-      summary: Proxy Core-Zero API-key request list
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '200': {description: Key-request metadata.}
-  /v1/zero/keys/requests/{request_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroKey
-      summary: Proxy explicit Core-Zero key approval
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: request_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: ISSUE_KEY}}}
-      responses:
-        '200': {description: Existing one-time-key approval response.}
-  /v1/zero/keys/issued/{key_id}/revoke:
-    post:
-      tags: [zero]
-      operationId: revokeZeroKey
-      summary: Proxy explicit Core-Zero key revocation
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: key_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: REVOKE_KEY}}}
-      responses:
-        '200': {description: Existing key-revocation response.}
-  /v1/zero/heal/baseline:
-    post:
-      tags: [zero]
-      operationId: recordZeroBaseline
-      summary: Proxy Core-Zero baseline recording
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '201': {description: Existing baseline recorded.}
-  /v1/zero/heal/proposals:
-    post:
-      tags: [zero]
-      operationId: proposeZeroHealing
-      summary: Proxy Core-Zero recovery proposal generation
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '201': {description: Existing recovery proposal; not executed.}
-  /v1/zero/heal/proposals/{proposal_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroHealing
-      summary: Proxy an explicitly approved Core-Zero recovery
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: proposal_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: RESTORE_TO_REPOSITORY}}}
-      responses:
-        '200': {description: Existing bounded recovery response.}
-  /v1/zero/assemble/templates:
-    get:
-      tags: [zero]
-      operationId: listZeroTemplates
-      summary: Proxy versioned Core-Zero assembly templates
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing curated template catalogue.}
-  /v1/zero/assemble:
-    post:
-      tags: [zero]
-      operationId: proposeZeroAssembly
-      summary: Proxy Core-Zero template-bounded assembly
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [target], properties: {target: {type: string}}}
-      responses:
-        '201': {description: Existing review-only artifacts.}
-  /v1/zero/radar/compare:
-    post:
-      tags: [zero]
-      operationId: compareZeroRadar
-      summary: Proxy offline Core-Zero Radar comparison
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing local evidence comparison.}
-  /v1/zero/bridge/plan:
-    post:
-      tags: [zero]
-      operationId: planZeroBridge
-      summary: Proxy Core-Zero hardware/software adapter plan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Plan only; no hardware touched.}
-  /v1/zero/mind/compile:
-    post:
-      tags: [zero]
-      operationId: compileZeroRVLang
-      summary: Proxy Core-Zero non-executing RV Lang compiler
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 65536}}}
-      responses:
-        '200': {description: Non-executing Go plan artifact.}
-  /v1/zero/mind/ide:
-    get:
-      tags: [zero]
-      operationId: serveZeroRVLangIDE
-      summary: Proxy the existing Core-Zero bundled RV Lang IDE
-      responses:
-        '200': {description: Local editor resource.}
-  /v1/genesis/health:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHealth
-      summary: Proxy Core-One Genesis health
-      responses:
-        '200': {description: Existing Genesis service response.}
-  /v1/genesis/invent:
-    post:
-      tags: [genesis]
-      operationId: proposeGenesisInvention
-      summary: Proxy existing Core-One invention proposal
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, minLength: 1, maxLength: 3999}}}
-      responses:
-        '201': {description: Existing proposal-only invention.}
-        '403': {description: Core-One Guardian blocked the demand.}
-        '409': {description: Proposal already exists.}
-  /v1/genesis/queue:
-    post:
-      tags: [genesis]
-      operationId: queueGenesisDemand
-      summary: Proxy existing Genesis durable demand queue
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, maxLength: 3999}, source: {type: string, maxLength: 100}}}
-      responses:
-        '202': {description: Existing queued proposal.}
-  /v1/genesis/status:
-    get:
-      tags: [genesis]
-      operationId: getGenesisStatus
-      summary: Proxy Genesis operational status
-      responses:
-        '200': {description: Existing queue/invention snapshot.}
-  /v1/genesis/tools:
-    get:
-      tags: [genesis]
-      operationId: listGenesisTools
-      summary: Proxy Genesis invention listing
-      responses:
-        '200': {description: Existing proposal list.}
-  /v1/genesis/tools/{name}:
-    get:
-      tags: [genesis]
-      operationId: getGenesisTool
-      summary: Proxy Genesis tool proposal details
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing manifest.}
-        '404': {description: Not found.}
-  /v1/genesis/tools/{name}/hardware_guide:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHardwareGuide
-      summary: Proxy Genesis hardware guide
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing hardware-guide proposal.}
-  /v1/genesis/stream:
-    get:
-      tags: [genesis]
-      operationId: streamGenesis
-      summary: Proxy Genesis server-sent events
-      responses:
-        '200': {description: text/event-stream}
-  /v1/genesis/key:
-    get:
-      tags: [genesis]
-      operationId: getGenesisKeyStatus
-      summary: Proxy shared provider-key request status
-      responses:
-        '200': {description: Status only; secret not disclosed.}
-    post:
-      tags: [genesis]
-      operationId: requestGenesisKey
-      summary: Proxy Core-One key request for human approval
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [client_id, reason], properties: {client_id: {type: string, maxLength: 120}, reason: {type: string, maxLength: 500}}}
-      responses:
-        '202': {description: Existing pending approval.}
+        '202':
+          description: Existing Core-One response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/Unavailable'
   /v1/rvx/compile:
     post:
       tags: [genesis]
-      operationId: compileGenesisRVX
-      summary: Proxy the current Core-One RVX compiler; no compiler replacement is implied
-      security: [{GenesisToken: []}]
+      operationId: proxyGenesisRVXCompile
+      summary: Proxy the existing Core-One RVX compiler without replacing it
+      security:
+        - MindToken: []
+          GenesisToken: []
+        - MindHeaderToken: []
+          GenesisToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 16384}}}
+            schema:
+              type: object
+              required: [source]
+              additionalProperties: false
+              properties:
+                source:
+                  type: string
+                  maxLength: 16384
       responses:
-        '200': {description: Existing declarative IR; no executable WASM is implied.}
-        '422': {description: Invalid RVX program.}
+        '200':
+          description: Existing declarative RVX response.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Existing Core-One validation error.
 components:
   securitySchemes:
     MindToken:
       type: http
       scheme: bearer
-      description: Core-Two MIND_ADMIN_TOKEN; absent token disables mutations.
+      bearerFormat: MIND_ADMIN_TOKEN
+      description: Bearer form of the server-side Mind admin token.
+    MindHeaderToken:
+      type: apiKey
+      in: header
+      name: X-Mind-Token
+      description: Alternate header accepted by Mind for authenticated mutations.
     GenesisToken:
       type: apiKey
       in: header
       name: X-Genesis-Token
-      description: Existing Core-One credential; upstream checks remain required.
+      description: Existing Core-One service credential; required upstream for protected calls.
     ZeroAPIKey:
       type: apiKey
       in: header
@@ -419,1132 +757,175 @@ components:
       type: apiKey
       in: header
       name: X-Admin-Token
-      description: Existing Core-Zero admin token.
+      description: Existing Core-Zero admin credential.
   responses:
     Unauthorized:
-      description: Authentication or approval requirement not satisfied.
+      description: Authentication requirement not satisfied.
       content:
         application/json:
-          schema: {$ref: '#/components/schemas/Error'}
+          schema:
+            $ref: '#/components/schemas/Error'
     BadRequest:
-      description: Invalid or unsupported request.
+      description: Invalid request.
       content:
         application/json:
-          schema: {$ref: '#/components/schemas/Error'}
+          schema:
+            $ref: '#/components/schemas/Error'
     Unavailable:
-      description: Evidence or local upstream unavailable.
+      description: Local upstream or required evidence is unavailable.
       content:
         application/json:
-          schema: {$ref: '#/components/schemas/Error'}
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
+    ToolTelemetryEvent:
+      type: object
+      additionalProperties: false
+      required: [tool_name, version_hash, success, latency_ms, timestamp, evidence_origin]
+      properties:
+        tool_name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        version_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        success:
+          type: boolean
+        latency_ms:
+          type: integer
+          minimum: 0
+          maximum: 3600000
+        error_class:
+          type: string
+          maxLength: 48
+          pattern: '^[a-z0-9_-]*$'
+        timestamp:
+          type: string
+          format: date-time
+        sample_kind:
+          type: string
+          enum: [runtime, replay]
+          default: runtime
+        evidence_origin:
+          type: string
+          enum: [tool_runner, replay_harness, synthetic_fixture]
+          description: Declared origin; synthetic fixtures are never eligible for auto-promotion and do not constitute production evidence.
+    FoundryCandidate:
+      type: object
+      additionalProperties: false
+      required: [candidate_id, source_core, tool_name, objective, baseline_version_hash, candidate_version_hash, source_sha256, risk_tier, sandbox_tested, sandbox_evidence_ref]
+      properties:
+        candidate_id:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        source_core:
+          type: string
+          const: core-one-foundry
+        tool_name:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9_-]{0,63}$'
+        objective:
+          type: string
+          minLength: 3
+          maxLength: 500
+        baseline_version_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        candidate_version_hash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        source_sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        risk_tier:
+          type: integer
+          enum: [1, 2]
+        sandbox_tested:
+          type: boolean
+          const: true
+        sandbox_evidence_ref:
+          type: string
+          minLength: 1
+          maxLength: 500
+    CandidateScoreResult:
+      type: object
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [blocked, hold, promote, rollback]
+        candidate_id:
+          type: string
+        tool_name:
+          type: string
+        guardian_passed:
+          type: boolean
+        core_one_guardian_passed:
+          type: boolean
+        scored:
+          type: boolean
+        score:
+          type: number
+        ranking_context_score:
+          type: number
+        canary:
+          $ref: '#/components/schemas/CanaryDecision'
+        evidence_recorded_at:
+          type: string
+          format: date-time
+        evidence_path:
+          type: string
+        synthetic_fixture:
+          type: boolean
+          const: false
+        production_verified:
+          type: boolean
+          const: false
+        automatic_merge:
+          type: boolean
+          const: false
+        promotion_executed:
+          type: boolean
+          const: false
+        rollback_executed:
+          type: boolean
+          const: false
+    CanaryDecision:
+      type: object
+      additionalProperties: false
+      required: [decision, reason, minimum_sample_size, baseline, candidate, score, automatic_merge, auto_promotion_recommended]
+      properties:
+        decision:
+          type: string
+          enum: [promote, hold, rollback]
+        reason:
+          type: string
+        minimum_sample_size:
+          type: integer
+        baseline:
+          type: object
+        candidate:
+          type: object
+        score:
+          type: number
+        synthetic_fixture:
+          type: boolean
+        production_verified:
+          type: boolean
+          const: false
+        automatic_merge:
+          type: boolean
+          const: false
+        auto_promotion_recommended:
+          type: boolean
     Error:
       type: object
       required: [status, code, message]
       properties:
-        status: {type: string, const: error}
-        code: {type: string}
-        message: {type: string}
-}
-                tool_name: {type: string, pattern: '^[a-z0-9_-]{1,64}    get:
-      tags: [mind]
-      operationId: listMindEvolutions
-      summary: List Core-Two proposals and recorded evidence
-      responses:
-        '200': {description: Proposal inventory; no merge is performed.}
-  /v1/mind/tools/{name}/improvement:
-    get:
-      tags: [mind]
-      operationId: getToolImprovement
-      summary: Read per-tool improvement metrics
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Provenance-aware tool metrics.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '404': {description: No metrics were recorded for this tool.}
-  /v1/mind/stream:
-    get:
-      tags: [mind]
-      operationId: streamMindStatus
-      summary: Stream periodic integration/evolution status as SSE
-      responses:
-        '200': {description: text/event-stream}
-  /v1/mind/key:
-    get:
-      tags: [mind]
-      operationId: getMindProviderKeyStatus
-      summary: Read shared provider key configuration without disclosing secrets
-      responses:
-        '200': {description: Reports whether the shared provider URL/key environment settings exist.}
-    post:
-      tags: [mind]
-      operationId: requestMindProviderKey
-      summary: Submit a key-access request for human approval; no key is issued
-      security: [{MindToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [client_id, reason]
-              properties:
-                client_id: {type: string, minLength: 1, maxLength: 120}
-                reason: {type: string, minLength: 1, maxLength: 500}
-      responses:
-        '202': {description: Request is pending_approval and secret_issued=false.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/status:
-    get:
-      tags: [zero]
-      operationId: getZeroIntegrationStatus
-      summary: Observe Core-Zero integration and healing-log availability
-      responses:
-        '200': {description: Read-only integration evidence.}
-  /v1/zero/health:
-    get:
-      tags: [zero]
-      operationId: getZeroHealth
-      summary: Proxy Core-Zero GET /v1/health
-      responses:
-        '200': {description: Existing Core-Zero health response.}
-  /v1/zero/scan:
-    get:
-      tags: [zero]
-      operationId: scanZeroRepository
-      summary: Proxy Core-Zero repository scan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing source inventory.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/keys/request:
-    post:
-      tags: [zero]
-      operationId: requestZeroKey
-      summary: Proxy Core-Zero pending API-key workflow
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object}
-      responses:
-        '202': {description: Existing request-awaiting-approval response.}
-  /v1/zero/keys/requests:
-    get:
-      tags: [zero]
-      operationId: listZeroKeyRequests
-      summary: Proxy Core-Zero API-key request list
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '200': {description: Key-request metadata.}
-  /v1/zero/keys/requests/{request_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroKey
-      summary: Proxy explicit Core-Zero key approval
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: request_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: ISSUE_KEY}}}
-      responses:
-        '200': {description: Existing one-time-key approval response.}
-  /v1/zero/keys/issued/{key_id}/revoke:
-    post:
-      tags: [zero]
-      operationId: revokeZeroKey
-      summary: Proxy explicit Core-Zero key revocation
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: key_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: REVOKE_KEY}}}
-      responses:
-        '200': {description: Existing key-revocation response.}
-  /v1/zero/heal/baseline:
-    post:
-      tags: [zero]
-      operationId: recordZeroBaseline
-      summary: Proxy Core-Zero baseline recording
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '201': {description: Existing baseline recorded.}
-  /v1/zero/heal/proposals:
-    post:
-      tags: [zero]
-      operationId: proposeZeroHealing
-      summary: Proxy Core-Zero recovery proposal generation
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '201': {description: Existing recovery proposal; not executed.}
-  /v1/zero/heal/proposals/{proposal_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroHealing
-      summary: Proxy an explicitly approved Core-Zero recovery
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: proposal_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: RESTORE_TO_REPOSITORY}}}
-      responses:
-        '200': {description: Existing bounded recovery response.}
-  /v1/zero/assemble/templates:
-    get:
-      tags: [zero]
-      operationId: listZeroTemplates
-      summary: Proxy versioned Core-Zero assembly templates
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing curated template catalogue.}
-  /v1/zero/assemble:
-    post:
-      tags: [zero]
-      operationId: proposeZeroAssembly
-      summary: Proxy Core-Zero template-bounded assembly
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [target], properties: {target: {type: string}}}
-      responses:
-        '201': {description: Existing review-only artifacts.}
-  /v1/zero/radar/compare:
-    post:
-      tags: [zero]
-      operationId: compareZeroRadar
-      summary: Proxy offline Core-Zero Radar comparison
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing local evidence comparison.}
-  /v1/zero/bridge/plan:
-    post:
-      tags: [zero]
-      operationId: planZeroBridge
-      summary: Proxy Core-Zero hardware/software adapter plan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Plan only; no hardware touched.}
-  /v1/zero/mind/compile:
-    post:
-      tags: [zero]
-      operationId: compileZeroRVLang
-      summary: Proxy Core-Zero non-executing RV Lang compiler
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 65536}}}
-      responses:
-        '200': {description: Non-executing Go plan artifact.}
-  /v1/zero/mind/ide:
-    get:
-      tags: [zero]
-      operationId: serveZeroRVLangIDE
-      summary: Proxy the existing Core-Zero bundled RV Lang IDE
-      responses:
-        '200': {description: Local editor resource.}
-  /v1/genesis/health:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHealth
-      summary: Proxy Core-One Genesis health
-      responses:
-        '200': {description: Existing Genesis service response.}
-  /v1/genesis/invent:
-    post:
-      tags: [genesis]
-      operationId: proposeGenesisInvention
-      summary: Proxy existing Core-One invention proposal
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, minLength: 1, maxLength: 3999}}}
-      responses:
-        '201': {description: Existing proposal-only invention.}
-        '403': {description: Core-One Guardian blocked the demand.}
-        '409': {description: Proposal already exists.}
-  /v1/genesis/queue:
-    post:
-      tags: [genesis]
-      operationId: queueGenesisDemand
-      summary: Proxy existing Genesis durable demand queue
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, maxLength: 3999}, source: {type: string, maxLength: 100}}}
-      responses:
-        '202': {description: Existing queued proposal.}
-  /v1/genesis/status:
-    get:
-      tags: [genesis]
-      operationId: getGenesisStatus
-      summary: Proxy Genesis operational status
-      responses:
-        '200': {description: Existing queue/invention snapshot.}
-  /v1/genesis/tools:
-    get:
-      tags: [genesis]
-      operationId: listGenesisTools
-      summary: Proxy Genesis invention listing
-      responses:
-        '200': {description: Existing proposal list.}
-  /v1/genesis/tools/{name}:
-    get:
-      tags: [genesis]
-      operationId: getGenesisTool
-      summary: Proxy Genesis tool proposal details
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing manifest.}
-        '404': {description: Not found.}
-  /v1/genesis/tools/{name}/hardware_guide:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHardwareGuide
-      summary: Proxy Genesis hardware guide
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing hardware-guide proposal.}
-  /v1/genesis/stream:
-    get:
-      tags: [genesis]
-      operationId: streamGenesis
-      summary: Proxy Genesis server-sent events
-      responses:
-        '200': {description: text/event-stream}
-  /v1/genesis/key:
-    get:
-      tags: [genesis]
-      operationId: getGenesisKeyStatus
-      summary: Proxy shared provider-key request status
-      responses:
-        '200': {description: Status only; secret not disclosed.}
-    post:
-      tags: [genesis]
-      operationId: requestGenesisKey
-      summary: Proxy Core-One key request for human approval
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [client_id, reason], properties: {client_id: {type: string, maxLength: 120}, reason: {type: string, maxLength: 500}}}
-      responses:
-        '202': {description: Existing pending approval.}
-  /v1/rvx/compile:
-    post:
-      tags: [genesis]
-      operationId: compileGenesisRVX
-      summary: Proxy the current Core-One RVX compiler; no compiler replacement is implied
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 16384}}}
-      responses:
-        '200': {description: Existing declarative IR; no executable WASM is implied.}
-        '422': {description: Invalid RVX program.}
-components:
-  securitySchemes:
-    MindToken:
-      type: http
-      scheme: bearer
-      description: Core-Two MIND_ADMIN_TOKEN; absent token disables mutations.
-    GenesisToken:
-      type: apiKey
-      in: header
-      name: X-Genesis-Token
-      description: Existing Core-One credential; upstream checks remain required.
-    ZeroAPIKey:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: Existing approved scoped Core-Zero key.
-    ZeroAdminToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Token
-      description: Existing Core-Zero admin token.
-  responses:
-    Unauthorized:
-      description: Authentication or approval requirement not satisfied.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-    BadRequest:
-      description: Invalid or unsupported request.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-    Unavailable:
-      description: Evidence or local upstream unavailable.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-  schemas:
-    Error:
-      type: object
-      required: [status, code, message]
-      properties:
-        status: {type: string, const: error}
-        code: {type: string}
-        message: {type: string}
-}
-                mutation: {type: string, pattern: '^[a-z0-9_-]{1,64}    get:
-      tags: [mind]
-      operationId: listMindEvolutions
-      summary: List Core-Two proposals and recorded evidence
-      responses:
-        '200': {description: Proposal inventory; no merge is performed.}
-  /v1/mind/tools/{name}/improvement:
-    get:
-      tags: [mind]
-      operationId: getToolImprovement
-      summary: Read per-tool improvement metrics
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Provenance-aware tool metrics.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '404': {description: No metrics were recorded for this tool.}
-  /v1/mind/stream:
-    get:
-      tags: [mind]
-      operationId: streamMindStatus
-      summary: Stream periodic integration/evolution status as SSE
-      responses:
-        '200': {description: text/event-stream}
-  /v1/mind/key:
-    get:
-      tags: [mind]
-      operationId: getMindProviderKeyStatus
-      summary: Read shared provider key configuration without disclosing secrets
-      responses:
-        '200': {description: Reports whether the shared provider URL/key environment settings exist.}
-    post:
-      tags: [mind]
-      operationId: requestMindProviderKey
-      summary: Submit a key-access request for human approval; no key is issued
-      security: [{MindToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [client_id, reason]
-              properties:
-                client_id: {type: string, minLength: 1, maxLength: 120}
-                reason: {type: string, minLength: 1, maxLength: 500}
-      responses:
-        '202': {description: Request is pending_approval and secret_issued=false.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/status:
-    get:
-      tags: [zero]
-      operationId: getZeroIntegrationStatus
-      summary: Observe Core-Zero integration and healing-log availability
-      responses:
-        '200': {description: Read-only integration evidence.}
-  /v1/zero/health:
-    get:
-      tags: [zero]
-      operationId: getZeroHealth
-      summary: Proxy Core-Zero GET /v1/health
-      responses:
-        '200': {description: Existing Core-Zero health response.}
-  /v1/zero/scan:
-    get:
-      tags: [zero]
-      operationId: scanZeroRepository
-      summary: Proxy Core-Zero repository scan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing source inventory.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/keys/request:
-    post:
-      tags: [zero]
-      operationId: requestZeroKey
-      summary: Proxy Core-Zero pending API-key workflow
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object}
-      responses:
-        '202': {description: Existing request-awaiting-approval response.}
-  /v1/zero/keys/requests:
-    get:
-      tags: [zero]
-      operationId: listZeroKeyRequests
-      summary: Proxy Core-Zero API-key request list
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '200': {description: Key-request metadata.}
-  /v1/zero/keys/requests/{request_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroKey
-      summary: Proxy explicit Core-Zero key approval
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: request_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: ISSUE_KEY}}}
-      responses:
-        '200': {description: Existing one-time-key approval response.}
-  /v1/zero/keys/issued/{key_id}/revoke:
-    post:
-      tags: [zero]
-      operationId: revokeZeroKey
-      summary: Proxy explicit Core-Zero key revocation
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: key_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: REVOKE_KEY}}}
-      responses:
-        '200': {description: Existing key-revocation response.}
-  /v1/zero/heal/baseline:
-    post:
-      tags: [zero]
-      operationId: recordZeroBaseline
-      summary: Proxy Core-Zero baseline recording
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '201': {description: Existing baseline recorded.}
-  /v1/zero/heal/proposals:
-    post:
-      tags: [zero]
-      operationId: proposeZeroHealing
-      summary: Proxy Core-Zero recovery proposal generation
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '201': {description: Existing recovery proposal; not executed.}
-  /v1/zero/heal/proposals/{proposal_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroHealing
-      summary: Proxy an explicitly approved Core-Zero recovery
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: proposal_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: RESTORE_TO_REPOSITORY}}}
-      responses:
-        '200': {description: Existing bounded recovery response.}
-  /v1/zero/assemble/templates:
-    get:
-      tags: [zero]
-      operationId: listZeroTemplates
-      summary: Proxy versioned Core-Zero assembly templates
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing curated template catalogue.}
-  /v1/zero/assemble:
-    post:
-      tags: [zero]
-      operationId: proposeZeroAssembly
-      summary: Proxy Core-Zero template-bounded assembly
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [target], properties: {target: {type: string}}}
-      responses:
-        '201': {description: Existing review-only artifacts.}
-  /v1/zero/radar/compare:
-    post:
-      tags: [zero]
-      operationId: compareZeroRadar
-      summary: Proxy offline Core-Zero Radar comparison
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing local evidence comparison.}
-  /v1/zero/bridge/plan:
-    post:
-      tags: [zero]
-      operationId: planZeroBridge
-      summary: Proxy Core-Zero hardware/software adapter plan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Plan only; no hardware touched.}
-  /v1/zero/mind/compile:
-    post:
-      tags: [zero]
-      operationId: compileZeroRVLang
-      summary: Proxy Core-Zero non-executing RV Lang compiler
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 65536}}}
-      responses:
-        '200': {description: Non-executing Go plan artifact.}
-  /v1/zero/mind/ide:
-    get:
-      tags: [zero]
-      operationId: serveZeroRVLangIDE
-      summary: Proxy the existing Core-Zero bundled RV Lang IDE
-      responses:
-        '200': {description: Local editor resource.}
-  /v1/genesis/health:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHealth
-      summary: Proxy Core-One Genesis health
-      responses:
-        '200': {description: Existing Genesis service response.}
-  /v1/genesis/invent:
-    post:
-      tags: [genesis]
-      operationId: proposeGenesisInvention
-      summary: Proxy existing Core-One invention proposal
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, minLength: 1, maxLength: 3999}}}
-      responses:
-        '201': {description: Existing proposal-only invention.}
-        '403': {description: Core-One Guardian blocked the demand.}
-        '409': {description: Proposal already exists.}
-  /v1/genesis/queue:
-    post:
-      tags: [genesis]
-      operationId: queueGenesisDemand
-      summary: Proxy existing Genesis durable demand queue
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, maxLength: 3999}, source: {type: string, maxLength: 100}}}
-      responses:
-        '202': {description: Existing queued proposal.}
-  /v1/genesis/status:
-    get:
-      tags: [genesis]
-      operationId: getGenesisStatus
-      summary: Proxy Genesis operational status
-      responses:
-        '200': {description: Existing queue/invention snapshot.}
-  /v1/genesis/tools:
-    get:
-      tags: [genesis]
-      operationId: listGenesisTools
-      summary: Proxy Genesis invention listing
-      responses:
-        '200': {description: Existing proposal list.}
-  /v1/genesis/tools/{name}:
-    get:
-      tags: [genesis]
-      operationId: getGenesisTool
-      summary: Proxy Genesis tool proposal details
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing manifest.}
-        '404': {description: Not found.}
-  /v1/genesis/tools/{name}/hardware_guide:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHardwareGuide
-      summary: Proxy Genesis hardware guide
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing hardware-guide proposal.}
-  /v1/genesis/stream:
-    get:
-      tags: [genesis]
-      operationId: streamGenesis
-      summary: Proxy Genesis server-sent events
-      responses:
-        '200': {description: text/event-stream}
-  /v1/genesis/key:
-    get:
-      tags: [genesis]
-      operationId: getGenesisKeyStatus
-      summary: Proxy shared provider-key request status
-      responses:
-        '200': {description: Status only; secret not disclosed.}
-    post:
-      tags: [genesis]
-      operationId: requestGenesisKey
-      summary: Proxy Core-One key request for human approval
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [client_id, reason], properties: {client_id: {type: string, maxLength: 120}, reason: {type: string, maxLength: 500}}}
-      responses:
-        '202': {description: Existing pending approval.}
-  /v1/rvx/compile:
-    post:
-      tags: [genesis]
-      operationId: compileGenesisRVX
-      summary: Proxy the current Core-One RVX compiler; no compiler replacement is implied
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 16384}}}
-      responses:
-        '200': {description: Existing declarative IR; no executable WASM is implied.}
-        '422': {description: Invalid RVX program.}
-components:
-  securitySchemes:
-    MindToken:
-      type: http
-      scheme: bearer
-      description: Core-Two MIND_ADMIN_TOKEN; absent token disables mutations.
-    GenesisToken:
-      type: apiKey
-      in: header
-      name: X-Genesis-Token
-      description: Existing Core-One credential; upstream checks remain required.
-    ZeroAPIKey:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: Existing approved scoped Core-Zero key.
-    ZeroAdminToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Token
-      description: Existing Core-Zero admin token.
-  responses:
-    Unauthorized:
-      description: Authentication or approval requirement not satisfied.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-    BadRequest:
-      description: Invalid or unsupported request.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-    Unavailable:
-      description: Evidence or local upstream unavailable.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-  schemas:
-    Error:
-      type: object
-      required: [status, code, message]
-      properties:
-        status: {type: string, const: error}
-        code: {type: string}
-        message: {type: string}
-}
-                outcome: {type: string, enum: [merged, rejected, reverted, needs_work]}
-                note: {type: string, minLength: 8, maxLength: 1200}
-                evidence_ref: {type: string, maxLength: 500}
-      responses:
-        '201': {description: Feedback recorded for deterministic ranking; no source files merged.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-        '422': {description: Feedback does not match a staged evolution or violates ledger rules.}
-  /v1/mind/evolutions:
-    get:
-      tags: [mind]
-      operationId: listMindEvolutions
-      summary: List Core-Two proposals and recorded evidence
-      responses:
-        '200': {description: Proposal inventory; no merge is performed.}
-  /v1/mind/tools/{name}/improvement:
-    get:
-      tags: [mind]
-      operationId: getToolImprovement
-      summary: Read per-tool improvement metrics
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Provenance-aware tool metrics.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '404': {description: No metrics were recorded for this tool.}
-  /v1/mind/stream:
-    get:
-      tags: [mind]
-      operationId: streamMindStatus
-      summary: Stream periodic integration/evolution status as SSE
-      responses:
-        '200': {description: text/event-stream}
-  /v1/mind/key:
-    get:
-      tags: [mind]
-      operationId: getMindProviderKeyStatus
-      summary: Read shared provider key configuration without disclosing secrets
-      responses:
-        '200': {description: Reports whether the shared provider URL/key environment settings exist.}
-    post:
-      tags: [mind]
-      operationId: requestMindProviderKey
-      summary: Submit a key-access request for human approval; no key is issued
-      security: [{MindToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [client_id, reason]
-              properties:
-                client_id: {type: string, minLength: 1, maxLength: 120}
-                reason: {type: string, minLength: 1, maxLength: 500}
-      responses:
-        '202': {description: Request is pending_approval and secret_issued=false.}
-        '400': {$ref: '#/components/responses/BadRequest'}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/status:
-    get:
-      tags: [zero]
-      operationId: getZeroIntegrationStatus
-      summary: Observe Core-Zero integration and healing-log availability
-      responses:
-        '200': {description: Read-only integration evidence.}
-  /v1/zero/health:
-    get:
-      tags: [zero]
-      operationId: getZeroHealth
-      summary: Proxy Core-Zero GET /v1/health
-      responses:
-        '200': {description: Existing Core-Zero health response.}
-  /v1/zero/scan:
-    get:
-      tags: [zero]
-      operationId: scanZeroRepository
-      summary: Proxy Core-Zero repository scan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing source inventory.}
-        '401': {$ref: '#/components/responses/Unauthorized'}
-  /v1/zero/keys/request:
-    post:
-      tags: [zero]
-      operationId: requestZeroKey
-      summary: Proxy Core-Zero pending API-key workflow
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object}
-      responses:
-        '202': {description: Existing request-awaiting-approval response.}
-  /v1/zero/keys/requests:
-    get:
-      tags: [zero]
-      operationId: listZeroKeyRequests
-      summary: Proxy Core-Zero API-key request list
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '200': {description: Key-request metadata.}
-  /v1/zero/keys/requests/{request_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroKey
-      summary: Proxy explicit Core-Zero key approval
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: request_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: ISSUE_KEY}}}
-      responses:
-        '200': {description: Existing one-time-key approval response.}
-  /v1/zero/keys/issued/{key_id}/revoke:
-    post:
-      tags: [zero]
-      operationId: revokeZeroKey
-      summary: Proxy explicit Core-Zero key revocation
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: key_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: REVOKE_KEY}}}
-      responses:
-        '200': {description: Existing key-revocation response.}
-  /v1/zero/heal/baseline:
-    post:
-      tags: [zero]
-      operationId: recordZeroBaseline
-      summary: Proxy Core-Zero baseline recording
-      security: [{ZeroAdminToken: []}]
-      responses:
-        '201': {description: Existing baseline recorded.}
-  /v1/zero/heal/proposals:
-    post:
-      tags: [zero]
-      operationId: proposeZeroHealing
-      summary: Proxy Core-Zero recovery proposal generation
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '201': {description: Existing recovery proposal; not executed.}
-  /v1/zero/heal/proposals/{proposal_id}/approve:
-    post:
-      tags: [zero]
-      operationId: approveZeroHealing
-      summary: Proxy an explicitly approved Core-Zero recovery
-      security: [{ZeroAdminToken: []}]
-      parameters:
-        - {name: proposal_id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [confirmation], properties: {confirmation: {type: string, const: RESTORE_TO_REPOSITORY}}}
-      responses:
-        '200': {description: Existing bounded recovery response.}
-  /v1/zero/assemble/templates:
-    get:
-      tags: [zero]
-      operationId: listZeroTemplates
-      summary: Proxy versioned Core-Zero assembly templates
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing curated template catalogue.}
-  /v1/zero/assemble:
-    post:
-      tags: [zero]
-      operationId: proposeZeroAssembly
-      summary: Proxy Core-Zero template-bounded assembly
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [target], properties: {target: {type: string}}}
-      responses:
-        '201': {description: Existing review-only artifacts.}
-  /v1/zero/radar/compare:
-    post:
-      tags: [zero]
-      operationId: compareZeroRadar
-      summary: Proxy offline Core-Zero Radar comparison
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Existing local evidence comparison.}
-  /v1/zero/bridge/plan:
-    post:
-      tags: [zero]
-      operationId: planZeroBridge
-      summary: Proxy Core-Zero hardware/software adapter plan
-      security: [{ZeroAPIKey: []}]
-      responses:
-        '200': {description: Plan only; no hardware touched.}
-  /v1/zero/mind/compile:
-    post:
-      tags: [zero]
-      operationId: compileZeroRVLang
-      summary: Proxy Core-Zero non-executing RV Lang compiler
-      security: [{ZeroAPIKey: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 65536}}}
-      responses:
-        '200': {description: Non-executing Go plan artifact.}
-  /v1/zero/mind/ide:
-    get:
-      tags: [zero]
-      operationId: serveZeroRVLangIDE
-      summary: Proxy the existing Core-Zero bundled RV Lang IDE
-      responses:
-        '200': {description: Local editor resource.}
-  /v1/genesis/health:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHealth
-      summary: Proxy Core-One Genesis health
-      responses:
-        '200': {description: Existing Genesis service response.}
-  /v1/genesis/invent:
-    post:
-      tags: [genesis]
-      operationId: proposeGenesisInvention
-      summary: Proxy existing Core-One invention proposal
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, minLength: 1, maxLength: 3999}}}
-      responses:
-        '201': {description: Existing proposal-only invention.}
-        '403': {description: Core-One Guardian blocked the demand.}
-        '409': {description: Proposal already exists.}
-  /v1/genesis/queue:
-    post:
-      tags: [genesis]
-      operationId: queueGenesisDemand
-      summary: Proxy existing Genesis durable demand queue
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [demand], properties: {demand: {type: string, maxLength: 3999}, source: {type: string, maxLength: 100}}}
-      responses:
-        '202': {description: Existing queued proposal.}
-  /v1/genesis/status:
-    get:
-      tags: [genesis]
-      operationId: getGenesisStatus
-      summary: Proxy Genesis operational status
-      responses:
-        '200': {description: Existing queue/invention snapshot.}
-  /v1/genesis/tools:
-    get:
-      tags: [genesis]
-      operationId: listGenesisTools
-      summary: Proxy Genesis invention listing
-      responses:
-        '200': {description: Existing proposal list.}
-  /v1/genesis/tools/{name}:
-    get:
-      tags: [genesis]
-      operationId: getGenesisTool
-      summary: Proxy Genesis tool proposal details
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing manifest.}
-        '404': {description: Not found.}
-  /v1/genesis/tools/{name}/hardware_guide:
-    get:
-      tags: [genesis]
-      operationId: getGenesisHardwareGuide
-      summary: Proxy Genesis hardware guide
-      parameters:
-        - {name: name, in: path, required: true, schema: {type: string, pattern: '^[a-z0-9_-]{1,64}$'}}
-      responses:
-        '200': {description: Existing hardware-guide proposal.}
-  /v1/genesis/stream:
-    get:
-      tags: [genesis]
-      operationId: streamGenesis
-      summary: Proxy Genesis server-sent events
-      responses:
-        '200': {description: text/event-stream}
-  /v1/genesis/key:
-    get:
-      tags: [genesis]
-      operationId: getGenesisKeyStatus
-      summary: Proxy shared provider-key request status
-      responses:
-        '200': {description: Status only; secret not disclosed.}
-    post:
-      tags: [genesis]
-      operationId: requestGenesisKey
-      summary: Proxy Core-One key request for human approval
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [client_id, reason], properties: {client_id: {type: string, maxLength: 120}, reason: {type: string, maxLength: 500}}}
-      responses:
-        '202': {description: Existing pending approval.}
-  /v1/rvx/compile:
-    post:
-      tags: [genesis]
-      operationId: compileGenesisRVX
-      summary: Proxy the current Core-One RVX compiler; no compiler replacement is implied
-      security: [{GenesisToken: []}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {type: object, required: [source], properties: {source: {type: string, maxLength: 16384}}}
-      responses:
-        '200': {description: Existing declarative IR; no executable WASM is implied.}
-        '422': {description: Invalid RVX program.}
-components:
-  securitySchemes:
-    MindToken:
-      type: http
-      scheme: bearer
-      description: Core-Two MIND_ADMIN_TOKEN; absent token disables mutations.
-    GenesisToken:
-      type: apiKey
-      in: header
-      name: X-Genesis-Token
-      description: Existing Core-One credential; upstream checks remain required.
-    ZeroAPIKey:
-      type: apiKey
-      in: header
-      name: X-API-Key
-      description: Existing approved scoped Core-Zero key.
-    ZeroAdminToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Token
-      description: Existing Core-Zero admin token.
-  responses:
-    Unauthorized:
-      description: Authentication or approval requirement not satisfied.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-    BadRequest:
-      description: Invalid or unsupported request.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-    Unavailable:
-      description: Evidence or local upstream unavailable.
-      content:
-        application/json:
-          schema: {$ref: '#/components/schemas/Error'}
-  schemas:
-    Error:
-      type: object
-      required: [status, code, message]
-      properties:
-        status: {type: string, const: error}
-        code: {type: string}
-        message: {type: string}
+        status:
+          type: string
+          const: error
+        code:
+          type: string
+        message:
+          type: string

@@ -156,3 +156,6 @@ services:
           type: pserv
           name: genesis-core-one
           envVarKey: GENESIS_ADMIN_TOKEN
+      # Optional provider credential; Mind remains model-free without it.
+      - key: REVELACODE_PROVIDER_KEY
+        sync: false

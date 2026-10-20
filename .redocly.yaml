@@ -1,0 +1,8 @@
+extends:
+  - recommended
+rules:
+  # The gateway intentionally exposes health/status/read-only observations without
+  # authentication; mutating and upstream-protected operations declare security
+  # explicitly at operation level. Keep these warnings visible without blocking CI.
+  security-defined: warn
+  operation-4xx-response: warn
