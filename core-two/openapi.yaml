@@ -766,7 +766,7 @@ components:
     ToolTelemetryEvent:
       type: object
       additionalProperties: false
-      required: [tool_name, version_hash, success, latency_ms, timestamp]
+      required: [tool_name, version_hash, success, latency_ms, timestamp, evidence_origin]
       properties:
         tool_name:
           type: string
@@ -791,6 +791,10 @@ components:
           type: string
           enum: [runtime, replay]
           default: runtime
+        evidence_origin:
+          type: string
+          enum: [tool_runner, replay_harness, synthetic_fixture]
+          description: Declared origin; synthetic fixtures are never eligible for auto-promotion and do not constitute production evidence.
     FoundryCandidate:
       type: object
       additionalProperties: false
@@ -889,6 +893,11 @@ components:
           type: object
         score:
           type: number
+        synthetic_fixture:
+          type: boolean
+        production_verified:
+          type: boolean
+          const: false
         automatic_merge:
           type: boolean
           const: false
