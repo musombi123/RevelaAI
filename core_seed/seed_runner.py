@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from core_billing.licensing import LicenseError, verify_license_token
+from core_uncopyable.hardware_bind import hardware_fingerprint
 from core_foundry.factory.foundry_builder import FactoryBuildError, FoundryBuilder
 from core_foundry.attestation import AttestationError, verify_approval_attestation
 
@@ -25,6 +26,17 @@ class SeedError(RuntimeError):
 
 def seed_root() -> Path:
     return Path(os.getenv("REVELA_SEED_ROOT", str(Path.home() / ".revelaai" / "seeded"))).expanduser()
+
+
+def _verify_device_license(token: str, *, now: datetime | None = None) -> dict[str, Any]:
+    claims = _verify_device_license(token, now=now)
+    if claims.get("hardware_fingerprint"):
+        try:
+            current = hardware_fingerprint()
+        except RuntimeError as exc:
+            raise LicenseError("Hardware-bound Seed license requires a stable device identity.") from exc
+        claims = verify_license_token(token, now=now, hardware_fingerprint=current)
+    return claims
 
 
 class SeedRunner:
@@ -41,7 +53,7 @@ class SeedRunner:
         if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9 _.-]{1,99}", child_name.strip()):
             raise SeedError("Child name contains unsupported characters or length.")
         try:
-            claims = verify_license_token(license_key, now=now)
+            claims = _verify_device_license(license_key, now=now)
         except LicenseError as exc:
             raise SeedError(str(exc)) from exc
         if claims.get("sub") != user_id:
