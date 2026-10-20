@@ -2,6 +2,7 @@ package diagnostics
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -426,7 +427,5 @@ func TestSampleTruncatesPathList(t *testing.T) {
 }
 
 func fileName(index int) string {
-	return strings.Repeat("0", 4-len(strings.TrimLeft(strings.Repeat("0", 4)+strings.TrimSpace(string(rune('0'+index%10)), " "), "0"))) +
-		strings.TrimSpace(string(rune('0'+index%10)), " ") +
-		".txt"
+	return fmt.Sprintf("%04d.txt", index)
 }
