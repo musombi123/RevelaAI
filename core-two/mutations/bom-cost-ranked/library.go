@@ -3,7 +3,6 @@ package candidate
 
 import (
 	"errors"
-	"math"
 	"sort"
 	"strings"
 )
@@ -71,9 +70,9 @@ func RankQuotes(quotes []Quote) []RankedQuote {
 
 // Validate checks the invariants required by this deterministic ranking library.
 func Validate() error {
-	max := int64(math.MaxInt64)
-	total, ok := TotalCost(Quote{UnitCost: max, TransportCost: max})
-	if !ok || total != uint64(math.MaxUint64-1) {
+	const maxInt64 = int64(1<<63 - 1)
+	total, ok := TotalCost(Quote{UnitCost: maxInt64, TransportCost: maxInt64})
+	if !ok || total != uint64(1<<64-2) {
 		return errors.New("BOM cost overflow invariant failed")
 	}
 	best, found := BestQuote([]Quote{
