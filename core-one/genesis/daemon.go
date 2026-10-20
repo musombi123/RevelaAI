@@ -445,7 +445,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 			item.Status = "failed"
 			item.Error = limitText(validationErr.Error(), 500)
 
-			if err := finalizeQueueRecord(
+			if err := e.finalizeQueueRecord(
 				root,
 				claim,
 				entry.Name(),
@@ -539,7 +539,7 @@ func (e *Engine) ProcessQueue(ctx context.Context) error {
 			}
 		}
 
-		if err := finalizeQueueRecord(
+		if err := e.finalizeQueueRecord(
 			root,
 			claim,
 			entry.Name(),
@@ -826,7 +826,7 @@ func readQueueDemand(path, filename string) (Demand, error) {
 
 // finalizeQueueRecord writes a durable status record before removing the
 // processing claim. The original Source value remains available for provenance.
-func finalizeQueueRecord(
+func (e *Engine) finalizeQueueRecord(
 	root string,
 	claim string,
 	filename string,
