@@ -411,8 +411,15 @@ def _ai_sync(
         if not isinstance(core_mesh_raw, dict):
             core_mesh = {}
         else:
+            raw_safety = core_mesh_raw.get("safety")
+            if not isinstance(raw_safety, dict):
+                raw_safety = {}
             core_mesh = {
                 "mode": str(core_mesh_raw.get("mode") or "advisory_only")[:40],
+                "target_core": str(core_mesh_raw.get("target_core") or "")[:40],
+                "operation_kind": str(core_mesh_raw.get("operation_kind") or "")[:80],
+                "execution_status": str(core_mesh_raw.get("execution_status") or "not_run")[:40],
+                "failure_reason": str(core_mesh_raw.get("failure_reason") or "")[:100] or None,
                 "selected_core": str(core_mesh_raw.get("selected_core") or "orchestrator")[:40],
                 "route_reason": str(core_mesh_raw.get("route_reason") or "")[:280],
                 "domain": str(core_mesh_raw.get("domain") or "general")[:80],
@@ -424,15 +431,18 @@ def _ai_sync(
                         "status": str(info.get("status") or "unknown")[:40],
                         "reachable": info.get("reachable") if info.get("reachable") in (True, False, None) else None,
                         "version": str(info.get("version") or "")[:40],
+                        "failure_reason": str(info.get("failure_reason") or "")[:100] or None,
                     }
                     for name, info in core_mesh_raw.get("cores", {}).items()
                     if isinstance(name, str) and isinstance(info, dict)
                 } if isinstance(core_mesh_raw.get("cores"), dict) else {},
                 "safety": {
-                    "operation_executed": False,
-                    "human_approval_required": True,
-                    "automatic_merge": False,
-                    "automatic_execution": False,
+                    "operation_executed": raw_safety.get("operation_executed") is True,
+                    "target_mutation_performed": raw_safety.get("target_mutation_performed") is True,
+                    "candidate_source_execution": raw_safety.get("candidate_source_execution") is True,
+                    "human_approval_required": raw_safety.get("human_approval_required", True) is True,
+                    "automatic_merge": raw_safety.get("automatic_merge") is True,
+                    "automatic_execution": raw_safety.get("automatic_execution") is True,
                 },
             }
 
