@@ -1354,12 +1354,12 @@ def process_message(
     ):
         lower_message = normalized_message.strip().lower()
         starts_with_action = bool(re.match(
-            r"^(?:please\\s+)?(?:create|build|invent|generate|develop|propose|evolve|upgrade|improve|implement|make|design)\\b",
+            r"^(?:please\s+)?(?:create|build|invent|generate|develop|propose|evolve|upgrade|improve|implement|make|design)\b",
             lower_message,
         ))
         requested_action = bool(re.search(
-            r"\\b(?:i want (?:you to |to )|please |can you |could you |go ahead and |build me |create me |generate me )"
-            r"(?:create|build|invent|generate|develop|propose|evolve|upgrade|improve|implement|make|design)\\b",
+            r"\b(?:i want (?:you to |to )|please |can you |could you |go ahead and |build me |create me |generate me )"
+            r"(?:create|build|invent|generate|develop|propose|evolve|upgrade|improve|implement|make|design)\b",
             lower_message,
         ))
         if starts_with_action or requested_action:
@@ -1375,7 +1375,7 @@ def process_message(
                     core_label = "Genesis / USECT-ONE"
                 else:
                     tool_match = re.search(
-                        r"\\b(?:tool(?:_name)?\\s*(?:is|=|:)?\\s+)([a-z0-9][a-z0-9_-]{0,63})\\b",
+                        r"\b(?:tool(?:_name)?\s*(?:is|=|:)?\s+)([a-z0-9][a-z0-9_-]{0,63})\b",
                         lower_message,
                     )
                     tool_name = tool_match.group(1) if tool_match else "offline_vault_fixture"
