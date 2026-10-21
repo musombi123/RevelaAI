@@ -85,6 +85,49 @@ def test_operator_can_dispatch_only_active_signed_tier_zero_tool(monkeypatch):
     }
 
 
+def test_gemini_key_value_pairs_are_normalized_to_existing_runtime_input_map(monkeypatch):
+    _set_operator(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(
+        ai_service,
+        "execute_active_tool",
+        lambda name, version, artifact_hash, arguments: (
+            seen.update(arguments=arguments) or {"status": "success", "result": {"summary": "ok"}}
+        ),
+    )
+
+    result = ai_service._execute_genesis_function_calls(
+        _call(inputs=[
+            {"key": "county", "value": "Mombasa"},
+            {"key": "crop", "value": "maize"},
+        ]),
+        [_active_item()],
+        "operator-1",
+    )
+
+    assert result["status"] == "executed"
+    assert seen["arguments"]["inputs"] == {"county": "Mombasa", "crop": "maize"}
+
+
+def test_duplicate_gemini_input_keys_are_rejected(monkeypatch):
+    _set_operator(monkeypatch)
+    called = []
+    monkeypatch.setattr(ai_service, "execute_active_tool", lambda *args, **kwargs: called.append(args))
+
+    result = ai_service._execute_genesis_function_calls(
+        _call(inputs=[
+            {"key": "county", "value": "Mombasa"},
+            {"key": "county", "value": "Nairobi"},
+        ]),
+        [_active_item()],
+        "operator-1",
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "tool_arguments_failed_safety_validation"
+    assert called == []
+
+
 def test_non_operator_cannot_dispatch_and_never_calls_genesis(monkeypatch):
     _set_operator(monkeypatch)
     called = []
@@ -249,7 +292,11 @@ def test_genesis_declarations_strip_unsupported_gemini_schema_keywords():
                 walk(value)
 
     walk(declarations[0]["parameters"])
-    assert declarations[0]["parameters"]["properties"]["action"]["type"] == "string"
+    properties = declarations[0]["parameters"]["properties"]
+    assert properties["action"]["type"] == "string"
+    assert properties["inputs"]["type"] == "array"
+    assert properties["inputs"]["items"]["required"] == ["key", "value"]
+    assert "consent" not in properties
     assert "additionalProperties" not in declarations[0]["parameters"]
 
 
