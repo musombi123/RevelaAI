@@ -283,13 +283,24 @@ def test_genesis_declarations_strip_unsupported_gemini_schema_keywords():
     }
 
     def walk(schema):
-        if isinstance(schema, dict):
-            assert set(schema).issubset(supported)
-            for value in schema.values():
-                walk(value)
-        elif isinstance(schema, list):
-            for value in schema:
-                walk(value)
+        if not isinstance(schema, dict):
+            return
+        assert set(schema).issubset(supported)
+        properties = schema.get("properties")
+        if isinstance(properties, dict):
+            for property_schema in properties.values():
+                walk(property_schema)
+        items = schema.get("items")
+        if isinstance(items, dict):
+            walk(items)
+        definitions = schema.get("$defs")
+        if isinstance(definitions, dict):
+            for definition in definitions.values():
+                walk(definition)
+        any_of = schema.get("anyOf")
+        if isinstance(any_of, list):
+            for variant in any_of:
+                walk(variant)
 
     walk(declarations[0]["parameters"])
     properties = declarations[0]["parameters"]["properties"]
