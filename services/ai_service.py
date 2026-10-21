@@ -86,6 +86,7 @@ from ai.tool_registry import (
     gemini_function_declarations,
     list_active_tools,
     provider_tool_context,
+    _valid_manifest_shape,
 )
 
 
@@ -963,7 +964,8 @@ def _execute_genesis_function_calls(
         artifact_hash = str(item.get("artifact_hash") or "")
         evidence = item.get("sandbox_evidence")
         if (
-            item.get("name") == manifest_name
+            _valid_manifest_shape(manifest)
+            and item.get("name") == manifest_name
             and item.get("version") == manifest.get("version")
             and item.get("risk_tier") == manifest.get("risk_tier")
             and re.fullmatch(r"[a-fA-F0-9]{64}", artifact_hash)
@@ -1041,11 +1043,13 @@ def _execute_genesis_function_calls(
 
     remote_status = str(result.get("status") or "unknown").strip().lower() if isinstance(result, dict) else "unknown"
     accepted = remote_status in {"success", "completed", "proposal_only"}
-    final_status = "proposal_only" if remote_status == "proposal_only" else "executed" if accepted else "failed"
+    direct_execution_confirmed = remote_status in {"success", "completed"}
+    final_status = "proposal_only" if remote_status == "proposal_only" else "executed" if direct_execution_confirmed else "failed"
     return {
         **base,
         "status": final_status,
-        "executed": accepted,
+        "executed": direct_execution_confirmed,
+        "invocation_confirmed": accepted,
         "reason": None if accepted else "genesis_did_not_confirm_success",
         "tool": name,
         "version": version,
@@ -1981,7 +1985,8 @@ def process_message(
                 "cores": {},
                 "safety": {},
             }
-        accepted_status = dispatch_status in {"executed", "proposal_only"}
+        invocation_confirmed = dispatch_status in {"executed", "proposal_only"}
+        direct_execution_confirmed = dispatch_status == "executed"
         mesh.update({
             "mode": (
                 "executed" if dispatch_status == "executed"
@@ -1993,7 +1998,7 @@ def process_message(
             "target_core": "core-one",
             "operation_kind": "signed_genesis_tool_call",
             "execution_status": dispatch_status,
-            "failure_reason": None if accepted_status else str(
+            "failure_reason": None if invocation_confirmed else str(
                 genesis_tool_execution.get("reason") or "genesis_tool_call_not_executed"
             )[:100],
         })
@@ -2001,12 +2006,13 @@ def process_message(
         if not isinstance(safety, dict):
             safety = {}
         safety.update({
-            "operation_executed": accepted_status,
+            "operation_executed": direct_execution_confirmed,
+            "invocation_confirmed": invocation_confirmed,
             "target_mutation_performed": False,
             "candidate_source_execution": False,
             "human_approval_required": dispatch_status == "approval_required",
             "automatic_merge": False,
-            "automatic_execution": accepted_status,
+            "automatic_execution": False,
         })
         mesh["safety"] = safety
         orchestrator_data["core_mesh"] = mesh
