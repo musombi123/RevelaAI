@@ -997,12 +997,35 @@ def _execute_genesis_function_calls(
         }
 
     action = arguments.get("action")
-    inputs = arguments.get("inputs", {})
+    raw_inputs = arguments.get("inputs", {})
+    inputs: dict[str, str] = {}
+    input_pairs_valid = True
+    if isinstance(raw_inputs, dict):
+        inputs = raw_inputs
+    elif isinstance(raw_inputs, list):
+        if len(raw_inputs) > 64:
+            input_pairs_valid = False
+        else:
+            for pair in raw_inputs:
+                if (
+                    not isinstance(pair, dict)
+                    or set(pair) != {"key", "value"}
+                    or not isinstance(pair.get("key"), str)
+                    or not pair["key"]
+                    or not isinstance(pair.get("value"), str)
+                    or pair["key"] in inputs
+                ):
+                    input_pairs_valid = False
+                    break
+                inputs[pair["key"]] = pair["value"]
+    else:
+        input_pairs_valid = False
     consent = arguments.get("consent", False)
     if (
         not isinstance(action, str)
         or not action.strip()
         or len(action) > 2000
+        or not input_pairs_valid
         or not isinstance(inputs, dict)
         or len(inputs) > 64
         or any(
