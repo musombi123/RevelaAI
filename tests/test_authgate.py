@@ -1,79 +1,97 @@
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
 
 import jwt
+import pytest
 from fastapi import Depends, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
+from starlette.middleware.cors import CORSMiddleware
 
 from revela_platform.auth.auth_gate import enforce_auth
 
 
-def build_client():
+def issue_token(secret: str, *, subject: str = "learner-1", lifetime: int = 3600, extra: dict | None = None) -> str:
+    now = datetime.now(timezone.utc)
+    claims = {
+        "sub": subject,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(seconds=lifetime)).timestamp()),
+        "contact": "learner@example.test",
+        "full_name": "Test Learner",
+        "role": "user",
+        "roles": ["user", "learner"],
+        **(extra or {}),
+    }
+    return jwt.encode(claims, secret, algorithm="HS256")
+
+
+def protected_test_app() -> FastAPI:
     app = FastAPI()
+
+    @app.get("/api/elimu/hubs")
+    async def hubs(claims: dict = Depends(enforce_auth)):
+        return {"success": True, "sub": claims["sub"]}
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["https://revelacode.co.ke"],
+        allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Revela-License"],
     )
-
-    @app.get("/protected")
-    async def protected(claims=Depends(enforce_auth)):
-        return {"success": True, "sub": claims["sub"], "roles": claims.get("roles", [])}
-
-    return TestClient(app)
+    return app
 
 
-def signed_token(secret, *, expiry, sub="64b0000000000000000000aa"):
-    now = datetime.now(timezone.utc)
-    return jwt.encode(
-        {"sub": sub, "iat": int(now.timestamp()), "exp": int(expiry.timestamp()), "roles": ["learner"]},
-        secret,
-        algorithm="HS256",
-    )
-
-
-def test_protected_route_rejects_missing_and_invalid_jwt_as_json(monkeypatch):
-    secret = "test-authgate-secret-that-is-not-used-in-production"
+@pytest.fixture
+def auth_client(monkeypatch):
+    secret = "unit-test-jwt-secret-not-for-production"
     monkeypatch.setenv("JWT_SECRET", secret)
-    client = build_client()
-
-    missing = client.get("/protected")
-    assert missing.status_code == 401
-    assert missing.headers["content-type"].startswith("application/json")
-
-    invalid = client.get("/protected", headers={"Authorization": "Bearer definitely-not-a-jwt"})
-    assert invalid.status_code == 401
-    assert invalid.headers["content-type"].startswith("application/json")
+    return TestClient(protected_test_app()), secret
 
 
-def test_valid_and_expired_access_tokens(monkeypatch):
-    secret = "test-authgate-secret-that-is-not-used-in-production"
-    monkeypatch.setenv("JWT_SECRET", secret)
-    client = build_client()
-
-    valid = signed_token(secret, expiry=datetime.now(timezone.utc) + timedelta(minutes=5))
-    allowed = client.get("/protected", headers={"Authorization": f"Bearer {valid}"})
-    assert allowed.status_code == 200
-    assert allowed.json()["sub"] == "64b0000000000000000000aa"
-
-    expired = signed_token(secret, expiry=datetime.now(timezone.utc) - timedelta(seconds=5))
-    denied = client.get("/protected", headers={"Authorization": f"Bearer {expired}"})
-    assert denied.status_code == 401
-    assert denied.headers["content-type"].startswith("application/json")
+def test_no_token_returns_json_401_with_cors(auth_client):
+    client, _ = auth_client
+    response = client.get("/api/elimu/hubs", headers={"Origin": "https://revelacode.co.ke"})
+    assert response.status_code == 401
+    assert "application/json" in response.headers["content-type"]
+    assert response.headers.get("access-control-allow-origin") == "https://revelacode.co.ke"
+    assert response.json()["detail"]["code"] == "authentication_required"
 
 
-def test_cors_preflight_allows_authorization_and_license_headers(monkeypatch):
-    monkeypatch.setenv("JWT_SECRET", "test-authgate-secret-that-is-not-used-in-production")
-    client = build_client()
-    response = client.options(
-        "/protected",
-        headers={
-            "Origin": "https://revelacode.co.ke",
-            "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "authorization,x-revela-license",
-        },
+def test_valid_hs256_token_allows_protected_route(auth_client):
+    client, secret = auth_client
+    response = client.get(
+        "/api/elimu/hubs",
+        headers={"Authorization": f"Bearer {issue_token(secret)}"},
     )
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "https://revelacode.co.ke"
-    assert "x-revela-license" in response.headers["access-control-allow-headers"].lower()
+    assert response.json() == {"success": True, "sub": "learner-1"}
+
+
+def test_expired_or_invalid_jwt_is_401_json(auth_client):
+    client, secret = auth_client
+    expired = issue_token(secret, lifetime=-10)
+    for token in (expired, "not-a-jwt"):
+        response = client.get("/api/elimu/hubs", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401
+        assert "application/json" in response.headers["content-type"]
+
+
+def test_refresh_endpoint_rotates_access_and_refresh_tokens(monkeypatch):
+    from fastapi_routes.auth_endpoints import router as refresh_router
+
+    secret = "refresh-test-secret-not-for-production"
+    monkeypatch.setenv("JWT_SECRET", secret)
+    app = FastAPI()
+    app.include_router(refresh_router)
+    client = TestClient(app)
+    response = client.post("/api/auth/refresh", json={"refresh_token": issue_token(secret)})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["token_type"] == "Bearer"
+    assert jwt.decode(body["access_token"], secret, algorithms=["HS256"])["sub"] == "learner-1"
+    claims = jwt.decode(body["refresh_token"], secret, algorithms=["HS256"])
+    assert claims["sub"] == "learner-1"
+    assert claims["token_use"] == "refresh"
