@@ -47,4 +47,4 @@ def test_hub_cannot_be_certified_before_all_lessons_are_complete(monkeypatch):
     client, _, _, _, hub_id = make_test_state(monkeypatch)
     response = client.post("/api/certificates/generate", json={"hub_id": hub_id})
     assert response.status_code == 409
-    assert response.json()["error"]["code"] == "hub_not_complete"
+    assert response.json()["detail"]["code"] == "hub_not_complete"
