@@ -645,7 +645,123 @@ def propose_mind_evolution(objective: str, tool_name: str) -> dict:
         headers=_upstream_headers(mutation=True),
         timeout=40.0,
     )
-    return _public_proposal(payload)
+    result = _public_proposal(payload)
+    result.update({
+        "target_core": "core-one",
+        "operation_kind": "core_one_improvement_proposal",
+        "target_modified": False,
+        "human_approval_required": True,
+        "automatic_merge": False,
+        "automatic_execution": False,
+    })
+    return result
+
+
+# Only immutable candidate metadata crosses this bridge. Source files and prompts
+# are rejected before forwarding to Infinite Mind.
+_MIND_CANDIDATE_FIELDS = frozenset({
+    "candidate_id",
+    "source_core",
+    "tool_name",
+    "objective",
+    "baseline_version_hash",
+    "candidate_version_hash",
+    "source_sha256",
+    "risk_tier",
+    "sandbox_tested",
+    "sandbox_evidence_ref",
+})
+_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}\Z")
+_MIND_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+_MIND_EVIDENCE_RE = re.compile(r"[A-Za-z0-9._:/#-]{1,500}\Z")
+
+
+def score_mind_foundry_candidate(candidate: dict) -> dict:
+    """Ask Mind to score a Core-One Foundry candidate without sending its source."""
+    if not isinstance(candidate, dict):
+        raise CoreMeshError("Candidate must be a JSON object.", status_code=400, code="invalid_mind_candidate")
+    if set(candidate) != _MIND_CANDIDATE_FIELDS:
+        raise CoreMeshError(
+            "Candidate must contain exactly the declared metadata fields; source code and extra fields are not accepted.",
+            status_code=400,
+            code="invalid_mind_candidate",
+        )
+
+    text_limits = {
+        "candidate_id": 64,
+        "source_core": 64,
+        "tool_name": 64,
+        "objective": 500,
+        "baseline_version_hash": 64,
+        "candidate_version_hash": 64,
+        "source_sha256": 64,
+        "sandbox_evidence_ref": 500,
+    }
+    for field, limit in text_limits.items():
+        value = candidate.get(field)
+        if not isinstance(value, str) or not value or len(value) > limit or value != value.strip():
+            raise CoreMeshError(
+                f"Candidate field {field} is invalid.",
+                status_code=400,
+                code="invalid_mind_candidate",
+            )
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+            raise CoreMeshError(
+                f"Candidate field {field} contains control characters.",
+                status_code=400,
+                code="invalid_mind_candidate",
+            )
+
+    if candidate["source_core"] != "core-one-foundry":
+        raise CoreMeshError("Only Core-One Foundry candidates may be scored.", status_code=400, code="invalid_mind_candidate")
+    if not _MIND_NAME_RE.fullmatch(candidate["candidate_id"]) or not _MIND_NAME_RE.fullmatch(candidate["tool_name"]):
+        raise CoreMeshError("Candidate ID or tool name is invalid.", status_code=400, code="invalid_mind_candidate")
+    if not 3 <= len(candidate["objective"]) <= 500:
+        raise CoreMeshError("Objective must contain 3–500 characters.", status_code=400, code="invalid_mind_candidate")
+    for field in ("baseline_version_hash", "candidate_version_hash", "source_sha256"):
+        if not _SHA256_HEX_RE.fullmatch(candidate[field]):
+            raise CoreMeshError(f"{field} must be lowercase SHA-256 hex.", status_code=400, code="invalid_mind_candidate")
+    if candidate["baseline_version_hash"] == candidate["candidate_version_hash"]:
+        raise CoreMeshError("Baseline and candidate version hashes must differ.", status_code=400, code="invalid_mind_candidate")
+    if type(candidate["risk_tier"]) is not int or candidate["risk_tier"] not in (1, 2):
+        raise CoreMeshError("Risk tier must be 1 or 2.", status_code=400, code="invalid_mind_candidate")
+    if candidate["sandbox_tested"] is not True:
+        raise CoreMeshError("The candidate must already pass Core-One Foundry sandbox tests.", status_code=422, code="mind_candidate_not_sandbox_tested")
+
+    evidence_ref = candidate["sandbox_evidence_ref"]
+    if "://" in evidence_ref:
+        parsed = urlsplit(evidence_ref)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+            raise CoreMeshError("Evidence URI must use HTTPS without credentials, query, or fragment.", status_code=400, code="invalid_mind_candidate")
+    elif not _MIND_EVIDENCE_RE.fullmatch(evidence_ref):
+        raise CoreMeshError("Evidence reference contains unsupported characters.", status_code=400, code="invalid_mind_candidate")
+
+    mind_base = _base_url("MIND_BASE_URL", "http://127.0.0.1:8782")
+    payload = _request_json(
+        mind_base,
+        "/v1/mind/candidates",
+        method="POST",
+        payload=dict(candidate),
+        headers=_upstream_headers(mutation=True),
+        timeout=25.0,
+    )
+    allowed_result_keys = (
+        "status", "candidate_id", "tool_name", "candidate_version_hash",
+        "source_sha256", "guardian_passed", "core_one_guardian_passed",
+        "scored", "score", "ranking_context_score", "canary",
+        "evidence_recorded_at", "evidence_path", "synthetic_fixture",
+        "production_verified",
+    )
+    result = {key: payload[key] for key in allowed_result_keys if key in payload}
+    result.update({
+        "target_core": "core-one",
+        "assessment_only": True,
+        "human_approval_required": True,
+        "automatic_merge": False,
+        "promotion_executed": False,
+        "rollback_executed": False,
+    })
+    return result
 
 
 def get_cached_core_mesh_dashboard() -> dict:
@@ -671,9 +787,15 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
     if re.search(r"\b(invent|build|create|design|develop|generate)\b.{0,100}\b(tool|module|software|system|engine|plugin|capability)\b", text) or re.search(r"\b(make|create|invent)\s+(me\s+)?(a|an)\s+(tool|module|engine|plugin)\b", text):
         selected = "core-one"
         reason = "A tool/invention request can be proposed through Genesis after explicit operator action."
-    elif re.search(r"\b(evolve|optimise|optimize|improve|benchmark|upgrade)\b", text) and re.search(r"\b(core|tool|system|performance|architecture|engine|mutation)\b", text):
+    elif (
+        re.search(r"\b(evolve|improve|improvement|benchmark|upgrade|optimise|optimize|enhance|harden|refine)\b", text)
+        and re.search(r"\b(core(?:[- ]?one|[- ]?two|[- ]?zero)?|genesis|tool|system|performance|architecture|engine|mutation|foundry)\b", text)
+    ):
         selected = "core-two"
-        reason = "An improvement request can be evaluated by Infinite Mind as a guarded proposal after explicit operator action."
+        reason = (
+            "Infinite Mind evaluates evidence-backed improvements for Core-One/Genesis; "
+            "it stages a proposal for human review and never edits or merges Core-One."
+        )
     elif re.search(r"\b(diagnose|diagnostics|health check|audit|recover|repair)\b", text) and re.search(r"\b(core|repository|system|service|daemon|platform)\b", text):
         selected = "core-zero"
         reason = "A diagnostic/recovery request maps to ZERO's read-only checks or human-gated recovery proposals."
@@ -684,9 +806,23 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
     asks_about_mesh = bool(re.search(r"\b(core[- ]?mesh|usect|genesis|infinite mind|core[- ]?(zero|one|two))\b", text))
     dashboard = get_core_mesh_dashboard() if selected != "orchestrator" or asks_about_mesh else get_cached_core_mesh_dashboard()
     cores = dashboard.get("cores", {})
+    target_core = {
+        "core-one": "core-one",
+        "core-two": "core-one",
+        "core-zero": "core-zero",
+    }.get(selected)
+    operation_kind = {
+        "core-one": "invention_proposal",
+        "core-two": "core_one_improvement_proposal",
+        "core-zero": "diagnostics_advisory",
+        "orchestrator": "normal_chat",
+    }.get(selected, "advisory_only")
+
     return {
         "mode": "advisory_only",
         "selected_core": selected,
+        "target_core": target_core,
+        "operation_kind": operation_kind,
         "route_reason": reason,
         "domain": str(domain or "general"),
         "intent": str(intent or "general"),
@@ -702,6 +838,8 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
         },
         "safety": {
             "operation_executed": False,
+            "target_mutation_performed": False,
+            "candidate_source_execution": False,
             "human_approval_required": True,
             "automatic_merge": False,
             "automatic_execution": False,

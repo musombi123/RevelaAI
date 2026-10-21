@@ -120,3 +120,143 @@ def test_mind_unavailable_is_explicit_and_normal_chat_stays_available(monkeypatc
     result = core_mesh.orchestrator_core_context("What is photosynthesis?")
     assert result["selected_core"] == "orchestrator"
     assert result["safety"]["operation_executed"] is False
+
+def test_core_one_upgrade_routes_to_mind_with_explicit_core_one_target(monkeypatch):
+    monkeypatch.setattr(core_mesh, "get_core_mesh_dashboard", lambda: _online_dashboard())
+
+    result = core_mesh.orchestrator_core_context(
+        "Upgrade Core-One to improve its tool reliability.",
+        domain="programming",
+        intent="engineering",
+    )
+
+    assert result["selected_core"] == "core-two"
+    assert result["target_core"] == "core-one"
+    assert result["operation_kind"] == "core_one_improvement_proposal"
+    assert result["safety"]["operation_executed"] is False
+    assert result["safety"]["target_mutation_performed"] is False
+    assert result["safety"]["candidate_source_execution"] is False
+    assert result["safety"]["human_approval_required"] is True
+    assert result["safety"]["automatic_merge"] is False
+
+
+def _valid_mind_foundry_candidate():
+    return {
+        "candidate_id": "candidate_school_summary_v2",
+        "source_core": "core-one-foundry",
+        "tool_name": "school_doc_summary",
+        "objective": "Reduce false positives while preserving the output contract.",
+        "baseline_version_hash": "a" * 64,
+        "candidate_version_hash": "b" * 64,
+        "source_sha256": "c" * 64,
+        "risk_tier": 1,
+        "sandbox_tested": True,
+        "sandbox_evidence_ref": "evidence/core-one/candidate-school-summary-v2.json",
+    }
+
+
+def test_mind_foundry_candidate_bridge_forwards_metadata_only(monkeypatch):
+    monkeypatch.setenv("MIND_BASE_URL", "http://127.0.0.1:8782")
+    monkeypatch.setattr(core_mesh, "_upstream_headers", lambda **kwargs: {"X-Mind-Token": "internal-test"})
+    seen = {}
+
+    def fake_request(base, path, **kwargs):
+        seen.update({"base": base, "path": path, **kwargs})
+        return {
+            "status": "hold",
+            "candidate_id": "candidate_school_summary_v2",
+            "tool_name": "school_doc_summary",
+            "candidate_version_hash": "b" * 64,
+            "source_sha256": "c" * 64,
+            "guardian_passed": True,
+            "core_one_guardian_passed": True,
+            "scored": False,
+            "score": 0.0,
+            "canary": {"decision": "hold"},
+            "production_verified": False,
+            "automatic_merge": False,
+            "promotion_executed": False,
+            "rollback_executed": False,
+        }
+
+    monkeypatch.setattr(core_mesh, "_request_json", fake_request)
+    result = core_mesh.score_mind_foundry_candidate(_valid_mind_foundry_candidate())
+
+    assert seen["path"] == "/v1/mind/candidates"
+    assert seen["method"] == "POST"
+    assert seen["payload"]["source_core"] == "core-one-foundry"
+    assert "source_code" not in seen["payload"]
+    assert "candidate_source" not in seen["payload"]
+    assert result["target_core"] == "core-one"
+    assert result["assessment_only"] is True
+    assert result["human_approval_required"] is True
+    assert result["automatic_merge"] is False
+    assert result["promotion_executed"] is False
+    assert result["rollback_executed"] is False
+    assert result["status"] == "hold"
+
+
+def test_mind_foundry_candidate_bridge_rejects_source_code_and_bad_hash(monkeypatch):
+    candidate = _valid_mind_foundry_candidate()
+    candidate["source_code"] = "package main"
+
+    with pytest.raises(core_mesh.CoreMeshError) as error:
+        core_mesh.score_mind_foundry_candidate(candidate)
+    assert error.value.code == "invalid_mind_candidate"
+
+    candidate = _valid_mind_foundry_candidate()
+    candidate["source_sha256"] = "not-a-hash"
+    with pytest.raises(core_mesh.CoreMeshError) as error:
+        core_mesh.score_mind_foundry_candidate(candidate)
+    assert error.value.code == "invalid_mind_candidate"
+
+def test_mind_evolution_proposal_is_explicitly_targeted_at_core_one(monkeypatch):
+    monkeypatch.setenv("MIND_BASE_URL", "http://127.0.0.1:8782")
+    monkeypatch.setattr(core_mesh, "_upstream_headers", lambda **kwargs: {"X-Mind-Token": "internal-test"})
+    monkeypatch.setattr(
+        core_mesh,
+        "_request_json",
+        lambda *args, **kwargs: {
+            "status": "await_merge",
+            "version": "v1-test",
+            "tool_name": "school_doc_summary",
+            "selected_mutation": "bounded-input-guard",
+            "await_merge_path": "core-two/evolutions/v1-test/AWAIT_MERGE.md",
+        },
+    )
+
+    result = core_mesh.propose_mind_evolution(
+        "Improve Core-One tool reliability using reviewed evidence.",
+        "school_doc_summary",
+    )
+
+    assert result["target_core"] == "core-one"
+    assert result["operation_kind"] == "core_one_improvement_proposal"
+    assert result["target_modified"] is False
+    assert result["human_approval_required"] is True
+    assert result["automatic_merge"] is False
+    assert result["automatic_execution"] is False
+
+def test_live_brain_prompt_receives_mind_to_core_one_target_and_safety_rules():
+    from services.ai_service import build_grounded_system_prompt
+
+    prompt = build_grounded_system_prompt(
+        "BASE PROMPT",
+        {
+            "core_mesh": {
+                "selected_core": "core-two",
+                "target_core": "core-one",
+                "operation_kind": "core_one_improvement_proposal",
+                "route_reason": "Infinite Mind stages Core-One improvements for review.",
+                "mesh_status": "online",
+                "cores": {},
+            }
+        },
+    )
+
+    assert "- Selected core: core-two" in prompt
+    assert "- Target core: core-one" in prompt
+    assert "- Operation kind: core_one_improvement_proposal" in prompt
+    assert "must not edit Core-One" in prompt
+    assert "never forward candidate source code or secrets" in prompt
+    assert "Never claim an invention, mutation, repair, deployment, or merge occurred" in prompt

@@ -26,6 +26,7 @@ from ai.core_mesh import (
     compile_genesis_rvx,
     propose_genesis_invention,
     propose_mind_evolution,
+    score_mind_foundry_candidate,
 )
 from ai.tool_registry import (
     GenesisToolRegistryError,
@@ -585,6 +586,61 @@ async def core_mesh_mind_evolve_api(request: Request):
     return await run_in_threadpool(
         _proposal, request.headers.get("Authorization", ""), body, "mind"
     )
+
+
+@router.post("/api/core-mesh/mind/candidates")
+async def core_mesh_mind_candidates_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
+
+    raw = bytearray()
+    async for chunk in request.stream():
+        raw.extend(chunk)
+        if len(raw) > 16 * 1024:
+            return JSONResponse(
+                {"status": "error", "error": {
+                    "code": "candidate_payload_too_large",
+                    "message": "Candidate metadata must not exceed 16 KiB.",
+                }},
+                status_code=413,
+            )
+    try:
+        body = json.loads(bytes(raw).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JSONResponse(
+            {"status": "error", "error": {
+                "code": "invalid_json",
+                "message": "Candidate metadata must be a UTF-8 JSON object.",
+            }},
+            status_code=400,
+        )
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"status": "error", "error": {
+                "code": "invalid_mind_candidate",
+                "message": "Candidate metadata must be a JSON object.",
+            }},
+            status_code=400,
+        )
+
+    try:
+        result = await run_in_threadpool(score_mind_foundry_candidate, body)
+    except CoreMeshError as exc:
+        return _core_mesh_upstream_error(exc)
+    except Exception:
+        logger.warning("Mind candidate assessment request failed.")
+        return JSONResponse(
+            {"status": "error", "error": {
+                "code": "mind_candidate_assessment_failed",
+                "message": "Infinite Mind could not assess the candidate.",
+            }},
+            status_code=502,
+        )
+    return JSONResponse({"status": "success", "data": result}, status_code=200)
 
 
 
