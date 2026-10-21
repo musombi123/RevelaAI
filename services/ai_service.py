@@ -74,7 +74,12 @@ from ai.system_prompt import SYSTEM_PROMPT
 from ai.orchestrator import Orchestrator
 from ai.usect_zero_tools import execute_for_message, tool_catalog_prompt
 from ai.unknown_learning import attach_genesis_proposal, clear_pending_unknown_ask, get_pending_unknown_ask, register_unknown_ask, save_teaching
-from ai.core_mesh import CoreMeshError, propose_genesis_invention
+from ai.core_mesh import (
+    CoreMeshError,
+    core_mesh_operator_allowed,
+    propose_genesis_invention,
+    propose_mind_evolution,
+)
 from ai.tool_registry import GenesisToolRegistryError, provider_tool_context
 
 
@@ -1164,6 +1169,26 @@ def process_message(
             "capability": "engineering_tool",
             "action_required": False,
             "tool_execution": tool_execution,
+            "orchestrator": {
+                "usect_zero_tool": tool_execution,
+                "core_mesh": {
+                    "mode": "unavailable",
+                    "selected_core": "core-zero",
+                    "target_core": "core-zero",
+                    "operation_kind": str(tool_execution.get("operation") or "engineering_tool")[:80],
+                    "execution_status": "unavailable",
+                    "mesh_status": "not_probed",
+                    "failure_reason": str(tool_execution.get("error_code") or "usect_zero_unavailable")[:100],
+                    "safety": {
+                        "operation_executed": False,
+                        "target_mutation_performed": False,
+                        "candidate_source_execution": False,
+                        "human_approval_required": True,
+                        "automatic_merge": False,
+                        "automatic_execution": False,
+                    },
+                },
+            },
             "error_code": "engineering_tool_unavailable",
         }
 
@@ -1276,6 +1301,175 @@ def process_message(
         orchestrator_data["grounding_context"] = (
             previous_grounding + "\n\n" + tool_evidence
         ).strip()
+
+    # Keep operational metadata consistent with the real ZERO dispatcher outcome.
+    core_mesh = orchestrator_data.get("core_mesh")
+    if not isinstance(core_mesh, dict):
+        core_mesh = {
+            "mode": "advisory_only",
+            "selected_core": "orchestrator",
+            "target_core": None,
+            "operation_kind": "normal_chat",
+            "mesh_status": "not_probed",
+            "cores": {},
+            "safety": {},
+        }
+    if tool_execution:
+        tool_status = str(tool_execution.get("status") or "unknown").strip().lower()
+        zero_operation_succeeded = (
+            tool_status in {"success", "completed", "proposal_only"}
+            and tool_execution.get("executed") is True
+        )
+        core_mesh.update({
+            "mode": "executed" if zero_operation_succeeded else "blocked",
+            "selected_core": "core-zero",
+            "target_core": "core-zero",
+            "operation_kind": str(tool_execution.get("operation") or tool_execution.get("tool") or "engineering_tool")[:80],
+            "execution_status": tool_status[:40],
+            "failure_reason": None if zero_operation_succeeded else str(
+                tool_execution.get("error_code") or tool_execution.get("message") or "usect_zero_operation_not_completed"
+            )[:100],
+        })
+        core_mesh["safety"] = {
+            "operation_executed": zero_operation_succeeded,
+            "target_mutation_performed": (
+                isinstance(tool_execution.get("result"), dict)
+                and tool_execution["result"].get("target_mutation_performed") is True
+            ),
+            "candidate_source_execution": False,
+            "human_approval_required": True,
+            "automatic_merge": False,
+            "automatic_execution": False,
+        }
+        orchestrator_data["core_mesh"] = core_mesh
+
+    # Core-One/Two chat routes can submit proposals only for an explicitly
+    # allowlisted operator. Proposal creation is the operation; activation,
+    # candidate source execution and merge remain separately gated.
+    if (
+        not tool_execution
+        and core_mesh.get("selected_core") in {"core-one", "core-two"}
+        and core_mesh_operator_allowed(user_id)
+        and len(normalized_message.strip()) <= 500
+    ):
+        lower_message = normalized_message.strip().lower()
+        starts_with_action = bool(re.match(
+            r"^(?:please\\s+)?(?:create|build|invent|generate|develop|propose|evolve|upgrade|improve|implement|make|design)\\b",
+            lower_message,
+        ))
+        requested_action = bool(re.search(
+            r"\\b(?:i want (?:you to |to )|please |can you |could you |go ahead and |build me |create me |generate me )"
+            r"(?:create|build|invent|generate|develop|propose|evolve|upgrade|improve|implement|make|design)\\b",
+            lower_message,
+        ))
+        if starts_with_action or requested_action:
+            selected = str(core_mesh.get("selected_core"))
+            try:
+                if selected == "core-one":
+                    proposal_result = propose_genesis_invention(
+                        normalized_message.strip(),
+                        country=country,
+                        language=language,
+                    )
+                    operation_kind = "invention_proposal"
+                    core_label = "Genesis / USECT-ONE"
+                else:
+                    tool_match = re.search(
+                        r"\\b(?:tool(?:_name)?\\s*(?:is|=|:)?\\s+)([a-z0-9][a-z0-9_-]{0,63})\\b",
+                        lower_message,
+                    )
+                    tool_name = tool_match.group(1) if tool_match else "offline_vault_fixture"
+                    proposal_result = propose_mind_evolution(
+                        normalized_message.strip(),
+                        tool_name=tool_name,
+                    )
+                    operation_kind = "core_one_improvement_proposal"
+                    core_label = "Infinite Mind / USECT-TWO"
+
+                proposal_obj = proposal_result.get("proposal") if isinstance(proposal_result, dict) else {}
+                if not isinstance(proposal_obj, dict):
+                    proposal_obj = {}
+                proposal_id = str(
+                    proposal_result.get("proposal_id")
+                    or proposal_result.get("id")
+                    or proposal_obj.get("proposal_id")
+                    or proposal_obj.get("id")
+                    or ""
+                )[:100]
+                proposal_status = str(
+                    proposal_result.get("status")
+                    or proposal_obj.get("status")
+                    or "pending_review"
+                )[:60]
+                core_mesh.update({
+                    "mode": "executed",
+                    "operation_kind": operation_kind,
+                    "execution_status": "proposal_created",
+                    "proposal_id": proposal_id or None,
+                    "proposal_status": proposal_status,
+                    "failure_reason": None,
+                })
+                core_mesh["safety"] = {
+                    "operation_executed": True,
+                    "target_mutation_performed": False,
+                    "candidate_source_execution": False,
+                    "human_approval_required": True,
+                    "automatic_merge": False,
+                    "automatic_execution": False,
+                }
+                orchestrator_data["core_mesh"] = core_mesh
+                proposal_ref = f" Proposal ID: {proposal_id}." if proposal_id else ""
+                return {
+                    "response": (
+                        f"{core_label} accepted the request and created a proposal "
+                        f"(status: {proposal_status}).{proposal_ref} It remains a proposal "
+                        "for human review; no tool was activated, no candidate source was "
+                        "executed, and nothing was automatically merged."
+                    ),
+                    "confidence": "high",
+                    "intent": intent or "engineering_tool",
+                    "domain": "programming",
+                    "domains": ["programming", "engineering"],
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "provider": "revelaai-core-mesh",
+                    "model": "genesis-proposal" if selected == "core-one" else "mind-evolution-proposal",
+                    "tool_execution": None,
+                    "orchestrator": orchestrator_data,
+                }
+            except CoreMeshError as exc:
+                core_mesh.update({
+                    "mode": "dispatch_failed",
+                    "execution_status": "failed",
+                    "failure_reason": str(getattr(exc, "code", "core_mesh_operation_failed"))[:100],
+                })
+                core_mesh["safety"] = {
+                    "operation_executed": False,
+                    "target_mutation_performed": False,
+                    "candidate_source_execution": False,
+                    "human_approval_required": True,
+                    "automatic_merge": False,
+                    "automatic_execution": False,
+                }
+                orchestrator_data["core_mesh"] = core_mesh
+                return {
+                    "response": (
+                        f"I could not submit this {('Genesis' if selected == 'core-one' else 'Infinite Mind')} proposal. "
+                        f"The service returned {str(getattr(exc, 'code', 'core_mesh_operation_failed'))[:100]}; "
+                        "nothing was activated or merged."
+                    ),
+                    "confidence": "low",
+                    "intent": intent or "engineering_tool",
+                    "domain": "programming",
+                    "domains": ["programming", "engineering"],
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "provider": "revelaai-core-mesh",
+                    "model": "core-mesh-error",
+                    "orchestrator": orchestrator_data,
+                }
+
+    orchestrator_data["core_mesh"] = core_mesh
 
     # =====================================================
     # GUARANTEE ONLINE SEMANTICS
