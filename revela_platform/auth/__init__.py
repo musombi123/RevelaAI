@@ -1,0 +1,1 @@
+"""Native FastAPI authentication dependencies."""
