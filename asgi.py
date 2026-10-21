@@ -71,6 +71,7 @@ app.add_middleware(
         "X-User-ID",
         "X-Session-ID",
         "X-Request-ID",
+        "X-Revela-License",
     ],
 )
 
@@ -185,12 +186,23 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "request_id": request_id,
         }
     else:
-        detail = exc.detail if isinstance(exc.detail, str) else "Request could not be completed."
-        body = {
-            "status": "error",
-            "error": {"code": f"HTTP_{exc.status_code}", "message": detail},
-            "request_id": request_id,
-        }
+        detail = exc.detail
+        if isinstance(detail, dict):
+            code = str(detail.get("code") or f"HTTP_{exc.status_code}")
+            message = str(detail.get("message") or "Request could not be completed.")
+            body = {
+                "success": False,
+                "error": {"code": code, "message": message},
+                "detail": detail,
+                "request_id": request_id,
+            }
+        else:
+            message = str(detail) if isinstance(detail, str) else "Request could not be completed."
+            body = {
+                "success": False,
+                "error": {"code": f"HTTP_{exc.status_code}", "message": message},
+                "request_id": request_id,
+            }
     return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
 
 
