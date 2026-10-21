@@ -288,6 +288,33 @@ def gemini_function_declarations(tools: list[dict[str, Any]] | None = None) -> l
         compatible_schema = _gemini_schema_subset(input_schema)
         if not isinstance(compatible_schema, dict) or compatible_schema.get("type") != "object":
             continue
+        properties = compatible_schema.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        # Gemini's function schema subset does not support additionalProperties.
+        # Represent the runtime's string-to-string input map as an array of
+        # key/value pairs, then normalize it back to the existing Genesis map.
+        if "inputs" in properties:
+            properties["inputs"] = {
+                "type": "array",
+                "description": "Optional tool inputs; provide each named value as one key/value pair.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "key": {
+                            "type": "string",
+                            "description": "The exact tool input name.",
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "The string value for that input.",
+                        },
+                    },
+                    "required": ["key", "value"],
+                },
+            }
+        # Human consent is never a model argument; the gateway supplies False.
+        properties.pop("consent", None)
         declarations.append({
             "name": "genesis_" + name,
             "description": (
