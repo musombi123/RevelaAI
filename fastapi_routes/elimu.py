@@ -277,8 +277,18 @@ def _validate_certificate(record: dict[str, Any]) -> dict[str, Any] | None:
         or str(claims.get("user_name") or "") != str(record.get("user_name") or "")
         or str(claims.get("hub_name") or "") != str(record.get("hub_name") or "")
         or claims.get("roles") != (record.get("roles") or [])
+        or claims.get("user_roles") != (record.get("user_roles") or [])
+        or claims.get("hub_roles") != (record.get("hub_roles") or [])
         or claims.get("skills") != (record.get("skills") or [])
         or int(claims.get("progress_percent") or 0) != int(record.get("progress_percent") or 0)
+        or int(claims.get("completed_lessons") or 0) != int(record.get("completed_lessons") or 0)
+        or int(claims.get("total_lessons") or 0) != int(record.get("total_lessons") or 0)
+        or str(claims.get("score_label") or "") != str(record.get("score_label") or "")
+        or int(claims.get("time_spent_seconds") or 0) != int(record.get("time_spent_seconds") or 0)
+        or str(claims.get("time_spent_label") or "") != str(record.get("time_spent_label") or "")
+        or str(claims.get("signer_name") or "") != str(record.get("signer_name") or "")
+        or str(claims.get("issuer_role") or "") != str(record.get("issuer_role") or "")
+        or str(claims.get("verification_url") or "") != str(record.get("verification_url") or "")
         or str(signed_issued_at or "") != str(expected_issued_at or "")
     ):
         return None
@@ -872,8 +882,18 @@ async def generate_certificate(
         "hub_id": stable_hub_id,
         "hub_name": record["hub_name"],
         "roles": certificate_roles,
+        "user_roles": _user_roles(claims),
+        "hub_roles": hub_roles,
         "skills": skills,
         "progress_percent": 100,
+        "completed_lessons": totals["completed_lessons"],
+        "total_lessons": totals["total_lessons"],
+        "score_label": f"{score}%" if isinstance(score, (int, float)) else "Not assessed",
+        "time_spent_seconds": progress_seconds,
+        "time_spent_label": _duration_label(progress_seconds),
+        "signer_name": record["signer_name"],
+        "issuer_role": record["issuer_role"],
+        "verification_url": verify_url,
         "issued_at": issued.isoformat(),
     }
     try:
