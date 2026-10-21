@@ -4,18 +4,11 @@ from __future__ import annotations
 import os
 
 
-DEFAULT_CORS_ORIGINS = (
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://revelacode-frontend.onrender.com",
-    "https://revelacode.co.ke",
-    "https://www.revelacode.co.ke",
-    "https://localhost",
-)
+DEFAULT_CORS_ORIGINS: tuple[str, ...] = ()
 
 
 def parse_cors_origins() -> list[str]:
-    """Read trusted frontend origins; configured values extend the safe defaults."""
+    """Read only explicitly configured trusted frontend origins."""
     configured = os.getenv("CORS_ORIGINS", "")
     origins: list[str] = []
     for item in (*DEFAULT_CORS_ORIGINS, *configured.split(",")):
