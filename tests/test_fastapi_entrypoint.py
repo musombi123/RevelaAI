@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from asgi import app
 from fastapi_routes.auth import _header_value
+from fastapi_routes import core_mesh as core_mesh_routes
 
 
 client = TestClient(app)
@@ -292,6 +293,32 @@ def test_smart_memory_routes_require_identity() -> None:
     idea_list = client.get("/api/memory/ideas/507f1f77bcf86cd799439011")
     assert idea_list.status_code in (401, 503)
     assert idea_list.json().get("status") == "error"
+
+
+def test_signed_tool_execution_requires_core_mesh_operator(monkeypatch) -> None:
+    monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "approved-operator")
+    monkeypatch.delenv("META_ENGINEER_ADMIN_USER_IDS", raising=False)
+    monkeypatch.setattr(core_mesh_routes, "_authenticated_tool_user", lambda request: "ordinary-user")
+    called = {"execute": False}
+
+    def unexpected_execution(*args, **kwargs):
+        called["execute"] = True
+        raise AssertionError("non-operator must be rejected before tool dispatch")
+
+    monkeypatch.setattr(core_mesh_routes, "execute_active_tool", unexpected_execution)
+    response = client.post(
+        "/api/core-mesh/tools/execute",
+        json={
+            "name": "safe_tool",
+            "version": "1.0.0",
+            "artifact_hash": "a" * 64,
+            "arguments": {"action": "inspect"},
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "core_mesh_operator_required"
+    assert called["execute"] is False
 
 
 def test_core_mesh_routes_keep_authentication_boundary() -> None:
