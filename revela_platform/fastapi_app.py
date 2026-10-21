@@ -25,7 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.cors import CORSMiddleware
-from starlette.middleware.wsgi import WSGIMiddleware
+
 
 from core_billing.licensing import LicenseError, create_license_token, verify_license_token
 from core_billing.payments import (
@@ -43,6 +43,7 @@ from core_seed.seed_runner import SeedError, SeedRunner
 from core_uncopyable.dna_vault_guard import DnaVaultError, sign_tool_watermark, verify_tool_watermark
 from core_uncopyable.license_lock import require_enterprise_claims
 from core_auditor.ledger import AuditLedger, AuditLedgerError
+from revela_platform.auth.auth_gate import enforce_auth
 from marketplace.service import country_bundle, creator_earnings, safety_screen
 from revela_platform.database import (
     AuditRecord,
@@ -67,20 +68,10 @@ app = FastAPI(
     openapi_url="/v1/platform/openapi.json",
 )
 
-# Keep browser clients on the trusted RevelaCode production domains working
-# regardless of whether requests reach this native billing gateway or asgi:app.
-# Explicit origins are used with credentials; never use "*" here.
-_DEFAULT_CORS_ORIGINS = (
-    "https://revelacode.co.ke",
-    "https://www.revelacode.co.ke",
-    "https://revelacode-frontend.onrender.com",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-)
-_configured_cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
+# Only explicitly configured origins are trusted; do not silently add hosts.
 _CORS_ORIGINS = list(dict.fromkeys(
     origin.strip().rstrip("/")
-    for origin in (*_DEFAULT_CORS_ORIGINS, *_configured_cors_origins)
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
     if origin.strip()
 ))
 app.add_middleware(
@@ -90,7 +81,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[
         "Authorization", "Content-Type", "userId", "X-User-ID",
-        "X-Session-ID", "X-Request-ID", "Accept", "Origin",
+        "X-Session-ID", "X-Request-ID", "X-Revela-License", "Accept", "Origin",
     ],
 )
 
@@ -103,6 +94,7 @@ def _country(value: str | None) -> str:
 
 
 def _claims_from_bearer(authorization: str | None) -> dict[str, Any]:
+    """Compatibility helper for non-route business logic; use enforce_auth at route boundaries."""
     token = (authorization or "").strip()
     if not token.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="A RevelaCode Bearer token is required")
@@ -120,6 +112,8 @@ def _claims_from_bearer(authorization: str | None) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Authentication token expired") from exc
     except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=401, detail="Invalid RevelaCode authentication token") from exc
+    if str(claims.get("token_use") or "access").casefold() == "refresh":
+        raise HTTPException(status_code=401, detail="A refresh token cannot authorize API requests")
     user_id = claims.get("sub") or claims.get("user_id") or claims.get("id")
     if user_id is None or not str(user_id).strip():
         raise HTTPException(status_code=401, detail="Token has no user identity")
@@ -127,8 +121,9 @@ def _claims_from_bearer(authorization: str | None) -> dict[str, Any]:
     return claims
 
 
-def authenticated_user(authorization: str | None = Header(default=None, alias="Authorization")) -> str:
-    return str(_claims_from_bearer(authorization)["sub"])
+def authenticated_user(claims: dict[str, Any] = Depends(enforce_auth)) -> str:
+    """Shared FastAPI JWT guard for protected billing/license endpoints."""
+    return str(claims["sub"])
 
 
 def get_db():
