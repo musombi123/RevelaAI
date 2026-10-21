@@ -65,7 +65,10 @@ async def enforce_auth(
             detail={"code": "authentication_required", "message": "A Bearer JWT is required."},
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return decode_access_token(credentials.credentials)
+    claims = decode_access_token(credentials.credentials)
+    # Internal-only request context; route serializers must not expose this field.
+    claims["_access_token"] = credentials.credentials
+    return claims
 
 
 def require_roles(*allowed_roles: str):
