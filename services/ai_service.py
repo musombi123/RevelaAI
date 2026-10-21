@@ -959,7 +959,19 @@ def _execute_genesis_function_calls(
         manifest = item.get("manifest")
         if not isinstance(manifest, dict):
             continue
-        if call_name == "genesis_" + str(manifest.get("name") or ""):
+        manifest_name = str(manifest.get("name") or "")
+        artifact_hash = str(item.get("artifact_hash") or "")
+        evidence = item.get("sandbox_evidence")
+        if (
+            item.get("name") == manifest_name
+            and item.get("version") == manifest.get("version")
+            and item.get("risk_tier") == manifest.get("risk_tier")
+            and re.fullmatch(r"[a-fA-F0-9]{64}", artifact_hash)
+            and re.fullmatch(r"ed25519:[a-fA-F0-9]{128}", str(item.get("signature") or ""))
+            and isinstance(evidence, dict)
+            and evidence.get("passed") is True
+            and call_name == "genesis_" + manifest_name
+        ):
             selected = item
             break
     if selected is None:
