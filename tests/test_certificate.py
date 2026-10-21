@@ -24,3 +24,19 @@ def test_certificate_is_cryptographically_signed_and_publicly_verifiable(monkeyp
     tampered = client.get(f"/api/verify/certificate/{certificate_id}")
     assert tampered.status_code == 200
     assert tampered.json()["valid"] is False
+
+
+def test_certificate_public_metadata_must_match_signed_claims(monkeypatch):
+    client, collections, _, _, hub_id = make_test_state(monkeypatch)
+    complete_all_lessons(client, hub_id)
+    generated = client.post("/api/certificates/generate", json={"hub_id": hub_id})
+    assert generated.status_code == 200, generated.text
+    certificate_id = generated.json()["certificate_id"]
+
+    # The JWT still has a valid signature, but the public roles are changed in
+    # storage. The verifier must compare displayed metadata with signed claims.
+    collections["revela_certificates"].documents[0]["roles"] = ["Founder", "Forged Credential"]
+    response = client.get(f"/api/verify/certificate/{certificate_id}")
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert response.json()["reason"] == "signature_invalid"
