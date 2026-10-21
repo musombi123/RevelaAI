@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 import jwt
 import qrcode
+import requests
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -119,6 +120,40 @@ def _lessons(course: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _lesson_id(lesson: dict[str, Any]) -> str:
     return str(lesson.get("id") or lesson.get("_id") or lesson.get("lesson_id") or "")
+
+
+def _upstream_account_profile(claims: dict[str, Any]) -> dict[str, Any]:
+    """Fetch non-secret profile metadata from the authoritative account API."""
+    token = str(claims.get("_access_token") or "").strip()
+    try:
+        from fastapi_routes.auth import REVELACODE_BACKEND_URL, VERIFY_TIMEOUT_SECONDS
+        base_url = str(REVELACODE_BACKEND_URL or "").strip().rstrip("/")
+    except Exception:
+        base_url = str(os.getenv("REVELACODE_BACKEND_URL", "")).strip().rstrip("/")
+        try:
+            timeout = max(1.0, min(15.0, float(os.getenv("REVELACODE_VERIFY_TIMEOUT_SECONDS", "4"))))
+        except (TypeError, ValueError):
+            timeout = 4.0
+    else:
+        timeout = VERIFY_TIMEOUT_SECONDS
+
+    if not token or not base_url:
+        return {}
+    try:
+        response = requests.get(
+            f"{base_url}/api/user/me",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=timeout,
+        )
+        if not response.ok:
+            return {}
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    candidate = payload.get("data") or payload.get("user") or payload.get("profile") or payload
+    return candidate if isinstance(candidate, dict) else {}
 
 
 def _user_roles(claims: dict[str, Any]) -> list[str]:
@@ -495,15 +530,16 @@ def _profile_for(claims: dict[str, Any]) -> dict[str, Any]:
         }
         for c in certificates
     ]
+    account = _upstream_account_profile(claims)
     return {
         "user": {
-            "id": user_id,
-            "name": _user_name(claims),
-            "email": str(claims.get("contact") or claims.get("email") or ""),
-            "contact": str(claims.get("contact") or ""),
+            "id": str(account.get("id") or account.get("_id") or user_id),
+            "name": str(account.get("full_name") or account.get("fullName") or account.get("name") or _user_name(claims)),
+            "email": str(account.get("email") or account.get("contact") or claims.get("contact") or claims.get("email") or ""),
+            "contact": str(account.get("contact") or claims.get("contact") or ""),
             "roles": _user_roles(claims),
-            "avatar": claims.get("avatar") or claims.get("avatar_url"),
-            "joined_at": _iso(claims.get("created_at") or claims.get("joined_at") or claims.get("createdAt")),
+            "avatar": account.get("avatar") or account.get("avatar_url") or claims.get("avatar") or claims.get("avatar_url"),
+            "joined_at": _iso(account.get("created_at") or account.get("createdAt") or claims.get("created_at") or claims.get("joined_at") or claims.get("createdAt")),
         },
         "hubs": hubs_output,
         "certificates": certs_out,
