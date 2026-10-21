@@ -1246,6 +1246,52 @@ def _extract_gemini_response(
     return result
 
 
+def _extract_gemini_function_calls(data: Any) -> list[dict[str, Any]]:
+    """Extract structured Gemini function calls without trusting them for execution."""
+    if not isinstance(data, dict):
+        return []
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
+        return []
+    candidate = candidates[0]
+    finish_reason = str(candidate.get("finishReason") or "")
+    content = candidate.get("content")
+    if not isinstance(content, dict):
+        return []
+    parts = content.get("parts")
+    if not isinstance(parts, list):
+        return []
+    calls: list[dict[str, Any]] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        function_call = part.get("functionCall")
+        if not isinstance(function_call, dict):
+            continue
+        name = str(function_call.get("name") or "").strip()
+        arguments = function_call.get("args", {})
+        if not name or not isinstance(arguments, dict):
+            raise AIClientError(
+                "Gemini returned an invalid function call.",
+                provider="gemini",
+                error_code="gemini_invalid_function_call",
+            )
+        if finish_reason != "STOP":
+            raise AIClientError(
+                "Gemini function call did not finish safely.",
+                provider="gemini",
+                error_code="gemini_function_call_not_completed",
+            )
+        calls.append({"name": name, "arguments": arguments})
+        if len(calls) > 4:
+            raise AIClientError(
+                "Gemini returned too many function calls.",
+                provider="gemini",
+                error_code="gemini_too_many_function_calls",
+            )
+    return calls
+
+
 # =========================================================
 # GEMINI ERROR EXTRACTION
 # =========================================================
@@ -1341,6 +1387,7 @@ def _request_gemini(
     *,
     model: str,
     messages: list[dict[str, str]],
+    function_declarations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
 
     if not GEMINI_ENABLED:
@@ -1402,6 +1449,38 @@ def _request_gemini(
                     "text": system_instruction,
                 }
             ]
+        }
+
+    # Function declarations are only supplied by the authenticated Core Mesh
+    # operator path. Copy the supported fields and cap the catalogue size.
+    safe_declarations: list[dict[str, Any]] = []
+    if isinstance(function_declarations, list):
+        for item in function_declarations[:64]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            parameters = item.get("parameters")
+            if (
+                not name
+                or len(name) > 64
+                or not name.replace("_", "").isalnum()
+                or not name[0].isalpha()
+                or not isinstance(parameters, dict)
+                or parameters.get("type") != "object"
+            ):
+                continue
+            safe_item: dict[str, Any] = {
+                "name": name,
+                "parameters": parameters,
+            }
+            description = str(item.get("description") or "").strip()
+            if description:
+                safe_item["description"] = description[:1000]
+            safe_declarations.append(safe_item)
+    if safe_declarations:
+        payload["tools"] = [{"functionDeclarations": safe_declarations}]
+        payload["toolConfig"] = {
+            "functionCallingConfig": {"mode": "AUTO"}
         }
 
     encoded_model = quote(
@@ -1553,6 +1632,7 @@ def _ask_gemini_text(
     system_prompt: str = "",
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
+    function_declarations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
 
     if not GEMINI_ENABLED:
@@ -1629,16 +1709,16 @@ def _ask_gemini_text(
 
         try:
 
-            data = _request_gemini(
-                model=model,
-                messages=messages,
-            )
+            request_kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+            }
+            if function_declarations:
+                request_kwargs["function_declarations"] = function_declarations
+            data = _request_gemini(**request_kwargs)
 
-            response_text = (
-                _extract_gemini_response(
-                    data
-                )
-            )
+            tool_calls = _extract_gemini_function_calls(data)
+            response_text = "" if tool_calls else _extract_gemini_response(data)
 
             usage = data.get(
                 "usageMetadata",
@@ -1685,6 +1765,7 @@ def _ask_gemini_text(
                 "session_id": session_id,
                 "usage": usage,
                 "finish_reason": finish_reason,
+                **({"tool_calls": tool_calls} if tool_calls else {}),
             }
 
         except AIClientError as exc:
@@ -1755,6 +1836,7 @@ def ask_gemini(
     system_prompt: str = "",
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
+    function_declarations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
 
     if not str(
@@ -1781,6 +1863,7 @@ def ask_gemini(
             ),
             session_id=session_id,
             context=context,
+            function_declarations=function_declarations,
         )
 
     except AIClientError as exc:
@@ -4147,6 +4230,7 @@ def ask_hf(
     system_prompt: str = "",
     session_id: str | None = None,
     context: list[dict[str, Any]] | None = None,
+    gemini_function_declarations: list[dict[str, Any]] | None = None,
 ) -> dict:
 
     """
@@ -4236,17 +4320,15 @@ def ask_hf(
 
             try:
 
-                result = _ask_gemini_text(
-                    text=str(
-                        text
-                    ),
-                    system_prompt=str(
-                        system_prompt
-                        or ""
-                    ),
-                    session_id=session_id,
-                    context=context,
-                )
+                gemini_call_kwargs: dict[str, Any] = {
+                    "text": str(text),
+                    "system_prompt": str(system_prompt or ""),
+                    "session_id": session_id,
+                    "context": context,
+                }
+                if gemini_function_declarations:
+                    gemini_call_kwargs["function_declarations"] = gemini_function_declarations
+                result = _ask_gemini_text(**gemini_call_kwargs)
 
                 print(
                     "TEXT PROVIDER SUCCESS | "
