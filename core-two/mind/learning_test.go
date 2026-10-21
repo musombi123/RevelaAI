@@ -24,9 +24,9 @@ func TestHumanFeedbackCannotOverrideObjectiveRoutingOrQualification(t *testing.T
  if summary.AutomaticMerge||summary.FeedbackRecords!=2{t.Fatalf("invalid learning state: %+v",summary)}
  scores:=s.learningScores();if scores["graph-indexed"]!=-5||scores["bom-cost-ranked"]!=3{t.Fatalf("wrong human feedback scores: %+v",scores)}
  candidates:=[]CandidateEvaluation{
-  {ID:"graph-indexed",ImprovementPct:10,Passed:true},
-  {ID:"bom-cost-ranked",ImprovementPct:90,Passed:true},
-  {ID:"rvx-aead-envelope",ImprovementPct:1000,Passed:false},
+  {ID:"graph-indexed",Category:"graph_traversal",ImprovementType:"measured_speed",BaselineValue:100,CandidateValue:200,ImprovementPct:10,Passed:true,MeasurementSource:"synthetic fixture"},
+  {ID:"bom-cost-ranked",Category:"bom_cost",ImprovementType:"scored_rubric",BaselineValue:10,CandidateValue:12,ImprovementPct:90,Passed:true,MeasurementSource:"synthetic fixture"},
+  {ID:"rvx-aead-envelope",Category:"cryptography",ImprovementType:"scored_rubric",BaselineValue:1,CandidateValue:1000,ImprovementPct:1000,Passed:false,MeasurementSource:"synthetic fixture"},
  }
  selected,reason,scores,ok:=s.selectCandidateWithLearning("improve graph traversal",candidates)
  if !ok||selected.ID!="graph-indexed"{t.Fatalf("human feedback must not override objective routing: selected=%+v reason=%s",selected,reason)}
