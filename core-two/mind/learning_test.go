@@ -7,7 +7,7 @@ import (
  "testing"
 )
 
-func TestHumanFeedbackInfluencesRankingButCannotBypassGates(t *testing.T) {
+func TestHumanFeedbackCannotOverrideObjectiveRoutingOrQualification(t *testing.T) {
  root,s:=newTestRepository(t)
  fixtures:=[]struct{version,tool,mutation,outcome,note,ref string}{
   {"v0.1.0","offline_vault_a","graph-indexed","reverted","Regression observed during owner review",""},
@@ -24,12 +24,13 @@ func TestHumanFeedbackInfluencesRankingButCannotBypassGates(t *testing.T) {
  if summary.AutomaticMerge||summary.FeedbackRecords!=2{t.Fatalf("invalid learning state: %+v",summary)}
  scores:=s.learningScores();if scores["graph-indexed"]!=-5||scores["bom-cost-ranked"]!=3{t.Fatalf("wrong human feedback scores: %+v",scores)}
  candidates:=[]CandidateEvaluation{
-  {ID:"graph-indexed",ImprovementPct:10,Passed:true},
-  {ID:"bom-cost-ranked",ImprovementPct:90,Passed:true},
-  {ID:"rvx-aead-envelope",ImprovementPct:1000,Passed:false},
+  {ID:"graph-indexed",Category:"graph_traversal",ImprovementType:"measured_speed",BaselineValue:100,CandidateValue:200,ImprovementPct:10,Passed:true,MeasurementSource:"synthetic fixture"},
+  {ID:"bom-cost-ranked",Category:"bom_cost",ImprovementType:"scored_rubric",BaselineValue:10,CandidateValue:12,ImprovementPct:90,Passed:true,MeasurementSource:"synthetic fixture"},
+  {ID:"rvx-aead-envelope",Category:"cryptography",ImprovementType:"scored_rubric",BaselineValue:1,CandidateValue:1000,ImprovementPct:1000,Passed:false,MeasurementSource:"synthetic fixture"},
  }
- selected,_,_,ok:=s.selectCandidateWithLearning("improve graph traversal",candidates)
- if !ok||selected.ID!="bom-cost-ranked"{t.Fatalf("historical review should affect ranking among passing candidates: %+v",selected)}
+ selected,reason,scores,ok:=s.selectCandidateWithLearning("improve graph traversal",candidates)
+ if !ok||selected.ID!="graph-indexed"{t.Fatalf("human feedback must not override objective routing: selected=%+v reason=%s",selected,reason)}
+ if scores["bom-cost-ranked"] <= scores["graph-indexed"] { t.Fatalf("fixture must retain the higher feedback score as advisory context: %+v",scores) }
  if selected.ID=="rvx-aead-envelope"{t.Fatal("learning score must never select an unqualified candidate")}
 }
 

@@ -79,6 +79,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"version":        Version,
 			"standalone":     true,
 			"model_assisted": strings.TrimSpace(os.Getenv("GENESIS_MODEL_BASE_URL")) != "",
+			"signing_key_configured": strings.TrimSpace(os.Getenv("GENESIS_SIGNING_KEY")) != "",
 			"execution":      "proposal_only",
 			"merge":          "human_required",
 		})

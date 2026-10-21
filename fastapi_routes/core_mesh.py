@@ -702,6 +702,7 @@ async def core_mesh_tools_api(request: Request, provider: str = ""):
             "active_tools": tools,
             "tool_context": context,
             "execution_policy": "signed-artifacts-only; generated source never runs in the gateway",
+            "can_execute": _operator_allowed(user_id),
         },
     }
 
@@ -726,6 +727,9 @@ async def core_mesh_tool_execute_api(request: Request):
     user_id = _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
+    operator_error = _approved_tool_operator(user_id)
+    if operator_error:
+        return operator_error
     body = await _body_or_none(request)
     if not isinstance(body, dict):
         return JSONResponse(

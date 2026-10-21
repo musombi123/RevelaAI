@@ -293,6 +293,8 @@ def _dashboard_snapshot() -> dict:
                 "version": one_health.get("version") or one_status.get("version"),
                 "standalone": one_health.get("standalone", one_status.get("standalone")),
                 "model_assisted": one_health.get("model_assisted", one_status.get("model_assisted")),
+                "execution_policy": one_health.get("execution", one_status.get("execution")),
+                "merge_policy": one_health.get("merge", one_status.get("merge")),
                 "guardian_ready": guardian.get("ready"),
                 "queue": {str(k): v for k, v in queue.items() if isinstance(v, (int, float))},
                 "invention_count": one_status.get("invention_count", one_tools.get("count")),
@@ -340,7 +342,7 @@ def _dashboard_snapshot() -> dict:
             "genesis_url_configured": bool(os.getenv("GENESIS_BASE_URL")),
             "genesis_proxy_credential_configured": bool(os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")),
             "genesis_orchestrator_tools_enabled": os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
-            "genesis_signing_key_configured": bool(os.getenv("GENESIS_SIGNING_KEY", "").strip()),
+            "genesis_signing_key_configured": one_health.get("signing_key_configured"),
             "genesis_registry_ready": registry_ready,
             "active_signed_tools_count": active_signed_tools_count,
             "mind_url_configured": bool(os.getenv("MIND_BASE_URL")),
@@ -844,7 +846,9 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
         dashboard = get_core_mesh_dashboard()
     else:
         dashboard = {
-            "status": "not_applicable",
+            # The mesh is not applicable to this turn; no health probe ran.
+            # Keep mesh_status not_probed so clients do not show a false outage.
+            "status": "not_probed",
             "cores": {
                 "zero": {"id": "USECT-ZERO", "status": "not_probed", "reachable": None, "version": None},
                 "one": {"id": "USECT-ONE", "status": "not_probed", "reachable": None, "version": None},

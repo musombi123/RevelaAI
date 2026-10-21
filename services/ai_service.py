@@ -1402,7 +1402,7 @@ def process_message(
                     or "pending_review"
                 )[:60]
                 core_mesh.update({
-                    "mode": "executed",
+                    "mode": "proposal_created",
                     "operation_kind": operation_kind,
                     "execution_status": "proposal_created",
                     "proposal_id": proposal_id or None,

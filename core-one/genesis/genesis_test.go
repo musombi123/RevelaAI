@@ -609,7 +609,8 @@ func TestHTTPHealthAndBlockedDemand(t *testing.T) {
 	h.ServeHTTP(w, r)
 
 	if w.Code != 200 ||
-		!strings.Contains(w.Body.String(), `"standalone":true`) {
+		!strings.Contains(w.Body.String(), `"standalone":true`) ||
+		!strings.Contains(w.Body.String(), `"signing_key_configured":`) {
 		t.Fatalf("health response: %d %s", w.Code, w.Body.String())
 	}
 
