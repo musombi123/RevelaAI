@@ -399,7 +399,11 @@ def test_native_users_directory_create_get_and_validation(monkeypatch) -> None:
 
     missing = client.get("/api/users/000000000000000000000000")
     assert missing.status_code == 404
-    assert missing.json() == {"status": "error", "message": "User not found"}
+    missing_body = missing.json()
+    assert missing_body["status"] == "error"
+    assert missing_body["message"] == "User not found"
+    assert missing_body["error"]["code"] == "HTTP_404"
+    assert missing_body["request_id"]
 
 
 def test_native_system_routes_keep_response_contracts() -> None:
