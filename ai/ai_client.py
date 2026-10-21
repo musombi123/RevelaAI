@@ -1253,7 +1253,9 @@ def _extract_gemini_function_calls(data: Any) -> list[dict[str, Any]]:
     candidates = data.get("candidates")
     if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
         return []
-    content = candidates[0].get("content")
+    candidate = candidates[0]
+    finish_reason = str(candidate.get("finishReason") or "")
+    content = candidate.get("content")
     if not isinstance(content, dict):
         return []
     parts = content.get("parts")
@@ -1273,6 +1275,12 @@ def _extract_gemini_function_calls(data: Any) -> list[dict[str, Any]]:
                 "Gemini returned an invalid function call.",
                 provider="gemini",
                 error_code="gemini_invalid_function_call",
+            )
+        if finish_reason != "STOP":
+            raise AIClientError(
+                "Gemini function call did not finish safely.",
+                provider="gemini",
+                error_code="gemini_function_call_not_completed",
             )
         calls.append({"name": name, "arguments": arguments})
         if len(calls) > 4:
