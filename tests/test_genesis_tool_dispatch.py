@@ -230,6 +230,29 @@ def test_proposal_only_remote_result_is_not_reported_as_direct_execution(monkeyp
     assert result["executed"] is False
 
 
+def test_genesis_declarations_strip_unsupported_gemini_schema_keywords():
+    declarations = tool_registry.gemini_function_declarations([_active_item()])
+    assert len(declarations) == 1
+
+    supported = {
+        "type", "nullable", "required", "format", "description",
+        "properties", "items", "enum", "anyOf", "$ref", "$defs",
+    }
+
+    def walk(schema):
+        if isinstance(schema, dict):
+            assert set(schema).issubset(supported)
+            for value in schema.values():
+                walk(value)
+        elif isinstance(schema, list):
+            for value in schema:
+                walk(value)
+
+    walk(declarations[0]["parameters"])
+    assert declarations[0]["parameters"]["properties"]["action"]["type"] == "string"
+    assert "additionalProperties" not in declarations[0]["parameters"]
+
+
 def test_gemini_function_call_response_is_extracted_without_fabricated_text():
     response = {
         "candidates": [{
