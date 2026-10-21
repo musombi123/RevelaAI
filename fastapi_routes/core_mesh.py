@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ai.core_mesh import (
     CoreMeshError,
+    core_mesh_operator_allowed,
     get_core_mesh_dashboard,
     get_genesis_capability_plan,
     get_genesis_hardware_guide,
@@ -76,12 +77,7 @@ def _resolve_user(authorization: str) -> str | None:
 
 
 def _operator_allowed(user_id: str) -> bool:
-    configured = (
-        os.getenv("CORE_MESH_ADMIN_USER_IDS", "")
-        or os.getenv("META_ENGINEER_ADMIN_USER_IDS", "")
-    )
-    allowed = {value.strip() for value in configured.split(",") if value.strip()}
-    return bool(user_id and allowed and user_id in allowed)
+    return core_mesh_operator_allowed(user_id)
 
 
 def _auth_failure():

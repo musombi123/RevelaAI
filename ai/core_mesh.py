@@ -20,6 +20,7 @@ from urllib.parse import quote, urlencode, urlsplit
 import requests
 
 from services.core_config import core_base_url, core_admin_token
+from services.usect_zero_client import is_enabled as usect_zero_is_enabled
 
 
 CACHE_TTL_SECONDS = 12.0
@@ -201,6 +202,7 @@ def _dashboard_snapshot() -> dict:
         "one_health": (one_base, "/v1/genesis/health", None),
         "one_status": (one_base, "/v1/genesis/status", genesis_headers),
         "one_tools": (one_base, "/v1/genesis/tools", genesis_headers),
+        "one_registry": (one_base, "/v1/genesis/registry/tools", genesis_headers),
         "two_health": (mind_base, "/v1/mind/health", None),
         "two_metrics": (mind_base, "/v1/mind/metrics", None),
         "two_evolutions": (mind_base, "/v1/mind/evolutions", None),
@@ -223,6 +225,7 @@ def _dashboard_snapshot() -> dict:
     one_health = results["one_health"]
     one_status = results["one_status"]
     one_tools = results["one_tools"]
+    one_registry = results["one_registry"]
     two_health = results["two_health"]
     two_metrics = results["two_metrics"]
     two_evolutions = results["two_evolutions"]
@@ -231,6 +234,12 @@ def _dashboard_snapshot() -> dict:
     zero_online = _is_online(zero_health)
     one_online = _is_online(one_health) and _is_online(one_status)
     two_online = _is_online(two_health)
+    # The registry list endpoint returns {tools, count} without a status field.
+    registry_tools = one_registry.get("tools") if isinstance(one_registry.get("tools"), list) else []
+    registry_ready = "reason" not in one_registry and isinstance(one_registry.get("tools"), list)
+    active_signed_tools_count = sum(
+        1 for item in registry_tools if isinstance(item, dict) and item.get("active") is True
+    )
 
     guardian = one_status.get("guardian") if isinstance(one_status.get("guardian"), dict) else {}
     queue = one_status.get("queue") if isinstance(one_status.get("queue"), dict) else {}
@@ -272,6 +281,7 @@ def _dashboard_snapshot() -> dict:
                 "execution_policy": zero_health.get("execution_policy", "human-gated"),
                 "audit_log_observed": zero_detail.get("audit_log_observed"),
                 "healing_evidence_observed": zero_detail.get("healing_evidence_observed"),
+                "failure_reason": None if zero_online else str(zero_health.get("reason") or "usect_zero_unavailable")[:80],
             },
             "one": {
                 "id": "USECT-ONE",
@@ -286,6 +296,9 @@ def _dashboard_snapshot() -> dict:
                 "guardian_ready": guardian.get("ready"),
                 "queue": {str(k): v for k, v in queue.items() if isinstance(v, (int, float))},
                 "invention_count": one_status.get("invention_count", one_tools.get("count")),
+                "signed_tool_registry_ready": registry_ready,
+                "active_signed_tools_count": active_signed_tools_count,
+                "failure_reason": None if one_online else str(one_health.get("reason") or one_status.get("reason") or "genesis_unavailable")[:80],
                 "automatic_merge": False,
             },
             "two": {
@@ -304,6 +317,7 @@ def _dashboard_snapshot() -> dict:
                 "metrics_available": _is_online(two_metrics),
                 "learning_feedback_count": learning_count,
                 "evolution_count": two_evolutions.get("count", len(public_evolutions)),
+                "failure_reason": None if two_online else str(two_health.get("reason") or "mind_unavailable")[:80],
                 "automatic_merge": False,
             },
         },
@@ -313,11 +327,25 @@ def _dashboard_snapshot() -> dict:
             "feedback_count": learning_count,
         },
         "configuration": {
-            "zero_url_configured": bool(os.getenv("USECT_ZERO_BASE_URL")),
+            "zero_url_configured": bool(os.getenv("USECT_ZERO_URL") or os.getenv("USECT_ZERO_BASE_URL")),
+            "zero_admin_token_configured": bool(core_admin_token("zero")),
+            "zero_enabled": usect_zero_is_enabled(),
+            "zero_brain_key_configured": bool(os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()),
+            "zero_tools_ready": bool(
+                usect_zero_is_enabled()
+                and (os.getenv("USECT_ZERO_URL") or os.getenv("USECT_ZERO_BASE_URL"))
+                and core_admin_token("zero")
+                and os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
+            ),
             "genesis_url_configured": bool(os.getenv("GENESIS_BASE_URL")),
-            "mind_url_configured": bool(os.getenv("MIND_BASE_URL")),
-            "write_credentials_configured": bool(os.getenv("MIND_ADMIN_TOKEN")),
             "genesis_proxy_credential_configured": bool(os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")),
+            "genesis_orchestrator_tools_enabled": os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
+            "genesis_signing_key_configured": bool(os.getenv("GENESIS_SIGNING_KEY", "").strip()),
+            "genesis_registry_ready": registry_ready,
+            "active_signed_tools_count": active_signed_tools_count,
+            "mind_url_configured": bool(os.getenv("MIND_BASE_URL")),
+            "write_credentials_configured": bool(core_admin_token("mind")),
+            "core_mesh_operator_allowlist_configured": bool((os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip()),
         },
     }
 
@@ -764,6 +792,14 @@ def score_mind_foundry_candidate(candidate: dict) -> dict:
     return result
 
 
+def core_mesh_operator_allowed(user_id: str) -> bool:
+    """Use the same explicit operator allowlist for chat dispatch and HTTP routes."""
+    configured = os.getenv("CORE_MESH_ADMIN_USER_IDS", "") or os.getenv("META_ENGINEER_ADMIN_USER_IDS", "")
+    allowed = {value.strip() for value in configured.split(",") if value.strip()}
+    normalized_user_id = str(user_id or "").strip()
+    return bool(normalized_user_id and normalized_user_id in allowed)
+
+
 def get_cached_core_mesh_dashboard() -> dict:
     """Return the last read-only snapshot without adding network latency to chat."""
     with _cache_lock:
@@ -800,11 +836,21 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
         selected = "core-zero"
         reason = "A diagnostic/recovery request maps to ZERO's read-only checks or human-gated recovery proposals."
 
-    # Normal chat must not fan out to nine HTTP probes. Refresh the real mesh only
-    # when the user is asking about one of these cores; otherwise reuse the last
-    # admin/status snapshot, or expose an explicit not_probed state.
+    # Ordinary domain chat is not a mesh operation. Do not attach stale degraded
+    # mesh status to it, and avoid health-probe fan-out on every conversation turn.
     asks_about_mesh = bool(re.search(r"\b(core[- ]?mesh|usect|genesis|infinite mind|core[- ]?(zero|one|two))\b", text))
-    dashboard = get_core_mesh_dashboard() if selected != "orchestrator" or asks_about_mesh else get_cached_core_mesh_dashboard()
+    mesh_relevant = selected != "orchestrator" or asks_about_mesh
+    if mesh_relevant:
+        dashboard = get_core_mesh_dashboard()
+    else:
+        dashboard = {
+            "status": "not_applicable",
+            "cores": {
+                "zero": {"id": "USECT-ZERO", "status": "not_probed", "reachable": None, "version": None},
+                "one": {"id": "USECT-ONE", "status": "not_probed", "reachable": None, "version": None},
+                "two": {"id": "USECT-TWO", "status": "not_probed", "reachable": None, "version": None},
+            },
+        }
     cores = dashboard.get("cores", {})
     target_core = {
         "core-one": "core-one",
@@ -819,7 +865,7 @@ def orchestrator_core_context(message: str, domain: str = "general", intent: str
     }.get(selected, "advisory_only")
 
     return {
-        "mode": "advisory_only",
+        "mode": "advisory_only" if mesh_relevant else "not_applicable",
         "selected_core": selected,
         "target_core": target_core,
         "operation_kind": operation_kind,
