@@ -66,6 +66,12 @@ async def enforce_auth(
             headers={"WWW-Authenticate": "Bearer"},
         )
     claims = decode_access_token(credentials.credentials)
+    if str(claims.get("token_use") or "access").casefold() == "refresh":
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "refresh_token_not_allowed", "message": "A refresh token cannot authorize API requests."},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     # Internal-only request context; route serializers must not expose this field.
     claims["_access_token"] = credentials.credentials
     return claims
