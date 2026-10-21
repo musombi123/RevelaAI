@@ -95,3 +95,14 @@ def test_refresh_endpoint_rotates_access_and_refresh_tokens(monkeypatch):
     claims = jwt.decode(body["refresh_token"], secret, algorithms=["HS256"])
     assert claims["sub"] == "learner-1"
     assert claims["token_use"] == "refresh"
+
+
+def test_refresh_token_cannot_authorize_protected_route(auth_client):
+    client, secret = auth_client
+    refresh_token = issue_token(secret, extra={"token_use": "refresh"})
+    response = client.get(
+        "/api/elimu/hubs",
+        headers={"Authorization": f"Bearer {refresh_token}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "refresh_token_not_allowed"
