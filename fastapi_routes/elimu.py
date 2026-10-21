@@ -470,7 +470,7 @@ def _profile_for(claims: dict[str, Any]) -> dict[str, Any]:
         instructors_raw = hub.get("instructors") if isinstance(hub.get("instructors"), list) else []
         instructors = [str(v.get("name") or v.get("full_name")) if isinstance(v, dict) else str(v) for v in instructors_raw]
         hubs_output.append({
-            "id": str(hub.get("_id") or hub.get("id") or hub.get("slug") or progress.get("hub_id")),
+            "id": _identifier(hub),
             "hub_id": str(progress.get("hub_id")),
             "name": str(hub.get("name") or hub.get("title") or hub.get("hub_name") or "Learning hub"),
             "description": str(hub.get("description") or ""),
@@ -559,7 +559,7 @@ async def list_elimu_hubs(claims: dict[str, Any] = Depends(enforce_auth)) -> dic
             and str(doc.get("status") or "").lower() not in {"draft", "private", "archived"}
         ]
         return [safe_document({
-            "id": str(doc.get("_id") or doc.get("id") or doc.get("slug")),
+            "id": _identifier(doc),
             "name": doc.get("name") or doc.get("title") or doc.get("hub_name") or "",
             "description": doc.get("description") or "",
             "skills": doc.get("skills") or [],
@@ -600,7 +600,7 @@ async def get_elimu_hub(hub_id: str, claims: dict[str, Any] = Depends(enforce_au
         "success": True,
         "hub": {
             **safe_document(hub),
-            "id": str(hub.get("_id") or hub.get("id") or hub.get("slug")),
+            "id": _identifier(hub),
             "name": hub.get("name") or hub.get("title") or hub.get("hub_name") or "",
             "courses": courses_out,
             "progress": totals,
