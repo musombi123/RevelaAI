@@ -7,7 +7,7 @@ import (
  "testing"
 )
 
-func TestHumanFeedbackInfluencesRankingButCannotBypassGates(t *testing.T) {
+func TestHumanFeedbackCannotOverrideObjectiveRoutingOrQualification(t *testing.T) {
  root,s:=newTestRepository(t)
  fixtures:=[]struct{version,tool,mutation,outcome,note,ref string}{
   {"v0.1.0","offline_vault_a","graph-indexed","reverted","Regression observed during owner review",""},
@@ -28,8 +28,9 @@ func TestHumanFeedbackInfluencesRankingButCannotBypassGates(t *testing.T) {
   {ID:"bom-cost-ranked",ImprovementPct:90,Passed:true},
   {ID:"rvx-aead-envelope",ImprovementPct:1000,Passed:false},
  }
- selected,_,_,ok:=s.selectCandidateWithLearning("improve graph traversal",candidates)
- if !ok||selected.ID!="bom-cost-ranked"{t.Fatalf("historical review should affect ranking among passing candidates: %+v",selected)}
+ selected,reason,scores,ok:=s.selectCandidateWithLearning("improve graph traversal",candidates)
+ if !ok||selected.ID!="graph-indexed"{t.Fatalf("human feedback must not override objective routing: selected=%+v reason=%s",selected,reason)}
+ if scores["bom-cost-ranked"] <= scores["graph-indexed"] { t.Fatalf("fixture must retain the higher feedback score as advisory context: %+v",scores) }
  if selected.ID=="rvx-aead-envelope"{t.Fatal("learning score must never select an unqualified candidate")}
 }
 
