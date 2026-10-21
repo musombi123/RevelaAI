@@ -1957,6 +1957,48 @@ def process_message(
         result.pop("tool_calls", None)
         tool_name = str(genesis_tool_execution.get("tool") or "requested tool")
         dispatch_status = str(genesis_tool_execution.get("status") or "blocked")
+
+        mesh = orchestrator_data.get("core_mesh")
+        if not isinstance(mesh, dict):
+            mesh = {
+                "mode": "advisory_only",
+                "selected_core": "orchestrator",
+                "target_core": None,
+                "operation_kind": "normal_chat",
+                "mesh_status": "not_probed",
+                "cores": {},
+                "safety": {},
+            }
+        accepted_status = dispatch_status in {"executed", "proposal_only"}
+        mesh.update({
+            "mode": (
+                "executed" if dispatch_status == "executed"
+                else "proposal_created" if dispatch_status == "proposal_only"
+                else "approval_required" if dispatch_status == "approval_required"
+                else "blocked"
+            ),
+            "selected_core": "core-one",
+            "target_core": "core-one",
+            "operation_kind": "signed_genesis_tool_call",
+            "execution_status": dispatch_status,
+            "failure_reason": None if accepted_status else str(
+                genesis_tool_execution.get("reason") or "genesis_tool_call_not_executed"
+            )[:100],
+        })
+        safety = mesh.get("safety")
+        if not isinstance(safety, dict):
+            safety = {}
+        safety.update({
+            "operation_executed": accepted_status,
+            "target_mutation_performed": False,
+            "candidate_source_execution": False,
+            "human_approval_required": dispatch_status == "approval_required",
+            "automatic_merge": False,
+            "automatic_execution": accepted_status,
+        })
+        mesh["safety"] = safety
+        orchestrator_data["core_mesh"] = mesh
+
         if dispatch_status in {"executed", "proposal_only"}:
             evidence = json.dumps(
                 {
