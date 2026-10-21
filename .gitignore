@@ -40,3 +40,7 @@ Thumbs.db
 /recipe/signature.key
 /recipe/*.pem
 /recipe/*.rvx
+
+# Local RevelaCode certificate signing keys (never commit private keys)
+/secrets/
+*certificate_private*.pem
