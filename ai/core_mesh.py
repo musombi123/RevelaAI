@@ -342,7 +342,7 @@ def _dashboard_snapshot() -> dict:
             "genesis_url_configured": bool(os.getenv("GENESIS_BASE_URL")),
             "genesis_proxy_credential_configured": bool(os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")),
             "genesis_orchestrator_tools_enabled": os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
-            "genesis_signing_key_configured": one_health.get("signing_key_configured") is True,
+            "genesis_signing_key_configured": one_health.get("signing_key_configured"),
             "genesis_registry_ready": registry_ready,
             "active_signed_tools_count": active_signed_tools_count,
             "mind_url_configured": bool(os.getenv("MIND_BASE_URL")),
