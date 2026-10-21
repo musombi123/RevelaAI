@@ -265,10 +265,21 @@ def _validate_certificate(record: dict[str, Any]) -> dict[str, Any] | None:
         raise
     except jwt.InvalidTokenError:
         return None
+    # Validate every field rendered as public credential metadata against the
+    # signed claims, not just the primary identifiers. This prevents a changed
+    # database document from displaying roles/skills different from the PDF.
+    expected_issued_at = _iso(record.get("issued_at"))
+    signed_issued_at = claims.get("issued_at")
     if (
         str(claims.get("cert_id")) != str(record.get("certificate_id"))
         or str(claims.get("sub")) != str(record.get("user_id"))
         or str(claims.get("hub_id")) != str(record.get("hub_id"))
+        or str(claims.get("user_name") or "") != str(record.get("user_name") or "")
+        or str(claims.get("hub_name") or "") != str(record.get("hub_name") or "")
+        or claims.get("roles") != (record.get("roles") or [])
+        or claims.get("skills") != (record.get("skills") or [])
+        or int(claims.get("progress_percent") or 0) != int(record.get("progress_percent") or 0)
+        or str(signed_issued_at or "") != str(expected_issued_at or "")
     ):
         return None
     return claims
@@ -314,6 +325,20 @@ def _certificate_pdf(record: dict[str, Any]) -> bytes:
     pdf.setFillColor(colors.HexColor("#2E8B57"))
     pdf.setFont("Helvetica-Bold", 9)
     pdf.drawString(48 * mm, page_height - 35 * mm, "HIGHLY CERTIFIED LEARNING CREDENTIAL")
+
+    # Distinct gold seal, separate from the RevelaCode wordmark.
+    seal_x = page_width - 39 * mm
+    seal_y = page_height - 30 * mm
+    pdf.setStrokeColor(colors.HexColor("#D4AF37"))
+    pdf.setFillColor(colors.HexColor("#FFFBEB"))
+    pdf.setLineWidth(1.4)
+    pdf.circle(seal_x, seal_y, 11 * mm, fill=1, stroke=1)
+    pdf.setLineWidth(0.7)
+    pdf.circle(seal_x, seal_y, 8.7 * mm, fill=0, stroke=1)
+    pdf.setFillColor(colors.HexColor("#92400E"))
+    pdf.setFont("Helvetica-Bold", 6.5)
+    pdf.drawCentredString(seal_x, seal_y + 1.8 * mm, "OFFICIAL")
+    pdf.drawCentredString(seal_x, seal_y - 1.5 * mm, "SEAL")
 
     pdf.setFillColor(colors.HexColor("#0F172A"))
     pdf.setFont("Helvetica-Bold", 28)
