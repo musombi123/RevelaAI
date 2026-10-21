@@ -325,7 +325,10 @@ def test_signed_tool_execution_requires_core_mesh_operator(monkeypatch) -> None:
     assert called["execute"] is False
 
 
-def test_core_mesh_routes_keep_authentication_boundary() -> None:
+def test_core_mesh_routes_keep_authentication_boundary(monkeypatch) -> None:
+    # The test isolates invalid/missing credentials from missing server configuration.
+    monkeypatch.setattr(core_mesh_routes, "JWT_SECRET", "test-shared-secret-for-auth-boundary")
+
     response = client.get("/api/core-mesh/dashboard")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
@@ -337,6 +340,13 @@ def test_core_mesh_routes_keep_authentication_boundary() -> None:
     known = client.get("/v1/learn/known")
     assert known.status_code == 401
     assert known.json()["error"]["code"] == "authentication_required"
+
+
+def test_core_mesh_reports_missing_jwt_verifier_as_configuration_error(monkeypatch) -> None:
+    monkeypatch.setattr(core_mesh_routes, "JWT_SECRET", "")
+    response = client.get("/api/core-mesh/dashboard")
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "jwt_verifier_not_configured"
 
 
 
