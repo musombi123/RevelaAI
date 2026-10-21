@@ -55,7 +55,11 @@ def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse
         return None, _error("authentication_required", 401)
 
     if not JWT_SECRET:
-        return None, _error("invalid_identity", 401)
+        return None, _error(
+            "jwt_verifier_not_configured",
+            503,
+            "JWT verification is not configured on RevelaAI. Configure the shared JWT_SECRET before retrying.",
+        )
 
     try:
         claims = jwt.decode(
