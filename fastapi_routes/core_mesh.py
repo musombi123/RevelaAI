@@ -60,11 +60,17 @@ JWT_ALGORITHM = "HS256"
 def _resolve_user(authorization: str) -> str | None:
     """Preserve the existing Core Mesh JWT contract (identity only)."""
     header = (authorization or "").strip()
-    if not JWT_SECRET or not header.startswith("Bearer ") or not header[7:].strip():
+    parts = header.split(None, 1)
+    if (
+        not JWT_SECRET
+        or len(parts) != 2
+        or parts[0].casefold() != "bearer"
+        or not parts[1].strip()
+    ):
         return None
     try:
         claims = jwt.decode(
-            header[7:].strip(),
+            parts[1].strip(),
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
             options={"require": ["sub", "iat", "exp"]},
