@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -57,11 +58,23 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
+logger = logging.getLogger("revelaai.fastapi.elimu")
+
+
 def _store_call(fn):
     try:
         return fn()
-    except ElimuStoreUnavailable as exc:
-        raise HTTPException(status_code=503, detail={"code": "elimu_store_unavailable", "message": "Learning data is temporarily unavailable."}) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Elimu persistence operation failed")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "elimu_store_unavailable",
+                "message": "Learning data is temporarily unavailable.",
+            },
+        ) from exc
 
 
 def _identifier(doc: dict[str, Any]) -> str:
