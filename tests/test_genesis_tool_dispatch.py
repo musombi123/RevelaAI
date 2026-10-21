@@ -153,6 +153,47 @@ def test_tool_must_match_a_verified_signed_registry_item(monkeypatch):
     assert called == []
 
 
+def test_invalid_manifest_is_rejected_before_genesis_invocation(monkeypatch):
+    _set_operator(monkeypatch)
+    called = []
+    item = _active_item()
+    item["manifest"]["input_schema"] = {
+        "type": "object",
+        "properties": {"arbitrary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    monkeypatch.setattr(ai_service, "execute_active_tool", lambda *args, **kwargs: called.append(args))
+
+    result = ai_service._execute_genesis_function_calls(
+        _call(),
+        [item],
+        "operator-1",
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "tool_not_in_verified_active_registry"
+    assert called == []
+
+
+def test_gemini_function_call_with_non_stop_finish_reason_is_rejected():
+    from ai.ai_client import AIClientError
+
+    response = {
+        "candidates": [{
+            "content": {"parts": [{
+                "functionCall": {"name": "genesis_safe_tool", "args": {"action": "inspect"}}
+            }]},
+            "finishReason": "MAX_TOKENS",
+        }]
+    }
+    try:
+        ai_client._extract_gemini_function_calls(response)
+    except AIClientError as exc:
+        assert exc.error_code == "gemini_function_call_not_completed"
+    else:
+        raise AssertionError("incomplete function call must not be returned for execution")
+
+
 def test_multiple_model_tool_calls_are_rejected_without_execution(monkeypatch):
     _set_operator(monkeypatch)
     called = []
@@ -185,7 +226,8 @@ def test_proposal_only_remote_result_is_not_reported_as_direct_execution(monkeyp
 
     assert result["status"] == "proposal_only"
     assert result["remote_status"] == "proposal_only"
-    assert result["executed"] is True
+    assert result["invocation_confirmed"] is True
+    assert result["executed"] is False
 
 
 def test_gemini_function_call_response_is_extracted_without_fabricated_text():
