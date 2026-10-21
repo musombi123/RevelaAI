@@ -24,6 +24,7 @@ def test_normal_chat_does_not_trigger_core_health_fanout(monkeypatch):
     result = core_mesh.orchestrator_core_context("Explain photosynthesis in simple terms.")
 
     assert result["selected_core"] == "orchestrator"
+    assert result["mode"] == "not_applicable"
     assert result["mesh_status"] == "not_probed"
     assert result["cores"]["two"]["reachable"] is None
     assert result["safety"]["operation_executed"] is False
@@ -260,3 +261,13 @@ def test_live_brain_prompt_receives_mind_to_core_one_target_and_safety_rules():
     assert "must not edit Core-One" in prompt
     assert "never forward candidate source code or secrets" in prompt
     assert "Never claim an invention, mutation, repair, deployment, or merge occurred" in prompt
+
+
+def test_core_mesh_operator_allowlist_uses_exact_user_ids(monkeypatch):
+    monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "operator-1, operator-2")
+    monkeypatch.delenv("META_ENGINEER_ADMIN_USER_IDS", raising=False)
+
+    assert core_mesh.core_mesh_operator_allowed("operator-1") is True
+    assert core_mesh.core_mesh_operator_allowed("operator-2") is True
+    assert core_mesh.core_mesh_operator_allowed("operator-2x") is False
+    assert core_mesh.core_mesh_operator_allowed("") is False
