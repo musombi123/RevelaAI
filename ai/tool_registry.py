@@ -238,6 +238,41 @@ def _valid_manifest_shape(manifest: dict[str, Any]) -> bool:
     )
 
 
+_GEMINI_SCHEMA_FIELDS = frozenset({
+    "type", "nullable", "required", "format", "description",
+    "properties", "items", "enum", "anyOf", "$ref", "$defs",
+})
+
+
+def _gemini_schema_subset(schema: Any) -> Any:
+    """Strip schema keywords the Gemini function-declaration API does not support."""
+    if isinstance(schema, list):
+        return [_gemini_schema_subset(item) for item in schema[:128]]
+    if not isinstance(schema, dict):
+        return schema
+
+    result: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key not in _GEMINI_SCHEMA_FIELDS:
+            continue
+        if key in {"properties", "$defs"} and isinstance(value, dict):
+            result[key] = {
+                str(property_name): _gemini_schema_subset(property_schema)
+                for property_name, property_schema in list(value.items())[:128]
+                if isinstance(property_name, str)
+            }
+        elif key == "items" and isinstance(value, dict):
+            result[key] = _gemini_schema_subset(value)
+        elif key == "anyOf" and isinstance(value, list):
+            result[key] = [_gemini_schema_subset(item) for item in value[:16]]
+        elif key in {"required", "enum"} and isinstance(value, list):
+            result[key] = value[:128]
+        elif key in {"type", "nullable", "format", "description", "$ref"}:
+            if isinstance(value, (str, bool)):
+                result[key] = value
+    return result
+
+
 def gemini_function_declarations(tools: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Return Gemini REST functionDeclarations for already-active signed tools."""
     tools = list_active_tools() if tools is None else tools
@@ -250,13 +285,17 @@ def gemini_function_declarations(tools: list[dict[str, Any]] | None = None) -> l
         input_schema = manifest.get("input_schema")
         if not isinstance(input_schema, dict) or input_schema.get("type") != "object":
             continue
+        compatible_schema = _gemini_schema_subset(input_schema)
+        if not isinstance(compatible_schema, dict) or compatible_schema.get("type") != "object":
+            continue
         declarations.append({
             "name": "genesis_" + name,
             "description": (
-                f"Call the signed Genesis tool {name} version {manifest.get('version', 'unknown')}. "
-                f"Risk tier {manifest['risk_tier']}; tool execution is sandboxed by Genesis."
+                f"Request the signed Genesis tool {name} version {manifest.get('version', 'unknown')}. "
+                f"Risk tier {manifest['risk_tier']}; execution is delegated to the guarded Genesis sandbox. "
+                "Put any tool details in the action text and use only string values for named inputs."
             )[:1000],
-            "parameters": input_schema,
+            "parameters": compatible_schema,
         })
     return declarations
 
