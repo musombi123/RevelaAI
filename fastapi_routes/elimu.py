@@ -449,8 +449,8 @@ def _profile_pdf(profile: dict[str, Any]) -> bytes:
 
 def _profile_for(claims: dict[str, Any]) -> dict[str, Any]:
     user_id = str(claims.get("sub") or "")
-    progress_docs = list(_store_call(lambda: collection("elimu_progress").find({"user_id": user_id})))
-    certificates = list(_store_call(lambda: collection("revela_certificates").find({"user_id": user_id}).sort("issued_at", -1)))
+    progress_docs = _store_call(lambda: list(collection("elimu_progress").find({"user_id": user_id})))
+    certificates = _store_call(lambda: list(collection("revela_certificates").find({"user_id": user_id}).sort("issued_at", -1)))
     hubs_output: list[dict[str, Any]] = []
     for progress in progress_docs:
         try:
@@ -656,8 +656,7 @@ async def update_elimu_progress(
         raise HTTPException(status_code=409, detail={"code": "course_has_no_lessons", "message": "This course has no recorded lessons to complete."})
 
     now = _now()
-    progress_col = _store_call(lambda: collection("elimu_progress"))
-    progress = progress_col.find_one({"user_id": user_id, "hub_id": hub_id})
+    progress = _store_call(lambda: collection("elimu_progress").find_one({"user_id": user_id, "hub_id": hub_id}))
     if not progress:
         progress = {
             "user_id": user_id,
@@ -699,7 +698,7 @@ async def update_elimu_progress(
     if totals["hub_completed"]:
         progress["completed_at"] = progress.get("completed_at") or now
     progress["progress_percent"] = totals["progress_percent"]
-    progress_col.replace_one({"user_id": user_id, "hub_id": hub_id}, progress, upsert=True)
+    _store_call(lambda: collection("elimu_progress").replace_one({"user_id": user_id, "hub_id": hub_id}, progress, upsert=True))
     return {
         "success": True,
         "message": "Learning progress saved.",
@@ -853,6 +852,23 @@ async def download_certificate(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{record["certificate_id"]}.pdf"'},
     )
+
+
+
+@router.get("/api/verify/certificate/public-key")
+async def certificate_public_key() -> dict[str, Any]:
+    """Expose only the public key used to validate signed certificate JWTs."""
+    key = _get_public_key()
+    pem = key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("ascii")
+    return {
+        "algorithm": "RS256",
+        "issuer": CERT_ISSUER,
+        "public_key_pem": pem,
+        "fingerprint_sha256": hashlib.sha256(pem.encode("ascii")).hexdigest(),
+    }
 
 
 @router.get("/api/verify/certificate/{cert_id}")
