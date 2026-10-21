@@ -14,6 +14,13 @@ services:
       # Keep this server-side; bearer JWTs are never sent to the Go core.
       - key: REVELACODE_BACKEND_URL
         value: "https://revelacode-backend.onrender.com"
+      # Must exactly match the JWT signing secret used by RevelaCode-Backend.
+      # Keep it server-side; never place this value in Vite/frontend variables.
+      - key: JWT_SECRET
+        sync: false
+      # Comma-separated canonical RevelaCode user IDs permitted to operate Core Mesh.
+      - key: CORE_MESH_ADMIN_USER_IDS
+        sync: false
       - key: REVELACODE_ADMIN_VERIFY_TIMEOUT_SECONDS
         value: "15"
       - key: USECT_ZERO_ENABLED
@@ -33,6 +40,10 @@ services:
           type: pserv
           name: usect-zero-core
           envVarKey: USECT_ZERO_ADMIN_TOKEN
+      # A least-privilege scoped developer key issued by USECT-ZERO for the
+      # registered brain-tool scopes. Do not put the admin token here.
+      - key: USECT_ZERO_BRAIN_API_KEY
+        sync: false
       - key: GENESIS_BASE_URL
         fromService:
           type: pserv

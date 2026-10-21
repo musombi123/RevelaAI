@@ -170,6 +170,21 @@ def test_malformed_success_payload_fails_closed(monkeypatch):
     assert _error_body(error)["code"] == "admin_verification_unavailable"
 
 
+def test_missing_jwt_secret_is_reported_as_server_configuration_error(monkeypatch):
+    monkeypatch.setattr(admin_auth, "JWT_SECRET", "")
+
+    def unexpected_get(*args, **kwargs):
+        pytest.fail("missing JWT configuration must fail before an upstream call")
+
+    monkeypatch.setattr(admin_auth.requests, "get", unexpected_get)
+    actor, error = admin_auth.require_platform_admin("Bearer any-token")
+
+    assert actor is None
+    assert error is not None
+    assert error.status_code == 503
+    assert _error_body(error)["code"] == "jwt_verifier_not_configured"
+
+
 def test_invalid_bearer_is_rejected_before_upstream_request(monkeypatch):
     monkeypatch.setattr(admin_auth, "JWT_SECRET", TEST_SECRET)
 

@@ -50,15 +50,20 @@ def _error(code: str, status_code: int, message: str | None = None) -> JSONRespo
 def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse | None]:
     """Return the verified canonical operator ID or a fail-closed HTTP error."""
     header = (authorization or "").strip()
-    if not header.startswith("Bearer ") or not header[7:].strip():
+    parts = header.split(None, 1)
+    if len(parts) != 2 or parts[0].casefold() != "bearer" or not parts[1].strip():
         return None, _error("authentication_required", 401)
 
     if not JWT_SECRET:
-        return None, _error("invalid_identity", 401)
+        return None, _error(
+            "jwt_verifier_not_configured",
+            503,
+            "JWT verification is not configured on RevelaAI. Configure the shared JWT_SECRET before retrying.",
+        )
 
     try:
         claims = jwt.decode(
-            header[7:].strip(),
+            parts[1].strip(),
             JWT_SECRET,
             algorithms=[JWT_ALGORITHM],
             options={"require": ["sub", "iat", "exp"]},

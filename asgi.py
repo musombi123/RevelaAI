@@ -67,6 +67,7 @@ app.add_middleware(
     allow_headers=[
         "Content-Type",
         "Authorization",
+        "X-Revela-License",
         "userId",
         "X-User-ID",
         "X-Session-ID",
