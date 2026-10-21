@@ -11,13 +11,15 @@ import logging
 import time
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 
 from fastapi_routes.agi import router as agi_router
 from fastapi_routes.ai import router as ai_router
+from fastapi_routes.auth_endpoints import router as auth_endpoints_router
+from fastapi_routes.elimu import router as elimu_router
 from fastapi_routes.automation_fabric import router as automation_fabric_router
 from fastapi_routes.chat import router as chat_router
 from fastapi_routes.core_mesh import router as core_mesh_router
@@ -27,6 +29,7 @@ from fastapi_routes.uncopyable import router as uncopyable_router
 from fastapi_routes.hub import router as fastapi_hub_router
 from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
+from revela_platform.auth.auth_gate import enforce_auth
 from fastapi_routes.meta_engineer import router as meta_engineer_router
 from fastapi_routes.research import router as research_router
 from fastapi_routes.sci_core import router as sci_core_router
@@ -229,18 +232,20 @@ async def fastapi_gateway_health() -> dict[str, str]:
 # All active endpoint families are mounted natively. Keep sector/business logic in
 # the existing service modules; do not mount Flask blueprints or WSGI applications.
 app.include_router(system_router)
-app.include_router(ai_router)
+app.include_router(ai_router, dependencies=[Depends(enforce_auth)])
 app.include_router(stream_router)
 app.include_router(agi_router)
 app.include_router(sci_core_router)
 app.include_router(usect_zero_router)
 app.include_router(automation_fabric_router)
 app.include_router(core_mesh_router)
-app.include_router(memory_router)
+app.include_router(memory_router, dependencies=[Depends(enforce_auth)])
 app.include_router(meta_engineer_router)
 app.include_router(chat_router)
 app.include_router(research_router)
 app.include_router(users_router)
+app.include_router(auth_endpoints_router)
+app.include_router(elimu_router)
 app.include_router(explain_router)
 app.include_router(evolve_migrate_router)
 app.include_router(uncopyable_router)
