@@ -40,6 +40,10 @@ services:
           type: pserv
           name: usect-zero-core
           envVarKey: USECT_ZERO_ADMIN_TOKEN
+      # A least-privilege scoped developer key issued by USECT-ZERO for the
+      # registered brain-tool scopes. Do not put the admin token here.
+      - key: USECT_ZERO_BRAIN_API_KEY
+        sync: false
       - key: GENESIS_BASE_URL
         fromService:
           type: pserv
