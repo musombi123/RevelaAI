@@ -222,10 +222,11 @@ def test_explain_route_preserves_response_contract() -> None:
 def test_explain_route_rejects_empty_answer() -> None:
     response = client.post("/", json={"answer": "  "})
     assert response.status_code == 400
-    assert response.json() == {
-        "status": "error",
-        "message": "answer is required",
-    }
+    body = response.json()
+    assert body["status"] == "error"
+    assert body["message"] == "answer is required"
+    assert body["error"]["code"] == "HTTP_400"
+    assert body["request_id"]
 
 
 def test_hub_catalog_is_served_by_fastapi() -> None:
@@ -243,8 +244,11 @@ def test_hub_respond_preserves_session_validation_contract() -> None:
         json={"message": "Hello from the migration test"},
     )
     assert response.status_code == 400
-    assert response.json() == {"ok": False, "error": "sessionId is required."}
-    assert response.headers.get("X-Request-ID")
+    body = response.json()
+    assert body["ok"] is False
+    assert body["status"] == "error"
+    assert body["error"]["code"] == "HTTP_400"
+    assert body["request_id"] == response.headers.get("X-Request-ID")
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
 
 
@@ -346,7 +350,10 @@ def test_native_research_validates_query_and_returns_source_results(monkeypatch)
     )
     invalid = client.post("/api/research", json={"query": "   "})
     assert invalid.status_code == 400
-    assert invalid.json() == {"error": "query is required"}
+    body = invalid.json()
+    assert body["status"] == "error"
+    assert body["error"]["code"] == "HTTP_400"
+    assert body["request_id"]
 
     response = client.post("/api/research", json={"query": "climate"})
     assert response.status_code == 200
@@ -369,7 +376,11 @@ def test_native_users_directory_create_get_and_validation(monkeypatch) -> None:
     USERS.clear()
     invalid = client.post("/api/users", json={"email": "test@example.org"})
     assert invalid.status_code == 400
-    assert invalid.json() == {"status": "error", "message": "User name is required"}
+    body = invalid.json()
+    assert body["status"] == "error"
+    assert body["message"] == "User name is required"
+    assert body["error"]["code"] == "HTTP_400"
+    assert body["request_id"]
 
     created = client.post(
         "/api/users",
