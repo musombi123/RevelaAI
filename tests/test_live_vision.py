@@ -16,6 +16,16 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def vision_trial_access(monkeypatch):
+    # Provider-contract tests are isolated from the shared production billing API.
+    monkeypatch.setattr(
+        vision_routes,
+        "check_entitlement",
+        lambda *args, **kwargs: ({"success": True, "allowed": True, "tier": "trial"}, None),
+    )
+
+
 @pytest.fixture
 def valid_image_payload():
     stream = io.BytesIO()
