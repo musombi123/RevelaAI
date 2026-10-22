@@ -17,6 +17,7 @@ from revelai.core.agi_manifest import get_self_description_answer
 from services.ai_service import process_message
 from services.memory_store import _record_messages, memories
 from fastapi_routes.auth import authenticate_identity
+from services.revenue_entitlements import check_entitlement
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 logger = logging.getLogger("revelaai.chat")
@@ -84,6 +85,16 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     )
     if auth_error:
         return auth_error
+
+    _, memory_entitlement_error = check_entitlement(
+        headers.get("authorization", ""),
+        hub="smart_ai",
+        feature="long_memory",
+    )
+    if memory_entitlement_error is not None:
+        # Keep text responses available even if trial/memory billing is inactive.
+        # Only persistent saved-memory access is disabled for the free tier.
+        user_oid = None
 
     requested_user = str(payload.get("userId") or "").strip()
     if requested_user and requested_user != user_id:
