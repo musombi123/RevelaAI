@@ -241,6 +241,38 @@ def _ai_sync(
     image_options: dict[str, Any] = {}
 
     if upload_name is not None:
+        # Office/text/document parsing can have non-trivial provider cost. Image
+        # and video uploads remain available to existing vision flows; document
+        # extraction is tied to the Smart AI premium/trial entitlement.
+        suffix = os.path.splitext(str(upload_name or ""))[1].lower()
+        document_suffixes = {
+            ".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".md",
+            ".csv", ".xls", ".xlsx", ".ods", ".ppt", ".pptx", ".html",
+            ".htm", ".json", ".xml",
+        }
+        document_mime_prefixes = (
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument",
+            "application/vnd.ms-excel",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.oasis.opendocument",
+            "text/plain",
+            "text/csv",
+            "text/html",
+            "application/json",
+            "application/rtf",
+        )
+        mime = str(upload_mime or "").lower().split(";", 1)[0].strip()
+        is_document_upload = suffix in document_suffixes or mime.startswith(document_mime_prefixes)
+        if is_document_upload:
+            _, entitlement_error = check_entitlement(
+                authorization,
+                hub="smart_ai",
+                feature="document_analysis",
+            )
+            if entitlement_error is not None:
+                return entitlement_error
         if not upload_bytes:
             return _error("INVALID_DOCUMENT", "Uploaded file is empty.", 400, request_id)
         if len(upload_bytes) > MAX_BODY_BYTES:
@@ -362,6 +394,15 @@ def _ai_sync(
             action = ai_result.get("action") if isinstance(ai_result.get("action"), dict) else {}
             action_type = str(action.get("type") or "").strip().lower()
             if action_type == "image_generation":
+                # A model/tool-selected image action must use the same central
+                # entitlement gate as a directly classified image request.
+                _, entitlement_error = check_entitlement(
+                    authorization,
+                    hub="smart_ai",
+                    feature="image_generation",
+                )
+                if entitlement_error is not None:
+                    return entitlement_error
                 return _image_response(
                     message, image_options, session_id, session, request_id, base_url
                 )
