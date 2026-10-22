@@ -123,11 +123,21 @@ def check_entitlement(
             status_code=503,
         )
     if payload.get("allowed") is not True:
+        feature_labels = {
+            "image_generation": "image generation",
+            "document_analysis": "document analysis",
+            "voice_generation": "voice generation",
+            "long_memory": "persistent memory",
+            "vision_analysis": "Live Vision analysis",
+            "automation": "advanced AI tools",
+        }
+        hub_label = "RevelaAI" if hub == "smart_ai" else hub.replace("_", " ").title()
+        feature_label = feature_labels.get(feature, "this premium capability")
         return None, JSONResponse(
             {
                 "status": "error",
                 "code": "premium_entitlement_required",
-                "message": "Start your one-time 30-day RevelaAI trial or subscribe to enable image generation.",
+                "message": f"Start your one-time 30-day {hub_label} trial or subscribe to enable {feature_label}.",
                 "entitlement": {
                     "hub": hub,
                     "feature": feature,
