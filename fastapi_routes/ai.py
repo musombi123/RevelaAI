@@ -235,6 +235,7 @@ def _ai_sync(
                     authorization,
                     hub="smart_ai",
                     feature="long_memory",
+                    timeout_seconds=1.0,
                 )
                 if memory_entitlement_error is not None:
                     memory_user_oid = None
