@@ -123,3 +123,29 @@ def test_stream_endpoint_gates_matched_usect_tool_before_process_message(monkeyp
 
     assert response.status_code == 402
     assert response.json()["code"] == "premium_entitlement_required"
+
+
+def test_direct_core_mesh_tool_execution_requires_smart_ai_automation(monkeypatch):
+    from fastapi_routes import core_mesh as core_mesh_routes
+    from starlette.requests import Request
+
+    denied = _denied()
+    monkeypatch.setattr(
+        core_mesh_routes,
+        "check_entitlement",
+        lambda *args, **kwargs: (None, denied),
+    )
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/core-mesh/tools/execute",
+        "headers": [(b"authorization", b"Bearer signed-test-token")],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 12345),
+        "scheme": "http",
+    }
+    request = Request(scope)
+    result = core_mesh_routes._smart_ai_automation_entitlement_error(request)
+    assert isinstance(result, JSONResponse)
+    assert result.status_code == 402
