@@ -21,6 +21,7 @@ from automation_fabric.policy import (
 )
 from automation_fabric.registry import tool_catalog
 from fastapi_routes.auth import authenticate_identity
+from services.revenue_entitlements import check_entitlement
 
 router = APIRouter(prefix="/api/automation-fabric", tags=["Automation Fabric"])
 logger = logging.getLogger("revelaai.fastapi.automation_fabric")
@@ -61,6 +62,16 @@ def _principal(headers: Mapping[str, str]):
     if error:
         return None, error
     return "user:" + str(user_id), None
+
+
+def _automation_entitlement(headers: Mapping[str, str]):
+    """Gate stateful hosted automation behind the caller's Smart AI entitlement."""
+    _payload, error = check_entitlement(
+        headers.get("authorization", ""),
+        hub="smart_ai",
+        feature="automation",
+    )
+    return error
 
 
 def _json_error(code: str, status_code: int, message: str | None = None):
@@ -192,6 +203,9 @@ def _plan(headers: Mapping[str, str], body: dict[str, Any]):
     principal, error = _principal(headers)
     if error:
         return error
+    entitlement_error = _automation_entitlement(headers)
+    if entitlement_error is not None:
+        return entitlement_error
     try:
         result = create_plan(
             principal,
@@ -224,6 +238,9 @@ def _execute(headers: Mapping[str, str], body: dict[str, Any]):
     principal, error = _principal(headers)
     if error:
         return error
+    entitlement_error = _automation_entitlement(headers)
+    if entitlement_error is not None:
+        return entitlement_error
     plan_id = body.get("plan_id")
     plan_hash = body.get("plan_hash")
     if not isinstance(plan_id, str) or not isinstance(plan_hash, str):
