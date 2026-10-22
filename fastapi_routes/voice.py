@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from ai.ai_client import generate_hf_speech, transcribe_hf_audio
 from ai.intent_router import classify_intent
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
+from services.revenue_entitlements import check_entitlement
 from services.ai_service import detect_capability, process_message
 from services.audio_utils import audio_extension_for_mime
 from services.conversation_store import save_image_conversation
@@ -84,7 +85,18 @@ def _voice_sync(
     subject: str | None,
     session_id: str,
     request_base_url: str,
+    authorization: str = "",
 ):
+    # Voice transcription/synthesis invokes separate provider work, so the
+    # voice capability uses the same trial/subscription entitlement as AI chat.
+    _, entitlement_error = check_entitlement(
+        authorization,
+        hub="smart_ai",
+        feature="voice_generation",
+    )
+    if entitlement_error is not None:
+        return entitlement_error
+
     cleanup_generated_files()
 
     if not audio_bytes:
@@ -109,6 +121,13 @@ def _voice_sync(
     intent = classify_intent(heard)
     capability = detect_capability(heard, intent=intent)
     if capability == "image_generation":
+        _, image_entitlement_error = check_entitlement(
+            authorization,
+            hub="smart_ai",
+            feature="image_generation",
+        )
+        if image_entitlement_error is not None:
+            return image_entitlement_error
         intent = "image_generation"
         try:
             asset = generate_image_asset(heard, request_base_url=request_base_url)
@@ -172,6 +191,13 @@ def _voice_sync(
         action = ai_result.get("action") if isinstance(ai_result.get("action"), dict) else {}
         action_type = str(action.get("type") or "").strip().lower()
         if action_type == "image_generation":
+            _, image_entitlement_error = check_entitlement(
+                authorization,
+                hub="smart_ai",
+                feature="image_generation",
+            )
+            if image_entitlement_error is not None:
+                return image_entitlement_error
             try:
                 asset = generate_image_asset(heard, request_base_url=request_base_url)
                 save_image_conversation(session_id, session, heard, success=True)
@@ -351,6 +377,7 @@ async def voice(request: Request):
             subject,
             session_id,
             str(request.base_url),
+            request.headers.get("Authorization", ""),
         )
     finally:
         try:
