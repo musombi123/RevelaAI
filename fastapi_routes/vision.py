@@ -24,6 +24,7 @@ from ai.ai_client import (
     get_gemini_headers,
 )
 from fastapi_routes.auth import authenticate_identity
+from services.revenue_entitlements import check_entitlement
 
 router = APIRouter(prefix="/api/vision", tags=["Vision"])
 logger = logging.getLogger("revelaai.vision")
@@ -98,6 +99,14 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     )
     if auth_error:
         return auth_error
+
+    _, entitlement_error = check_entitlement(
+        headers.get("authorization", ""),
+        hub="smart_ai",
+        feature="vision_analysis",
+    )
+    if entitlement_error is not None:
+        return entitlement_error
 
     requested_user = str(payload.get("userId") or payload.get("user_id") or "").strip()
     if requested_user and requested_user != str(user_id):
