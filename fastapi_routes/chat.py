@@ -94,6 +94,7 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
         headers.get("authorization", ""),
         hub="smart_ai",
         feature="long_memory",
+        timeout_seconds=1.0,
     )
     if memory_entitlement_error is not None:
         # Keep text responses available even if trial/memory billing is inactive.
