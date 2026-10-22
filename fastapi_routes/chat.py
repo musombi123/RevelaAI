@@ -24,6 +24,8 @@ logger = logging.getLogger("revelaai.chat")
 
 
 def _load_personalization_context(user_oid) -> dict | None:
+    if not user_oid:
+        return None
     try:
         document = memories().find_one({"userId": user_oid}, {"bestThings": 1})
         facts = document.get("bestThings", {}) if document else {}
@@ -63,6 +65,8 @@ def _record_brain_outcome(
 
 
 def _persist_turn(user_oid, session_id: str, hub: str, message: str, reply: str) -> None:
+    if not user_oid:
+        return
     try:
         result = _record_messages(
             user_oid=user_oid, session_id=session_id, hub=hub or "general",
