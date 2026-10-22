@@ -12,6 +12,7 @@ from pymongo import DESCENDING
 from starlette.concurrency import run_in_threadpool
 
 from fastapi_routes.auth import authenticate_identity
+from services.revenue_entitlements import check_entitlement
 from services.memory_store import (
     _json_safe,
     _now,
@@ -28,12 +29,25 @@ logger = logging.getLogger("revelaai.fastapi.memory")
 
 
 def _authenticate(headers: Mapping[str, str], payload: dict[str, Any] | None = None, path_user_id: str = ""):
-    return authenticate_identity(
+    identity, user_id, auth_error = authenticate_identity(
         headers.get("authorization", ""),
         headers,
         payload or {},
         path_user_id=path_user_id,
     )
+    if auth_error:
+        return None, None, auth_error
+
+    # Dedicated persistent memory/history/idea endpoints are the paid long-memory
+    # capability. Core conversational replies remain usable on the free tier.
+    _, entitlement_error = check_entitlement(
+        headers.get("authorization", ""),
+        hub="smart_ai",
+        feature="long_memory",
+    )
+    if entitlement_error is not None:
+        return None, None, entitlement_error
+    return identity, user_id, None
 
 
 def _memory_chat(headers: Mapping[str, str], payload: dict[str, Any]):
