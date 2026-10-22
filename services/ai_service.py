@@ -1095,6 +1095,7 @@ def process_message(
     user_id: str | None = None,
     country: str = "KE",
     language: str = "",
+    allow_genesis_tools: bool = True,
 ) -> dict:
     """
     Execute the RevelaAI intelligence pipeline.
@@ -1988,11 +1989,21 @@ def process_message(
     # A native model function call is only a request. Re-check authorization,
     # exact signed-registry identity and risk tier before any remote invocation.
     if isinstance(result.get("tool_calls"), list) and result.get("tool_calls"):
-        genesis_tool_execution = _execute_genesis_function_calls(
-            result.get("tool_calls"),
-            genesis_active_tools,
-            user_id,
-        )
+        if allow_genesis_tools:
+            genesis_tool_execution = _execute_genesis_function_calls(
+                result.get("tool_calls"),
+                genesis_active_tools,
+                user_id,
+            )
+        else:
+            genesis_tool_execution = {
+                "source": "gemini_native_function_call",
+                "status": "blocked",
+                "reason": "premium_entitlement_required",
+                "executed": False,
+                "automatic_merge": False,
+                "candidate_source_execution": False,
+            }
         result.pop("tool_calls", None)
         tool_name = str(genesis_tool_execution.get("tool") or "requested tool")
         dispatch_status = str(genesis_tool_execution.get("status") or "blocked")
