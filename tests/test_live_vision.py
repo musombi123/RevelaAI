@@ -168,3 +168,30 @@ def test_vision_reports_provider_quota_errors(client, monkeypatch, valid_image_p
     response = client.post("/api/vision/analyze", json=valid_image_payload)
     assert response.status_code == 503
     assert response.json()["code"] == "vision_rate_limited"
+
+
+def test_vision_rejects_without_entitlement_before_gemini_call(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "authenticate_identity", _authenticate_as("verified-user"))
+    monkeypatch.setattr(
+        vision_routes,
+        "check_entitlement",
+        lambda *args, **kwargs: (
+            None,
+            JSONResponse(
+                {"status": "error", "code": "premium_entitlement_required"},
+                status_code=402,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        vision_routes.requests,
+        "post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Gemini must not be called when entitlement is denied")
+        ),
+    )
+
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert response.status_code == 402
+    assert response.json()["code"] == "premium_entitlement_required"
