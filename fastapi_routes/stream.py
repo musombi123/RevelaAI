@@ -12,6 +12,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ai.intent_router import classify_intent
+from ai.usect_zero_tools import select_tool_for_message
+from ai.core_mesh import core_mesh_operator_allowed
 from ai.json_utils import error_response
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
 from services.revenue_entitlements import check_entitlement
@@ -152,6 +154,24 @@ async def ai_stream(request: Request):
         session, raw_client_context
     )
     intent = classify_intent(message)
+    if select_tool_for_message(message, intent=intent):
+        _, tool_entitlement_error = check_entitlement(
+            request.headers.get("Authorization", ""),
+            hub="smart_ai",
+            feature="automation",
+        )
+        if tool_entitlement_error is not None:
+            return tool_entitlement_error
+
+    allow_genesis_tools = True
+    if subject and core_mesh_operator_allowed(subject):
+        _, genesis_entitlement_error = check_entitlement(
+            request.headers.get("Authorization", ""),
+            hub="smart_ai",
+            feature="automation",
+        )
+        allow_genesis_tools = genesis_entitlement_error is None
+
     capability = detect_capability(message, intent=intent)
     image_request = capability == "image_generation"
     if image_request:
@@ -217,6 +237,7 @@ async def ai_stream(request: Request):
                 intent=intent,
                 session_id=session_id,
                 user_id=subject,
+                allow_genesis_tools=allow_genesis_tools,
             )
             if not isinstance(ai_result, dict):
                 ai_result = {}
