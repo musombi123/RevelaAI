@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from ai.intent_router import classify_intent
+from ai.usect_zero_tools import select_tool_for_message
+from ai.core_mesh import core_mesh_operator_allowed
 from ai.global_brain_adapter import build_global_context
 from ai.hub_prompts import HUB_LABELS, get_identity_answer
 from revelai.core.agi_manifest import get_self_description_answer
@@ -123,6 +125,24 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     session_id = str(payload.get("sessionId") or payload.get("conversationId") or "default")[:128]
     requested_hub = payload.get("hub") or payload.get("domain") or "auto"
     intent = classify_intent(message)
+    if select_tool_for_message(message, intent=intent):
+        _, tool_entitlement_error = check_entitlement(
+            headers.get("authorization", ""),
+            hub="smart_ai",
+            feature="automation",
+        )
+        if tool_entitlement_error is not None:
+            return tool_entitlement_error
+
+    allow_genesis_tools = True
+    if user_id and core_mesh_operator_allowed(user_id):
+        _, genesis_entitlement_error = check_entitlement(
+            headers.get("authorization", ""),
+            hub="smart_ai",
+            feature="automation",
+        )
+        allow_genesis_tools = genesis_entitlement_error is None
+
     brain_context, interaction = build_global_context(
         message=message, hub=requested_hub, payload=payload
     )
@@ -148,6 +168,7 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
         } if direct_reply else process_message(
             message=message, context=context[-12:], intent=intent,
             session_id=session_id, user_id=user_id,
+            allow_genesis_tools=allow_genesis_tools,
         ))
         if result.get("action_required"):
             return JSONResponse({
