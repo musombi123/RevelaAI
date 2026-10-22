@@ -230,6 +230,15 @@ def _ai_sync(
             if auth_error or verified_id != user_id:
                 memory_user_oid = None
                 logger.info("Smart memory identity verification unavailable; AI continues without saved memory")
+            else:
+                _, memory_entitlement_error = check_entitlement(
+                    authorization,
+                    hub="smart_ai",
+                    feature="long_memory",
+                )
+                if memory_entitlement_error is not None:
+                    memory_user_oid = None
+                    logger.info("Long-term memory entitlement is unavailable; AI continues without saved memory")
         except Exception:
             memory_user_oid = None
             logger.warning("Smart memory identity verification failed; continuing without saved memory", exc_info=True)
