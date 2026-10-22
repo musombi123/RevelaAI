@@ -24,6 +24,7 @@ def check_entitlement(
     *,
     hub: str,
     feature: str,
+    timeout_seconds: float = _TIMEOUT_SECONDS,
 ) -> tuple[dict | None, JSONResponse | None]:
     """Return a verified central entitlement or a safe HTTP error response."""
     token = str(authorization or "").strip()
@@ -64,7 +65,7 @@ def check_entitlement(
             f"{base}/api/revenue/entitlements",
             params={"hub": hub, "feature": feature},
             headers={"Authorization": token, "Accept": "application/json"},
-            timeout=_TIMEOUT_SECONDS,
+            timeout=max(0.25, min(15.0, float(timeout_seconds))),
             allow_redirects=False,
             proxies={"http": "", "https": ""},
         )
