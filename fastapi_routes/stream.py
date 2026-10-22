@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ai.intent_router import classify_intent
 from ai.json_utils import error_response
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
+from services.revenue_entitlements import check_entitlement
 from services.ai_service import detect_capability, process_message
 from services.image_service import generate_image_asset, parse_image_options
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
@@ -159,6 +160,14 @@ async def ai_stream(request: Request):
     base_url = str(request.base_url)
 
     if image_request:
+        _, entitlement_error = check_entitlement(
+            request.headers.get("Authorization", ""),
+            hub="smart_ai",
+            feature="image_generation",
+        )
+        if entitlement_error is not None:
+            return entitlement_error
+
         def generate_image_stream() -> Iterator[str]:
             try:
                 asset = generate_image_asset(
@@ -215,6 +224,22 @@ async def ai_stream(request: Request):
                 action = ai_result.get("action") if isinstance(ai_result.get("action"), dict) else {}
                 action_type = str(action.get("type") or "").strip().lower()
                 if action_type == "image_generation":
+                    _, entitlement_error = check_entitlement(
+                        dict((str(k).lower(), str(v)) for k, v in headers.items()).get("authorization", ""),
+                        hub="smart_ai",
+                        feature="image_generation",
+                    )
+                    if entitlement_error is not None:
+                        try:
+                            denied_payload = json.loads(entitlement_error.body.decode("utf-8"))
+                        except Exception:
+                            denied_payload = {
+                                "success": False,
+                                "code": "premium_entitlement_required",
+                                "message": "Image generation requires an active Smart AI trial or subscription.",
+                            }
+                        yield _sse("error", denied_payload)
+                        return
                     asset = generate_image_asset(
                         message,
                         image_options=image_options,
