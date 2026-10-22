@@ -26,6 +26,7 @@ from ai.json_utils import enforce_base_schema, error_response, extract_json
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET, authenticate_identity
 from revelai.core.agi_manifest import get_self_description_answer
 from services.ai_service import detect_capability, process_message
+from services.revenue_entitlements import check_entitlement
 from services.conversation_store import save_image_conversation
 from services.document_service import process_uploaded_document
 from services.expert_law import analyze_legal_query
@@ -308,6 +309,16 @@ def _ai_sync(
         session["topic"] = intent
 
         if image_request:
+            # Generation costs provider credits. Entitlements are checked against
+            # RevelaCode's central service; outages fail closed for this premium
+            # capability without breaking free text chat.
+            _, entitlement_error = check_entitlement(
+                authorization,
+                hub="smart_ai",
+                feature="image_generation",
+            )
+            if entitlement_error is not None:
+                return entitlement_error
             return _image_response(
                 message, image_options, session_id, session, request_id, base_url
             )
