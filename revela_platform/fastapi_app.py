@@ -1409,7 +1409,7 @@ def usect_orchestrator_run(
     session: Session = Depends(get_db),
     license_key: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict[str, Any]:
-    """Run the Zero → One → Two proposal pipeline in order, continuing with explicit per-step failures."""
+    """Run the ordered proposal pipeline for a demand, with an optional owned registry target."""
     claims, license_record = _active_license(session, license_key or "", user_id, country=_country(body.country))
     demand_digest = hashlib.sha256(body.demand.encode("utf-8")).hexdigest()
     target_id = body.tool_id.strip() if body.tool_id else "demand-" + demand_digest[:16]
@@ -1433,7 +1433,7 @@ def usect_orchestrator_run(
     }
     steps.append({"core": "USECT-ZERO", "operation": "recovery_proposal",
                   "status": recovery.get("status", "unknown"), "result": recovery,
-                  "tool_id": body.tool_id, "reported_error_sha256": error_sha256,
+                  "tool_id": target_id, "target_exists_in_registry": target_exists, "reported_error_sha256": error_sha256,
                   "automatic_repair": False})
 
     # ONE: queue the free-text demand. This does not mean a tool was born yet.
