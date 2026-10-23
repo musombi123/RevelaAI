@@ -180,6 +180,7 @@ def _voice_sync(
             intent=intent,
             session_id=session_id,
             user_id=subject,
+            authorization=authorization,
         )
     except Exception:
         logger.exception("Voice AI processing failed")
