@@ -74,4 +74,3 @@ def test_voice_forwards_authorization_to_guarded_operator_dispatch(monkeypatch):
     assert captured["user_id"] == "verified-user"
     assert result["status"] == "success"
     assert result["response"] == "Read-only architecture scan request received."
-
