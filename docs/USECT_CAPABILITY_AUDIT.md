@@ -1,6 +1,6 @@
 # USECT Capability Coverage Audit
 
-**Scope:** repository-level implementation and route/test evidence, based on the checked-in code.  
+**Scope:** repository-level implementation and route/test evidence, based on the checked-in code.
 **Status:** changes in this branch are not production-effective until PR #96 is merged and Render deploys the Blueprint in render.yaml. The RevelaCode-Backend Elimu compatibility work is in a separate PR.
 
 This document separates a capability that has code and routes from one that has been verified live. Neither a route nor a passing unit test proves its production credentials, private-service reachability, supplier pricing, hardware safety, or regulatory conformity.
