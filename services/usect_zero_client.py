@@ -18,8 +18,7 @@ from services.core_config import core_base_url, core_admin_token
 
 MAX_REQUEST_BYTES = 1 * 1024 * 1024
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
-DEFAULT_TIMEOUT_SECONDS = 5
-_ENABLED_VALUES = frozenset({"1", "true", "yes", "on"})
+DEFAULT_TIMEOUT_SECONDS = 10
 
 
 class USECTZeroError(RuntimeError):
@@ -57,38 +56,23 @@ class CoreReply:
 
 
 def is_enabled() -> bool:
-    """Fail closed unless USECT-ZERO is explicitly enabled."""
-    return os.getenv("USECT_ZERO_ENABLED", "false").strip().lower() in _ENABLED_VALUES
+    """Compatibility shim: USECT-ZERO is code-enabled; readiness is determined by a real request."""
+    return True
 
 
 def _timeout_seconds() -> int:
-    raw = os.getenv("USECT_ZERO_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS))
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_TIMEOUT_SECONDS
-    return min(max(value, 1), 15)
+    """Use the fixed connect/read timeout so deployments need no timeout variable."""
+    return DEFAULT_TIMEOUT_SECONDS
 
 
 def _configured_base_url() -> str:
-    """Resolve the canonical URL and its legacy alias without a production localhost fallback."""
-    primary = os.getenv("USECT_ZERO_URL", "").strip()
-    alias = os.getenv("USECT_ZERO_BASE_URL", "").strip()
-    raw = primary or alias
+    """Resolve the service address supplied automatically by the Render Blueprint."""
+    raw = core_base_url("zero")
     if not raw:
-        # A loopback default is convenient for local development only. Render
-        # and other production deployments must configure an explicit service URL.
-        production = (
-            any(os.getenv(name, "").strip() for name in (
-                "RENDER_SERVICE_ID", "RENDER_EXTERNAL_URL", "K_SERVICE", "DYNO"
-            ))
-            or os.getenv("RENDER", "").strip().lower() in _ENABLED_VALUES
+        raise USECTZeroConfigurationError(
+            "The USECT-ZERO service address is not linked. Sync the RevelaAI Render Blueprint "
+            "so it can connect to usect-zero-core automatically."
         )
-        if production:
-            raise USECTZeroConfigurationError(
-                "Set USECT_ZERO_URL or USECT_ZERO_BASE_URL for the deployed USECT-ZERO service."
-            )
-        raw = "http://127.0.0.1:8780"
     return raw
 
 
