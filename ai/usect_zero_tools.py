@@ -417,12 +417,12 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
         })
         return result
 
-    api_key = os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
+    api_key = os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
     if not api_key:
         result.update({
             "status": "unavailable",
-            "error_code": "usect_zero_brain_key_missing",
-            "message": "The dedicated scoped brain API key is not configured on the server.",
+            "error_code": "usect_zero_brain_token_missing",
+            "message": "The generated USECT-ZERO brain credential is not linked to RevelaAI. Sync the Render Blueprint.",
         })
         return result
 
