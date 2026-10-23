@@ -169,6 +169,7 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
             message=message, context=context[-12:], intent=intent,
             session_id=session_id, user_id=user_id,
             allow_genesis_tools=allow_genesis_tools,
+            authorization=headers.get("authorization", ""),
         ))
         if result.get("action_required"):
             return JSONResponse({
@@ -208,6 +209,8 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
                     "fallback": False,
                     "interactionTone": interaction["interactionTone"],
                     "capabilities": interaction["capabilities"],
+                    "operator_tool": result.get("operator_tool"),
+                    "tool_execution": result.get("tool_execution"),
                 },
             })
         logger.warning("Provider pipeline returned no usable answer; switching to local fallback")
