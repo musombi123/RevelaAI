@@ -593,6 +593,12 @@ async def core_mesh_dashboard_api(request: Request, refresh: str = ""):
 
 @router.post("/api/core-mesh/genesis/invent")
 async def core_mesh_genesis_invent_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
     entitlement_error = _smart_ai_automation_entitlement_error(request)
     if entitlement_error is not None:
         return entitlement_error
@@ -605,6 +611,12 @@ async def core_mesh_genesis_invent_api(request: Request):
 
 @router.post("/api/core-mesh/mind/evolve")
 async def core_mesh_mind_evolve_api(request: Request):
+    user_id = _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
     entitlement_error = _smart_ai_automation_entitlement_error(request)
     if entitlement_error is not None:
         return entitlement_error
@@ -617,16 +629,15 @@ async def core_mesh_mind_evolve_api(request: Request):
 
 @router.post("/api/core-mesh/mind/candidates")
 async def core_mesh_mind_candidates_api(request: Request):
-    entitlement_error = _smart_ai_automation_entitlement_error(request)
-    if entitlement_error is not None:
-        return entitlement_error
-
     user_id = _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
     if operator_error:
         return operator_error
+    entitlement_error = _smart_ai_automation_entitlement_error(request)
+    if entitlement_error is not None:
+        return entitlement_error
 
     raw = bytearray()
     async for chunk in request.stream():
@@ -769,16 +780,15 @@ async def core_mesh_tool_registry_api(request: Request):
 
 @router.post("/api/core-mesh/tools/execute")
 async def core_mesh_tool_execute_api(request: Request):
-    entitlement_error = _smart_ai_automation_entitlement_error(request)
-    if entitlement_error is not None:
-        return entitlement_error
-
     user_id = _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
     if operator_error:
         return operator_error
+    entitlement_error = _smart_ai_automation_entitlement_error(request)
+    if entitlement_error is not None:
+        return entitlement_error
     body = await _body_or_none(request)
     if not isinstance(body, dict):
         return JSONResponse(

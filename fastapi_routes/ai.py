@@ -398,6 +398,7 @@ def _ai_sync(
                 country=str(brain_payload.get("country") or "KE"),
                 language=str(brain_payload.get("language") or ""),
                 allow_genesis_tools=allow_genesis_tools,
+                authorization=authorization,
             )
 
         if not isinstance(ai_result, dict):
@@ -553,6 +554,20 @@ def _ai_sync(
             "ecosystem": orchestrator_data.get("ecosystem", {}),
             "multimodal": attachment_metadata or orchestrator_data.get("multimodal", {}),
             "usect_zero_tool": _safe_tool_metadata(ai_result),
+            "operator_tool": (
+                {
+                    "tool": str(ai_result["operator_tool"].get("tool") or "")[:60],
+                    "operation": str(ai_result["operator_tool"].get("operation") or "")[:80],
+                    "status": str(ai_result["operator_tool"].get("status") or "")[:40],
+                    "invoked": ai_result["operator_tool"].get("invoked") is True,
+                    "executed": ai_result["operator_tool"].get("executed") is True,
+                    "proposal_created": ai_result["operator_tool"].get("proposal_created") is True,
+                    "http_status": ai_result["operator_tool"].get("http_status"),
+                    "code": str(ai_result["operator_tool"].get("code") or "")[:80] or None,
+                    "safety": ai_result["operator_tool"].get("safety", {}),
+                }
+                if isinstance(ai_result.get("operator_tool"), dict) else None
+            ),
             "core_mesh": core_mesh,
             "build_id": REVELAAI_BUILD_ID,
         }
