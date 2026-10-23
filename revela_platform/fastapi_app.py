@@ -43,6 +43,7 @@ from core_foundry.attestation import AttestationError, sign_approved_manifest
 from core_seed.seed_runner import SeedError, SeedRunner
 from core_uncopyable.dna_vault_guard import DnaVaultError, sign_tool_watermark, verify_tool_watermark
 from core_uncopyable.license_lock import require_enterprise_claims
+from core_uncopyable.rvx_evolver import evolve_dialect, verify_dialect
 from core_auditor.ledger import AuditLedger, AuditLedgerError
 from core_auditor.compliance_reports import (
     DRAFT_WARNING,
@@ -1576,8 +1577,45 @@ def _perform_daily_twin_scan() -> dict[str, Any]:
     }
 
 
+def _ensure_current_rvx_dialect() -> dict[str, Any]:
+    """Ensure the encrypted dialect is valid for the current UTC day without logging key paths."""
+    try:
+        status = verify_dialect()
+        if status.get("valid") is True:
+            return {
+                "status": "current",
+                "day": status.get("day"),
+                "dialect_version": status.get("dialect_version"),
+            }
+        artifact = evolve_dialect(reason="scheduled_rotation")
+        outcome = {
+            "status": "rotated",
+            "day": artifact.get("day"),
+            "dialect_version": artifact.get("dialect_version"),
+            "artifact_sha256": artifact.get("artifact_sha256"),
+        }
+        try:
+            AuditLedger().append(
+                actor_user_id="system:scheduler",
+                action="usect.uncopyable.daily_dialect_rotation",
+                object_id=str(artifact.get("dialect_version") or "rvx-dialect"),
+                detail={
+                    "day": artifact.get("day"),
+                    "dialect_version": artifact.get("dialect_version"),
+                    "artifact_sha256": artifact.get("artifact_sha256"),
+                    "reason": "scheduled_rotation",
+                },
+            )
+        except AuditLedgerError:
+            logger.warning("RVX dialect rotated, but the hash-chain audit record could not be appended.")
+        return outcome
+    except Exception:
+        logger.warning("RVX daily dialect is unavailable; owner recipe/master-key verification is required.")
+        return {"status": "unavailable", "reason": "owner_recipe_or_master_key_unavailable"}
+
+
 async def _daily_twin_scan_loop() -> None:
-    """Run a persisted read-only catalog scan each day at 02:17 UTC."""
+    """Run twin detection and make sure the encrypted RVX dialect is current each day at 02:17 UTC."""
     while True:
         due_at = _next_daily_twin_scan()
         await asyncio.sleep(max(1.0, (due_at - datetime.now(timezone.utc)).total_seconds()))
@@ -1587,11 +1625,21 @@ async def _daily_twin_scan_loop() -> None:
             raise
         except Exception:
             logger.exception("Scheduled USECT-EVOLVE twin scan failed; no evolution was attempted.")
+        try:
+            await asyncio.to_thread(_ensure_current_rvx_dialect)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Scheduled RVX dialect check failed; no key material was logged.")
 
 
 @app.on_event("startup")
 async def _start_daily_twin_scan_scheduler() -> None:
     global _DAILY_TWIN_SCAN_TASK
+    # Reconcile the encrypted dialect at boot so a service starting after UTC
+    # midnight does not serve yesterday's dialect. Missing owner keys stay
+    # an explicit unavailable state; startup is never silently "fixed" with a fake key.
+    await asyncio.to_thread(_ensure_current_rvx_dialect)
     if _DAILY_TWIN_SCAN_TASK is None or _DAILY_TWIN_SCAN_TASK.done():
         _DAILY_TWIN_SCAN_TASK = asyncio.create_task(_daily_twin_scan_loop())
 
