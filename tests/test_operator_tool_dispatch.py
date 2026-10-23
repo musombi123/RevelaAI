@@ -65,6 +65,42 @@ class OperatorToolDispatchTests(unittest.TestCase):
         self.assertTrue(result["operator_tool"]["executed"])
         self.assertFalse(result["operator_tool"]["safety"]["target_mutation_performed"])
 
+    @patch("fastapi_routes.core_mesh._proposal")
+    def test_genesis_proposal_uses_guarded_core_mesh_operator_route(self, proposal):
+        proposal.return_value = JSONResponse(
+            {"status": "success", "data": {"proposal_id": "genesis-123"}},
+            status_code=202,
+        )
+        result = dispatch_operator_tool(
+            "Create a safe, reviewable tool through Genesis (Core One) for ecosystem monitoring",
+            authorization="Bearer authenticated-operator-token",
+        )
+        proposal.assert_called_once()
+        args, kwargs = proposal.call_args
+        self.assertEqual(args[0], "Bearer authenticated-operator-token")
+        self.assertEqual(args[2], "genesis")
+        self.assertEqual(result["operator_tool"]["status"], "proposal_created")
+        self.assertFalse(result["operator_tool"]["executed"])
+        self.assertTrue(result["operator_tool"]["proposal_created"])
+        self.assertIn("no tool was activated", result["response"])
+
+    @patch("fastapi_routes.core_mesh._proposal")
+    def test_infinite_mind_proposal_stays_approval_gated(self, proposal):
+        proposal.return_value = JSONResponse(
+            {"status": "success", "data": {"proposal_id": "mind-123"}},
+            status_code=202,
+        )
+        result = dispatch_operator_tool(
+            "Propose one evidence-gated improvement through Infinite Mind (Core Two) for ecosystem monitoring",
+            authorization="Bearer authenticated-operator-token",
+        )
+        proposal.assert_called_once()
+        self.assertEqual(proposal.call_args.args[2], "mind")
+        self.assertEqual(result["operator_tool"]["tool"], "infinite-mind")
+        self.assertEqual(result["operator_tool"]["status"], "proposal_created")
+        self.assertFalse(result["operator_tool"]["executed"])
+        self.assertTrue(result["operator_tool"]["safety"]["human_approval_required"])
+
     @patch("fastapi_routes.admin_auth.require_platform_admin")
     @patch("ai.core_mesh.get_core_mesh_dashboard")
     @patch("ai.usect_zero_tools.execute_tool")
