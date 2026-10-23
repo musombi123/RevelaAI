@@ -160,19 +160,24 @@ def _join(prefix: str, path: str) -> str:
 
 
 def _routes_on_app(app: Any) -> list[Any]:
-    """Unwrap Starlette middleware stacks until the underlying router is reached."""
+    """Unwrap Starlette middleware stacks until a non-empty route collection is reached."""
     current = app
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         routes = getattr(current, "routes", None)
         if routes is not None:
-            return list(routes)
+            materialized = list(routes)
+            if materialized:
+                return materialized
         router = getattr(current, "router", None)
         routes = getattr(router, "routes", None)
         if routes is not None:
-            return list(routes)
-        current = getattr(current, "app", None)
+            materialized = list(routes)
+            if materialized:
+                return materialized
+        next_app = getattr(current, "app", None)
+        current = next_app if next_app is not None else router
     return []
 
 
@@ -221,7 +226,7 @@ def registered_routes(application: Any) -> set[tuple[str, str]]:
             # Recurse whenever the child exposes an actual route collection; normal
             # endpoint callables have none and remain ordinary leaf routes.
             child_routes = _routes_on_app(child) if child is not None else []
-            if child_routes:
+            if child is not None and (isinstance(route, Mount) or child_routes):
                 child_prefix = _join(prefix, path) if path.strip("/") else prefix
                 walk(child, child_prefix)
                 continue
