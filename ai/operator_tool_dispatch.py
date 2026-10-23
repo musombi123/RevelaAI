@@ -228,7 +228,11 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
     try:
         if tool == "ecosystem-guardian":
             payload = _run_guardian_sweep()
-            success = payload.get("status") == "completed"
+            success = int(payload.get("completed_checks") or 0) > 0
+            payload["_execution_status"] = str(payload.get("status") or "partial")
+            payload["_http_status"] = 200
+            payload["_invoked"] = True
+            payload["_executed"] = success
             return _format_result(
                 tool, operation, payload, success=success, proposal=False
             )
@@ -304,6 +308,24 @@ def _format_result(
         if proposal_id:
             response += f"Proposal reference: {str(proposal_id)[:100]}. "
         response += "It remains subject to human review; no production code was changed, deployed, or merged."
+    elif success and tool == "ecosystem-guardian":
+        components = result.get("components") if isinstance(result.get("components"), dict) else {}
+        parts = []
+        for key, label in (
+            ("core_mesh", "Core Mesh"),
+            ("core_zero_diagnostics", "Core Zero diagnostics"),
+            ("sci_defend_scan", "Sci Defend"),
+            ("meta_engineer_scan", "Meta Engineer"),
+        ):
+            item = components.get(key) if isinstance(components.get(key), dict) else {}
+            parts.append(label + ": " + str(item.get("status") or ("checked" if item.get("ok") else "unavailable"))[:32])
+        response = (
+            f"Guardian sweep returned {int(result.get('completed_checks') or 0)}/"
+            f"{int(result.get('total_checks') or 4)} completed checks. "
+            + "; ".join(parts) + ". "
+            + ("All reported cores are reachable. " if result.get("all_cores_reachable") is True else "At least one core or check needs attention. ")
+            + "No repairs, production mutations, candidate execution, deployment, or automatic merge were performed."
+        )
     elif success and tool == "sci-defend" and operation == "shield_scan":
         response = "Sci Defend completed the defensive shield scan. " + summary + " Defensive-only operation; no offensive action was requested."
     elif success and tool == "sci-defend":
