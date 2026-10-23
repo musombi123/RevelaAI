@@ -101,7 +101,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
         "id": "evolve", "name": "USECT-EVOLVE",
         "source_files": ["core_evolve/engine.py", "core_evolve/models.py", "fastapi_routes/evolve_migrate.py"],
         "test_files": ["tests/test_usect_evolve_migrate.py"],
-        "routes": [("GET", "/api/usect/evolve/health"), ("POST", "/api/usect/evolve/proposals"), ("POST", "/api/usect/evolve/proposals/{proposal_id}/evaluate")],
+        "routes": [("GET", "/api/usect/evolve/health"), ("POST", "/api/usect/evolve/proposals"), ("POST", "/api/usect/evolve/proposals/{proposal_id}/evaluate"), ("POST", "/v1/evolve/scan"), ("GET", "/v1/evolve/scans/latest")],
         "safety": "Performance claims require measurements and evidence; evolution remains an isolated human-reviewed proposal.",
     },
     {
