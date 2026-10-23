@@ -10,7 +10,15 @@ _CORE_ENV = {
 
 
 def _production() -> bool:
-    return os.getenv("RENDER", "").strip().lower() == "true" or os.getenv("ENVIRONMENT", "").strip().lower() in {"production", "prod"}
+    """Recognize hosted deployments so local loopback defaults never leak into production."""
+    if os.getenv("RENDER", "").strip().lower() == "true":
+        return True
+    if os.getenv("ENVIRONMENT", "").strip().lower() in {"production", "prod"}:
+        return True
+    return any(
+        os.getenv(name, "").strip()
+        for name in ("RENDER_SERVICE_ID", "RENDER_EXTERNAL_URL", "K_SERVICE", "DYNO")
+    )
 
 
 def core_base_url(core: str, *, default: str = "") -> str:
