@@ -34,12 +34,22 @@ def test_primary_url_takes_precedence_over_alias(monkeypatch):
 
 def test_production_without_url_fails_closed(monkeypatch):
     monkeypatch.setenv("RENDER_SERVICE_ID", "srv-example")
-    with pytest.raises(client.USECTZeroConfigurationError, match="Set USECT_ZERO_URL"):
+    with pytest.raises(client.USECTZeroConfigurationError, match="service address is not linked"):
         client._base_url()
 
 
 def test_local_development_keeps_loopback_default():
     assert client._base_url() == "http://127.0.0.1:8780"
+
+
+def test_timeout_is_fixed_to_ten_seconds_and_ignores_legacy_environment(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_TIMEOUT_SECONDS", "2")
+    assert client._timeout_seconds() == 10
+
+
+def test_legacy_enable_flag_does_not_control_runtime(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
+    assert client.is_enabled() is True
 
 
 def test_admin_token_is_read_from_server_environment(monkeypatch):
@@ -50,7 +60,6 @@ def test_admin_token_is_read_from_server_environment(monkeypatch):
 def test_connection_failure_is_reported_as_zero_unavailable(monkeypatch):
     import requests
 
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setenv("USECT_ZERO_URL", "http://zero.internal:8780")
 
     def fail_request(*args, **kwargs):
@@ -62,7 +71,6 @@ def test_connection_failure_is_reported_as_zero_unavailable(monkeypatch):
 
 
 def test_device_token_is_forwarded_only_in_its_dedicated_header(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setenv("USECT_ZERO_URL", "http://zero.internal:8780")
     captured = {}
 
