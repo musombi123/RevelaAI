@@ -22,7 +22,7 @@ from uuid import uuid4
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -494,7 +494,7 @@ class PublishToolInput(BaseModel):
     industry: str = Field(default="general", min_length=2, max_length=80)
     country_origin: str = Field(default="KE", min_length=2, max_length=2)
     endpoint: str = Field(pattern="^/v1/[a-z0-9][a-z0-9_-]{0,63}$", max_length=120)
-    factory_build_id: str | None = Field(default=None, pattern="^fab_[a-f0-9]{24}$")
+    factory_build_id: str | None = Field(default=None, pattern="^fab_[a-f0-9]{24}$", validation_alias=AliasChoices("factory_build_id", "factory_id"))
     price_usd_cents: int = Field(ge=100, le=100000000)
     bom_by_country: dict[str, Any] = Field(default_factory=dict)
     guides_by_language: dict[str, Any] = Field(default_factory=dict)
@@ -894,6 +894,32 @@ class SeedFactoryInput(BaseModel):
     purchase_id: str | None = Field(default=None, max_length=64)
 
 
+class SeedCreateCompatInput(BaseModel):
+    factory_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    child_name: str | None = Field(default=None, min_length=2, max_length=100)
+    buyer_country: str = Field(default="KE", min_length=2, max_length=2)
+    purchase_id: str | None = Field(default=None, max_length=64)
+
+
+@app.post("/v1/seed/create", status_code=201, tags=["seed"])
+def seed_create_compat(body: SeedCreateCompatInput,
+                       license_key: str | None = Header(default=None, alias="X-Revela-License"),
+                       user_id: str = Depends(authenticated_user),
+                       session: Session = Depends(get_db)) -> dict[str, Any]:
+    """Compatibility contract for POST /v1/seed/create {factory_id}; same guards as seeded builds."""
+    child_name = body.child_name or ("seed-" + hashlib.sha256(
+        (body.factory_id + ":" + user_id).encode("utf-8")
+    ).hexdigest()[:12])
+    result = seed_factory(
+        body.factory_id,
+        SeedFactoryInput(child_name=child_name, buyer_country=body.buyer_country, purchase_id=body.purchase_id),
+        license_key=license_key,
+        user_id=user_id,
+        session=session,
+    )
+    return {"factory_id": body.factory_id, "contract": "/v1/seed/create", **result}
+
+
 @app.post("/v1/seed/{build_id}", status_code=201, tags=["seed"])
 def seed_factory(build_id: str, body: SeedFactoryInput,
                  license_key: str | None = Header(default=None, alias="X-Revela-License"),
@@ -1174,13 +1200,16 @@ class GenesisDemandInput(BaseModel):
 
 
 class ImproveToolInput(BaseModel):
-    objective: str = Field(min_length=8, max_length=500)
+    objective: str = Field(
+        default="Review the existing tool for a measurable, evidence-backed reliability and efficiency improvement.",
+        min_length=8, max_length=500,
+    )
 
 
 class OrchestratorRunInput(BaseModel):
-    demand: str = Field(min_length=8, max_length=3999)
-    tool_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
-    error: str = Field(min_length=1, max_length=3000)
+    demand: str = Field(min_length=1, max_length=3999)
+    tool_id: str | None = Field(default=None, max_length=64, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+    error: str = Field(default="", max_length=3000)
     objective: str = Field(
         default="Assess a safe, evidence-backed improvement while preserving existing safeguards.",
         min_length=8, max_length=500,
@@ -1380,12 +1409,16 @@ def usect_orchestrator_run(
     session: Session = Depends(get_db),
     license_key: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict[str, Any]:
-    """Run the Zero → One → Two proposal pipeline in order, continuing with explicit per-step failures."""
+    """Run the ordered proposal pipeline for a demand, with an optional owned registry target."""
     claims, license_record = _active_license(session, license_key or "", user_id, country=_country(body.country))
+    demand_digest = hashlib.sha256(body.demand.encode("utf-8")).hexdigest()
+    target_id = body.tool_id.strip() if body.tool_id else "demand-" + demand_digest[:16]
+    target_exists = bool(body.tool_id)
     try:
         require_enterprise_claims(claims, "evolve")
         enforce_tool_creation_quota(session, license_record)
-        _require_owned_factory_or_tool(body.tool_id, user_id)
+        if target_exists:
+            _require_owned_factory_or_tool(target_id, user_id)
     except LicenseError as exc:
         raise _license_http_error(exc) from exc
 
@@ -1400,7 +1433,7 @@ def usect_orchestrator_run(
     }
     steps.append({"core": "USECT-ZERO", "operation": "recovery_proposal",
                   "status": recovery.get("status", "unknown"), "result": recovery,
-                  "tool_id": body.tool_id, "reported_error_sha256": error_sha256,
+                  "tool_id": target_id, "target_exists_in_registry": target_exists, "reported_error_sha256": error_sha256,
                   "automatic_repair": False})
 
     # ONE: queue the free-text demand. This does not mean a tool was born yet.
@@ -1420,9 +1453,10 @@ def usect_orchestrator_run(
 
     # TWO: request an improvement proposal for the authenticated user's owned target.
     try:
-        two = propose_mind_evolution(body.objective, body.tool_id)
+        two = propose_mind_evolution(body.objective, target_id)
         steps.append({"core": "USECT-TWO", "operation": "improvement_proposal",
                       "status": two.get("status", "proposal_created"), "result": two,
+                      "tool_id": target_id, "target_exists_in_registry": target_exists,
                       "target_modified": False})
     except CoreMeshError as exc:
         steps.append({"core": "USECT-TWO", "operation": "improvement_proposal",
@@ -1431,7 +1465,7 @@ def usect_orchestrator_run(
 
     complete = all(step.get("status") not in {"unavailable", "error", "blocked"} for step in steps)
     audit_recorded = _persist_usect_event(
-        user_id, "usect.orchestrator.pipeline_proposed", body.tool_id,
+        user_id, "usect.orchestrator.pipeline_proposed", target_id,
         {"demand_sha256": demand_sha256, "error_sha256": error_sha256,
          "step_count": len(steps), "complete": complete,
          "license_id": str(claims.get("jti") or "")},
@@ -1441,6 +1475,8 @@ def usect_orchestrator_run(
         "status": "proposal_pipeline_completed" if complete else "partial",
         "order": ["USECT-ZERO", "USECT-ONE", "USECT-TWO"],
         "steps": steps,
+        "target_tool_id": target_id,
+        "target_exists_in_registry": target_exists,
         "production_merge": False,
         "automatic_execution": False,
         "human_approval_required": True,
@@ -2071,6 +2107,8 @@ def _usect_meter_key(path: str, method: str) -> str | None:
             return "usect-foundry-inspector"
     if path.startswith("/v1/seed/") and method in {"POST", "GET"}:
         return "usect-seed"
+    if path.startswith("/v1/migrate/") and method in {"POST", "GET"}:
+        return "usect-evolve-migrate"
     if path.startswith("/v1/auditor/") or path.startswith("/v1/audit/"):
         return "usect-auditor"
     if path.startswith("/api/usect/evolve/") or path.startswith("/api/usect/migrate/"):

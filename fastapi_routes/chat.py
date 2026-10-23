@@ -19,6 +19,7 @@ from revelai.core.agi_manifest import get_self_description_answer
 from services.ai_service import process_message
 from services.memory_store import _record_messages, memories
 from fastapi_routes.auth import authenticate_identity
+from fastapi_routes.platform_hubs import load_authoritative_user_context
 from services.revenue_entitlements import check_entitlement
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
@@ -151,6 +152,12 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
         interaction.get("hubRequested"), interaction.get("hub"), interaction.get("hubDetected"),
     )
     context = context[-10:] + [brain_context]
+    platform_context = load_authoritative_user_context(
+        headers.get("authorization", ""),
+        message,
+    )
+    if platform_context:
+        context = context[-11:] + [platform_context]
     personalization = _load_personalization_context(user_oid)
     if personalization:
         context = context[-11:] + [personalization]

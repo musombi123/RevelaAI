@@ -14,6 +14,31 @@ services:
       # Keep this server-side; bearer JWTs are never sent to the Go core.
       - key: REVELACODE_BACKEND_URL
         value: "https://revelacode-backend.onrender.com"
+      # Persistent platform data (licenses, factories, billing and usage) needs PostgreSQL.
+      # If unset, the code falls back to local SQLite, which is not durable across ephemeral redeploys.
+      - key: REVELA_DATABASE_URL
+        sync: false
+      # Smart Memory stores in the separate 'revelai' MongoDB database.
+      - key: MONGO_URI
+        sync: false
+      # Must match the shared secret configured in RevelaCode-Backend for user verification.
+      - key: REVELAAI_SERVICE_KEY
+        sync: false
+      # Model-provider secret remains server-side; the API base URL has a safe source default.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-3.8-flash"
+      - key: GEMINI_FALLBACK_MODEL
+        value: "gemini-3.5-flash-lite"
+      # Same license-signing keypair used across all license issuers/verifiers in this platform.
+      - key: REVELA_LICENSE_PRIVATE_KEY
+        sync: false
+      - key: REVELA_LICENSE_PUBLIC_KEY
+        sync: false
+      # Shared within this service for guarded organ/security administration; never expose in the browser.
+      - key: REVELA_ORGAN_ADMIN_TOKEN
+        generateValue: true
       # Must exactly match the JWT signing secret used by RevelaCode-Backend.
       # Keep it server-side; never place this value in Vite/frontend variables.
       - key: JWT_SECRET
@@ -23,7 +48,15 @@ services:
         sync: false
       - key: REVELACODE_ADMIN_VERIFY_TIMEOUT_SECONDS
         value: "15"
+      # Keep the gateway adapter and dashboard/proxy origins identical.
+      - key: USECT_ZERO_ENABLED
+        value: "true"
       - key: USECT_ZERO_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
+      - key: USECT_ZERO_BASE_URL
         fromService:
           type: pserv
           name: usect-zero-core

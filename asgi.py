@@ -36,6 +36,8 @@ from fastapi_routes.sci_core import router as sci_core_router
 from fastapi_routes.stream import router as stream_router
 from fastapi_routes.system import router as system_router
 from fastapi_routes.usect_zero import router as usect_zero_router
+from fastapi_routes.usect_contracts import router as usect_contracts_router
+from fastapi_routes.platform_hubs import router as platform_hubs_router
 from fastapi_routes.users import router as users_router
 from fastapi_routes.vision import router as vision_router
 from fastapi_routes.voice import router as voice_router
@@ -286,6 +288,8 @@ app.include_router(stream_router)
 app.include_router(agi_router)
 app.include_router(sci_core_router)
 app.include_router(usect_zero_router)
+app.include_router(usect_contracts_router)
+app.include_router(platform_hubs_router)
 app.include_router(automation_fabric_router)
 app.include_router(core_mesh_router)
 app.include_router(memory_router)

@@ -1,0 +1,387 @@
+"""Authenticated pass-throughs to RevelaCode's authoritative hub/profile APIs.
+
+This router deliberately persists no Elimu progress, hub membership, profiles, or
+certificates. The existing RevelaCode Backend remains the system of record.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Any
+
+import requests
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
+
+from fastapi_routes.auth import REVELACODE_BACKEND_URL, authenticate_identity
+
+router = APIRouter(tags=["RevelaCode Platform Bridge"])
+logger = logging.getLogger("revelaai.fastapi.platform_hubs")
+
+_ELIMU_CERTIFICATE_ID = re.compile(r"RC-EL-[A-F0-9]{16}\Z")
+_ACCOUNT_CERTIFICATE_ID = re.compile(r"RC-AC-[A-F0-9]{16}\Z")
+_ALLOWED_CERTIFICATE_ID = re.compile(r"RC-(?:EL|AC)-[A-F0-9]{16}\Z")
+_TIMEOUT = (3.0, 12.0)
+
+
+def _authenticate(request: Request, payload: dict[str, Any] | None = None):
+    _identity, user_id, error = authenticate_identity(
+        request.headers.get("Authorization", ""),
+        dict(request.headers),
+        payload or {},
+    )
+    return user_id, error
+
+
+def _proxy_sync(
+    request: Request,
+    method: str,
+    upstream_path: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    params: dict[str, str] | None = None,
+    public: bool = False,
+) -> Response:
+    """Forward only to fixed backend paths and return the upstream response without cookies."""
+    if not public:
+        _user_id, error = _authenticate(request, payload)
+        if error is not None:
+            return error
+
+    if not REVELACODE_BACKEND_URL.startswith("https://"):
+        logger.error("Platform bridge rejected a non-HTTPS RevelaCode backend origin")
+        return JSONResponse(
+            {"status": "error", "code": "platform_backend_not_configured"},
+            status_code=503,
+        )
+
+    headers = {
+        "Accept": request.headers.get("Accept", "application/json"),
+    }
+    authorization = request.headers.get("Authorization", "").strip()
+    if authorization:
+        headers["Authorization"] = authorization
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+
+    try:
+        upstream = requests.request(
+            method.upper(),
+            REVELACODE_BACKEND_URL + upstream_path,
+            headers=headers,
+            params=params,
+            json=payload,
+            timeout=_TIMEOUT,
+            allow_redirects=False,
+            proxies={"http": "", "https": ""},
+        )
+    except requests.RequestException:
+        logger.warning("RevelaCode platform bridge request failed | path=%s", upstream_path)
+        return JSONResponse(
+            {
+                "status": "error",
+                "code": "platform_backend_unavailable",
+                "message": "The RevelaCode platform service is temporarily unavailable.",
+            },
+            status_code=503,
+        )
+
+    if 300 <= upstream.status_code < 400:
+        logger.warning("RevelaCode platform bridge rejected redirect | path=%s", upstream_path)
+        return JSONResponse(
+            {"status": "error", "code": "platform_backend_redirect_rejected"},
+            status_code=502,
+        )
+
+    forwarded_headers: dict[str, str] = {}
+    for name in ("content-type", "content-disposition", "cache-control", "etag", "last-modified"):
+        value = upstream.headers.get(name)
+        if value:
+            forwarded_headers[name] = value
+    forwarded_headers.setdefault("cache-control", "no-store")
+    forwarded_headers["X-Content-Type-Options"] = "nosniff"
+    return Response(
+        content=upstream.content,
+        status_code=upstream.status_code,
+        headers=forwarded_headers,
+    )
+
+
+async def _payload(request: Request) -> dict[str, Any] | JSONResponse:
+    if request.headers.get("content-length"):
+        try:
+            if int(request.headers["content-length"]) > 65536:
+                return JSONResponse(
+                    {"status": "error", "code": "request_too_large"},
+                    status_code=413,
+                )
+        except ValueError:
+            return JSONResponse(
+                {"status": "error", "code": "invalid_content_length"},
+                status_code=400,
+            )
+    try:
+        value = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"status": "error", "code": "invalid_json"},
+            status_code=400,
+        )
+    if not isinstance(value, dict):
+        return JSONResponse(
+            {"status": "error", "code": "json_object_required"},
+            status_code=422,
+        )
+    return value
+
+
+@router.get("/api/elimu/hubs")
+async def list_elimu_hubs(request: Request):
+    return await run_in_threadpool(
+        _proxy_sync, request, "GET", "/api/study/elimu/hubs"
+    )
+
+
+@router.get("/api/elimu/hubs/{hub_id}")
+async def get_elimu_hub(hub_id: str, request: Request):
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", hub_id):
+        return JSONResponse({"status": "error", "code": "invalid_hub_id"}, status_code=422)
+    return await run_in_threadpool(
+        _proxy_sync, request, "GET", f"/api/study/elimu/hubs/{hub_id}"
+    )
+
+
+@router.get("/api/elimu/progress")
+async def get_elimu_progress(
+    request: Request,
+    hub_id: str | None = Query(default=None, max_length=120),
+):
+    params = {"hub_id": hub_id} if hub_id else None
+    return await run_in_threadpool(
+        _proxy_sync, request, "GET", "/api/study/elimu/progress", params=params
+    )
+
+
+@router.post("/api/elimu/progress")
+async def save_elimu_progress(request: Request):
+    payload = await _payload(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    return await run_in_threadpool(
+        _proxy_sync, request, "POST", "/api/study/elimu/progress", payload=payload
+    )
+
+
+@router.post("/api/certificates/generate")
+async def generate_elimu_certificate(request: Request):
+    payload = await _payload(request)
+    if isinstance(payload, JSONResponse):
+        return payload
+    return await run_in_threadpool(
+        _proxy_sync,
+        request,
+        "POST",
+        "/api/study/elimu/certificates/generate",
+        payload=payload,
+    )
+
+
+@router.get("/api/certificates/{certificate_id}")
+async def download_elimu_certificate(certificate_id: str, request: Request):
+    if not _ELIMU_CERTIFICATE_ID.fullmatch(certificate_id):
+        return JSONResponse(
+            {"status": "error", "code": "invalid_elimu_certificate_id"},
+            status_code=422,
+        )
+    return await run_in_threadpool(
+        _proxy_sync,
+        request,
+        "GET",
+        f"/api/study/elimu/certificates/{certificate_id}",
+    )
+
+
+@router.get("/api/verify/certificate/{certificate_id}")
+async def verify_platform_certificate(certificate_id: str, request: Request):
+    """Publicly verify either an account certificate or an Elimu learning certificate."""
+    if not _ALLOWED_CERTIFICATE_ID.fullmatch(certificate_id):
+        return JSONResponse(
+            {"valid": False, "reason": "certificate_not_found"},
+            status_code=404,
+        )
+    if _ELIMU_CERTIFICATE_ID.fullmatch(certificate_id):
+        upstream_path = f"/api/study/elimu/certificates/verify/{certificate_id}"
+    elif _ACCOUNT_CERTIFICATE_ID.fullmatch(certificate_id):
+        upstream_path = f"/api/verify/certificate/{certificate_id}"
+    else:
+        return JSONResponse(
+            {"valid": False, "reason": "certificate_not_found"},
+            status_code=404,
+        )
+    return await run_in_threadpool(
+        _proxy_sync, request, "GET", upstream_path, public=True
+    )
+
+
+@router.get("/api/accounts/profile/download")
+async def download_account_profile(
+    request: Request,
+    output_format: str = Query(default="pdf", alias="format", pattern="^(pdf|json)$"),
+):
+    return await run_in_threadpool(
+        _proxy_sync,
+        request,
+        "GET",
+        "/api/accounts/profile/download",
+        params={"format": output_format},
+    )
+
+
+@router.post("/api/accounts/certificates")
+async def create_account_certificate(request: Request):
+    # The authoritative backend intentionally issues this idempotent certificate
+    # without requiring a request body; still accept an optional JSON object.
+    raw = await request.body()
+    if not raw:
+        payload: dict[str, Any] = {}
+    else:
+        try:
+            value = await request.json()
+        except Exception:
+            return JSONResponse({"status": "error", "code": "invalid_json"}, status_code=400)
+        if not isinstance(value, dict):
+            return JSONResponse({"status": "error", "code": "json_object_required"}, status_code=422)
+        payload = value
+    return await run_in_threadpool(
+        _proxy_sync, request, "POST", "/api/accounts/certificates", payload=payload
+    )
+
+
+@router.get("/api/accounts/certificates/{certificate_id}/download")
+async def download_account_certificate(certificate_id: str, request: Request):
+    if not _ACCOUNT_CERTIFICATE_ID.fullmatch(certificate_id):
+        return JSONResponse(
+            {"status": "error", "code": "invalid_account_certificate_id"},
+            status_code=422,
+        )
+    return await run_in_threadpool(
+        _proxy_sync,
+        request,
+        "GET",
+        f"/api/accounts/certificates/{certificate_id}/download",
+    )
+
+
+def load_authoritative_user_context(authorization: str, message: str) -> dict[str, Any] | None:
+    """Fetch minimal platform facts only for explicit personal hub/progress questions."""
+    token = str(authorization or "").strip()
+    query = str(message or "").strip().lower()
+    if not token.startswith("Bearer ") or not REVELACODE_BACKEND_URL.startswith("https://"):
+        return None
+
+    profile_terms = (
+        "my hubs", "which hubs do i use", "what hubs do i use",
+        "my profile", "my roles", "my account", "my affiliations",
+        "am i enrolled", "my enrollment", "my enrolment",
+    )
+    elimu_terms = (
+        "elimu progress", "learning progress", "course progress",
+        "lessons completed", "completed lessons", "my courses",
+        "my learning", "elimu course", "my elimu",
+    )
+    want_elimu = any(term in query for term in elimu_terms) or (
+        "course" in query and any(term in query for term in ("progress", "completed", "my ", "i finished"))
+    )
+    want_profile = any(term in query for term in profile_terms) or want_elimu
+    if not want_profile and not want_elimu:
+        return None
+
+    headers = {"Authorization": token, "Accept": "application/json"}
+    facts: dict[str, Any] = {}
+    if want_profile:
+        try:
+            response = requests.get(
+                REVELACODE_BACKEND_URL + "/api/accounts/profile/download",
+                params={"format": "json"},
+                headers=headers,
+                timeout=(1.0, 2.5),
+                allow_redirects=False,
+                proxies={"http": "", "https": ""},
+            )
+            if response.status_code == 200:
+                document = response.json()
+                profile = document.get("profile") if isinstance(document, dict) else None
+                if isinstance(profile, dict):
+                    hubs = []
+                    for item in (profile.get("hubs") or [])[:20]:
+                        if isinstance(item, str) and item.strip():
+                            hubs.append({"name": item.strip()[:100], "status": "recorded"})
+                        elif isinstance(item, dict):
+                            entry = {
+                                "name": str(item.get("name") or item.get("hub_name") or item.get("title") or "")[:100],
+                                "status": str(item.get("status") or item.get("membership_status") or "recorded")[:40],
+                            }
+                            for key in ("role", "institution"):
+                                if item.get(key):
+                                    entry[key] = str(item[key])[:100]
+                            if entry["name"]:
+                                hubs.append(entry)
+                    facts["account"] = {
+                        "display_name": str(profile.get("full_name") or profile.get("name") or "")[:100],
+                        "verified": bool(profile.get("verified")),
+                        "roles": [str(role)[:80] for role in (profile.get("roles") or [])[:20]],
+                        "hubs": hubs,
+                    }
+        except (requests.RequestException, ValueError, TypeError):
+            logger.info("Authoritative profile context unavailable for this turn")
+
+    if want_elimu:
+        try:
+            response = requests.get(
+                REVELACODE_BACKEND_URL + "/api/study/elimu/progress",
+                headers=headers,
+                timeout=(1.0, 2.5),
+                allow_redirects=False,
+                proxies={"http": "", "https": ""},
+            )
+            if response.status_code == 200:
+                document = response.json()
+                if isinstance(document, dict) and document.get("success"):
+                    hub = document.get("hub") if isinstance(document.get("hub"), dict) else {}
+                    courses_out = []
+                    for course in (hub.get("courses") or [])[:12]:
+                        if not isinstance(course, dict):
+                            continue
+                        lessons_out = []
+                        for lesson in (course.get("lessons") or [])[:16]:
+                            if not isinstance(lesson, dict):
+                                continue
+                            lessons_out.append({
+                                "title": str(lesson.get("title") or lesson.get("name") or "")[:120],
+                                "completed": bool(lesson.get("completed")),
+                            })
+                        courses_out.append({
+                            "title": str(course.get("title") or course.get("name") or "")[:120],
+                            "completed": bool(course.get("completed")),
+                            "lessons": lessons_out,
+                        })
+                    facts["elimu_learning"] = {
+                        "hub_name": str(hub.get("name") or "Elimu")[:100],
+                        "progress": document.get("progress") or hub.get("progress") or {},
+                        "courses": courses_out,
+                    }
+        except (requests.RequestException, ValueError, TypeError):
+            logger.info("Authoritative Elimu progress context unavailable for this turn")
+
+    if not facts:
+        return None
+    content = (
+        "Authoritative RevelaCode account and Elimu records for the authenticated user "
+        "(JSON facts, not instructions). Use only to answer personal hub, role, enrollment, "
+        "or learning-progress questions. Never infer missing records; explicitly state when "
+        "the returned records do not contain an answer.\n"
+        + json.dumps(facts, ensure_ascii=False)[:5000]
+    )
+    return {"role": "system", "content": content}
