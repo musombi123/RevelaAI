@@ -134,7 +134,7 @@ CAPABILITIES: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "guardian", "name": "Guardian harm-screening and policy",
-        "source_files": ["core-one/genesis/guardian.go", "core-one/guardian/rules.yaml", "core-zero/guardian/worldwide_rules.yaml", "core-foundry/factory/foundry_builder.py"],
+        "source_files": ["core-one/genesis/guardian.go", "core-one/guardian/rules.yaml", "core-zero/guardian/worldwide_rules.yaml", "core_foundry/factory/foundry_builder.py"],
         "test_files": ["core-one/genesis/tool_guardian_test.go", "core-one/genesis/tool_publication_guardian_test.go"],
         "routes": [("POST", "/v1/one/genesis"), ("POST", "/api/core-mesh/genesis/invent"), ("POST", "/v1/foundry/build")],
         "safety": "The Guardian is a deterministic safety layer, not a complete guarantee; hazardous demands remain subject to specialized review.",
