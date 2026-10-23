@@ -247,7 +247,7 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
             result.update({
                 "invoked": False,
                 "executed": False,
-                "http_status": code,
+                "_http_status": code,
             })
             return _format_result(tool, operation, result, success=False, proposal=False)
 
@@ -291,7 +291,7 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
                 entitlement_payload.update({
                     "invoked": False,
                     "executed": False,
-                    "http_status": entitlement_status,
+                    "_http_status": entitlement_status,
                 })
                 return _format_result(
                     tool, operation, entitlement_payload, success=False, proposal=False
