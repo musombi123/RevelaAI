@@ -100,7 +100,7 @@ def create_license_token(*, user_id: str, plan_id: str, country: str,
         "offline_until": int(min(expiry, now + timedelta(days=30)).timestamp()),
         "entitlements": (
             ["factory_build", "seed_create", "evolve", "migrate", "robot_build", "dna_restore",
-             "marketplace_publish", "private_rvx_dialect"]
+             "marketplace_publish", "private_rvx_dialect", "compliance_draft"]
             if plan.id == "enterprise" else
             ["marketplace_publish"] if plan.id == "pro" else []
         ),
