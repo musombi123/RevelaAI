@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import os
 import re
@@ -1934,13 +1935,19 @@ async def invoke_licensed_tool(
 app.mount("/", revelaai_app, name="revelaai-native-gateway")
 
 
+async def _run_mounted_lifecycle_handlers(name: str) -> None:
+    """Run child FastAPI on_event hooks explicitly; Starlette Mount does not propagate them."""
+    for handler in getattr(revelaai_app.router, name, ()) or ():
+        result = handler()
+        if inspect.isawaitable(result):
+            await result
+
+
 @app.on_event("startup")
 async def _startup_mounted_revelaai() -> None:
-    """Sub-app startup hooks are not propagated by a Starlette Mount."""
-    await revelaai_app.router.startup()
+    await _run_mounted_lifecycle_handlers("on_startup")
 
 
 @app.on_event("shutdown")
 async def _shutdown_mounted_revelaai() -> None:
-    await revelaai_app.router.shutdown()
-
+    await _run_mounted_lifecycle_handlers("on_shutdown")
