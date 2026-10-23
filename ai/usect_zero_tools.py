@@ -425,7 +425,7 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
     if not api_key:
         result.update({
             "status": "unavailable",
-            "error_code": "usect_zero_brain_credential_missing",
+            "error_code": "usect_zero_brain_token_missing",
             "message": "Scoped USECT-ZERO tool access is unavailable for this operation.",
         })
         return result
