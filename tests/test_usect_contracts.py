@@ -86,3 +86,24 @@ def test_render_blueprint_enables_and_links_both_zero_origins():
           property: hostport
 """
     assert expected_gateway_wiring in blueprint
+
+
+
+def test_render_declares_runtime_dependencies_and_guarded_admin_secret():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    blueprint = (root / "render.yaml").read_text(encoding="utf-8")
+    for key in (
+        "REVELA_DATABASE_URL",
+        "MONGO_URI",
+        "REVELAAI_SERVICE_KEY",
+        "GEMINI_API_KEY",
+        "REVELA_LICENSE_PRIVATE_KEY",
+        "REVELA_LICENSE_PUBLIC_KEY",
+        "JWT_SECRET",
+    ):
+        assert f"- key: {key}\n" in blueprint
+    assert """      - key: REVELA_ORGAN_ADMIN_TOKEN
+        generateValue: true
+""" in blueprint
