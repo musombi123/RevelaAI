@@ -25,6 +25,7 @@ def test_native_ai_application_registers_documented_usect_routes():
         "/api/certificates/{certificate_id}",
         "/api/accounts/profile/download",
         "/api/accounts/certificates",
+        "/api/accounts/certificates/{certificate_id}/download",
         "/api/verify/certificate/{certificate_id}",
     }
     assert required <= paths
@@ -140,3 +141,62 @@ def test_elimu_bridge_forwards_data_without_creating_a_second_store():
     assert '"/api/accounts/profile/download"' in source
     assert "MongoClient" not in source
     assert "pymongo" not in source.lower()
+
+
+def test_personal_elimu_chat_context_uses_authoritative_backend_facts(monkeypatch):
+    from fastapi_routes import platform_hubs
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        if url.endswith("/api/accounts/profile/download"):
+            return FakeResponse(200, {
+                "success": True,
+                "profile": {
+                    "full_name": "Test Learner",
+                    "verified": True,
+                    "roles": ["student"],
+                    "hubs": [{"name": "Elimu", "role": "Student", "status": "active"}],
+                    "email": "must-not-be-injected@example.test",
+                },
+            })
+        if url.endswith("/api/study/elimu/progress"):
+            return FakeResponse(200, {
+                "success": True,
+                "hub": {
+                    "name": "Elimu",
+                    "progress": {"completed_lessons": 2, "total_lessons": 5},
+                    "courses": [{
+                        "title": "Foundations",
+                        "completed": False,
+                        "lessons": [{"title": "Lesson one", "completed": True}],
+                    }],
+                },
+                "progress": {"completed_lessons": 2, "total_lessons": 5},
+            })
+        raise AssertionError(f"Unexpected platform URL: {url}")
+
+    monkeypatch.setattr(platform_hubs.requests, "get", fake_get)
+    context = platform_hubs.load_authoritative_user_context(
+        "Bearer test-token",
+        "What is my Elimu learning progress?",
+    )
+    assert context and context["role"] == "system"
+    assert "Test Learner" in context["content"]
+    assert "completed_lessons" in context["content"]
+    assert "must-not-be-injected@example.test" not in context["content"]
+    assert len(calls) == 2
+
+    assert platform_hubs.load_authoritative_user_context(
+        "Bearer test-token", "Explain photosynthesis"
+    ) is None
+    assert len(calls) == 2
