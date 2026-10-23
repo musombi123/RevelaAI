@@ -247,6 +247,7 @@ def test_manual_twin_scan_stores_candidates_and_latest_route_returns_evidence(mo
     platform.initialize_database()
     left_id = "twin-left-" + platform.uuid4().hex[:10]
     right_id = "twin-right-" + platform.uuid4().hex[:10]
+    test_scan_id = None
     try:
         with platform.SessionLocal() as session:
             session.add_all([
@@ -274,6 +275,7 @@ def test_manual_twin_scan_stores_candidates_and_latest_route_returns_evidence(mo
             )
             assert scanned.status_code == 200, scanned.text
             result = scanned.json()
+            test_scan_id = result["scan_id"]
             assert result["status"] == "completed"
             assert result["daily_schedule_configured"] is True
             assert result["daily_schedule"] == "02:17 UTC"
@@ -289,6 +291,8 @@ def test_manual_twin_scan_stores_candidates_and_latest_route_returns_evidence(mo
             assert latest.json()["scan_id"] == result["scan_id"]
             assert latest.json()["trigger"] == "manual"
             assert latest.json()["automatic_publication"] is False
+            assert latest.json()["scheduler_configured"] is True
+            assert latest.json()["scheduler_running"] is True
 
         with platform.SessionLocal() as session:
             saved = session.get(platform.EvolutionTwinScanRecord, result["scan_id"])
@@ -296,20 +300,13 @@ def test_manual_twin_scan_stores_candidates_and_latest_route_returns_evidence(mo
             assert saved.candidate_count == len(result["candidates"])
     finally:
         with platform.SessionLocal() as session:
-            session.query(platform.EvolutionTwinScanRecord).filter(
-                platform.EvolutionTwinScanRecord.trigger == "manual",
-                platform.EvolutionTwinScanRecord.candidates.is_not(None),
-            ).all()
             session.query(platform.ToolRecord).filter(
                 platform.ToolRecord.id.in_([left_id, right_id])
             ).delete(synchronize_session=False)
-            # Only remove the test's scan, never any previously stored production evidence.
-            scans = session.query(platform.EvolutionTwinScanRecord).filter(
-                platform.EvolutionTwinScanRecord.id.like("twin_%")
-            ).all()
-            for item in scans:
-                if {row.get("left_tool_id") for row in item.candidates or []} & {left_id, right_id}:
-                    session.delete(item)
+            if test_scan_id:
+                test_row = session.get(platform.EvolutionTwinScanRecord, test_scan_id)
+                if test_row is not None:
+                    session.delete(test_row)
             session.commit()
 
 
