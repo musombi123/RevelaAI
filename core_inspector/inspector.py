@@ -188,14 +188,16 @@ def registered_routes(application: Any) -> set[tuple[str, str]]:
         visited.add(marker)
         for route in _routes_on_app(app):
             path = getattr(route, "path", "")
-            child = getattr(route, "app", None)
-            if isinstance(route, Mount) and child is not None:
-                child_prefix = _join(prefix, path) if path.strip("/") else prefix
-                child_routes = _routes_on_app(child)
-                if child_routes:
-                    walk(child, child_prefix)
-                    continue
             methods = getattr(route, "methods", None)
+            child = getattr(route, "app", None)
+            # FastAPI / Starlette can expose a Mount wrapped as an ASGI middleware
+            # object, so identify nested applications by their route collection as
+            # well as by the concrete Mount class.
+            child_routes = _routes_on_app(child) if child is not None and not methods else []
+            if child_routes and (isinstance(route, Mount) or not methods):
+                child_prefix = _join(prefix, path) if path.strip("/") else prefix
+                walk(child, child_prefix)
+                continue
             if not path or not methods:
                 continue
             full_path = _join(prefix, path)
