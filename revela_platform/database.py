@@ -157,6 +157,19 @@ class ComplianceReportRecord(Base):
     pdf_bytes: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
+class EvolutionTwinScanRecord(Base):
+    """Immutable evidence snapshot from a manual or scheduled catalog similarity scan."""
+    __tablename__ = "revela_evolution_twin_scans"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    trigger: Mapped[str] = mapped_column(String(24), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="completed", index=True)
+    catalogue_size: Mapped[int] = mapped_column(Integer, default=0)
+    candidate_count: Mapped[int] = mapped_column(Integer, default=0)
+    threshold: Mapped[float] = mapped_column(Float, default=0.8)
+    similarity_method: Mapped[str] = mapped_column(String(64), default="lexical-token-jaccard-v1")
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
 
 def _database_url() -> str:
     configured = os.getenv("REVELA_DATABASE_URL", "").strip()
