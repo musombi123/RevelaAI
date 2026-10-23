@@ -23,7 +23,15 @@ services:
         sync: false
       - key: REVELACODE_ADMIN_VERIFY_TIMEOUT_SECONDS
         value: "15"
+      # Keep the gateway adapter and dashboard/proxy origins identical.
+      - key: USECT_ZERO_ENABLED
+        value: "true"
       - key: USECT_ZERO_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
+      - key: USECT_ZERO_BASE_URL
         fromService:
           type: pserv
           name: usect-zero-core
