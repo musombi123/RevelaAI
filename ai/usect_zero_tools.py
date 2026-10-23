@@ -389,18 +389,8 @@ def _record_activity(outcome: dict[str, Any]) -> None:
         _RECENT_ACTIVITY.append(activity_item)
 
 
-def execute_tool(
-    operation: str,
-    arguments: dict[str, Any] | None = None,
-    *,
-    allow_admin_read_only: bool = False,
-) -> dict[str, Any]:
-    """Invoke a known tool with a scoped key, or Guardian-only read-only admin fallback.
-
-    The fallback is limited to diagnostics and must only be enabled by an already
-    authorized platform-admin workflow. It never grants admin credentials to the model
-    and can never be used for healing, generation, assembly, or other mutating tools.
-    """
+def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Invoke one known tool using its dedicated scoped brain key, never admin credentials."""
     spec = _CATALOG_BY_OPERATION.get(str(operation or ""))
     if spec is None:
         return {
@@ -432,12 +422,7 @@ def execute_tool(
         os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
         or os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
     )
-    # Guardian enables this only after verifying a platform-admin session.
-    # The existing server-side admin credential may be used for diagnostics only.
-    admin_read_only_fallback = (
-        allow_admin_read_only and operation == "diagnostics" and not api_key
-    )
-    if not api_key and not admin_read_only_fallback:
+    if not api_key:
         result.update({
             "status": "unavailable",
             "error_code": "usect_zero_brain_credential_missing",
@@ -486,8 +471,8 @@ def execute_tool(
             method,
             spec["path"],
             body=body,
-            api_key=api_key or None,
-            admin=admin_read_only_fallback,
+            api_key=api_key,
+            admin=False,
         )
         safe_payload = _scan_summary(reply.payload) if operation == "scan" and isinstance(reply.payload, dict) else _sanitize(reply.payload)
         status = "success" if 200 <= reply.status_code < 300 else "blocked"
