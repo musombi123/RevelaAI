@@ -190,6 +190,34 @@ def _run_guardian_sweep() -> dict[str, Any]:
     }
 
 
+def _automation_entitlement_error(authorization: str) -> tuple[dict[str, Any], int] | None:
+    """Reuse RevelaCode's central entitlement contract for paid AI tool actions."""
+    from services.revenue_entitlements import check_entitlement
+
+    _entitlement, error = check_entitlement(
+        authorization,
+        hub="smart_ai",
+        feature="automation",
+    )
+    if error is None:
+        return None
+    payload, status_code = _unwrap(error)
+    payload = dict(payload)
+    payload.setdefault("status", "blocked")
+    payload.setdefault("message", "This AI tool action is not currently entitled.")
+    return payload, status_code
+
+
+def _core_mesh_operator_error(authorization: str):
+    """Preserve the Core Mesh JWT/operator gate before checking entitlement."""
+    from fastapi_routes import core_mesh
+
+    user_id = core_mesh._resolve_user(authorization)
+    if not user_id:
+        return core_mesh._auth_failure()
+    return core_mesh._operator_failure(user_id)
+
+
 def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str, Any] | None:
     """Invoke a narrowly allowlisted operator tool or return an explicit safe block."""
     request = classify_operator_tool_request(message)
@@ -200,6 +228,28 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
     operation = request["operation"]
     privileged = operation != "health" and tool not in {"genesis", "infinite-mind"}
     actor = None
+
+    # The regular Core Mesh HTTP proposal routes enforce authentication and
+    # central automation entitlement. Chat-dispatched proposals must preserve
+    # those exact gates instead of calling their private helper as a bypass.
+    if tool in {"genesis", "infinite-mind"}:
+        operator_error = _core_mesh_operator_error(authorization)
+        if operator_error is not None:
+            result, code = _unwrap(operator_error)
+            result["invoked"] = False
+            result["executed"] = False
+            result["http_status"] = code
+            return _format_result(tool, operation, result, success=False, proposal=False)
+        entitlement_error = _automation_entitlement_error(authorization)
+        if entitlement_error is not None:
+            result, code = entitlement_error
+            result.update({
+                "invoked": False,
+                "executed": False,
+                "http_status": code,
+            })
+            return _format_result(tool, operation, result, success=False, proposal=False)
+
     if privileged:
         # Import lazily to keep ordinary chat independent of admin verification.
         from fastapi_routes.admin_auth import require_platform_admin
@@ -234,6 +284,17 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
 
     try:
         if tool == "ecosystem-guardian":
+            entitlement_error = _automation_entitlement_error(authorization)
+            if entitlement_error is not None:
+                entitlement_payload, entitlement_status = entitlement_error
+                entitlement_payload.update({
+                    "invoked": False,
+                    "executed": False,
+                    "http_status": entitlement_status,
+                })
+                return _format_result(
+                    tool, operation, entitlement_payload, success=False, proposal=False
+                )
             payload = _run_guardian_sweep()
             success = int(payload.get("completed_checks") or 0) > 0
             payload["_execution_status"] = str(payload.get("status") or "partial")
