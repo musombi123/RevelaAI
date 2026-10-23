@@ -63,3 +63,26 @@ def test_marketplace_accepts_the_documented_factory_id_alias():
         price_usd_cents=500,
     )
     assert request.factory_build_id == "fab_0123456789abcdef01234567"
+
+
+
+def test_render_blueprint_enables_and_links_both_zero_origins():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    blueprint = (root / "render.yaml").read_text(encoding="utf-8")
+    expected_gateway_wiring = """      # Keep the gateway adapter and dashboard/proxy origins identical.
+      - key: USECT_ZERO_ENABLED
+        value: "true"
+      - key: USECT_ZERO_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
+      - key: USECT_ZERO_BASE_URL
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          property: hostport
+"""
+    assert expected_gateway_wiring in blueprint
