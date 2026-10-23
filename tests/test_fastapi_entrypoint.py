@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from asgi import app
 from fastapi_routes.auth import _header_value
 from fastapi_routes import core_mesh as core_mesh_routes
+from fastapi_routes import usect_zero as usect_zero_routes
 
 
 client = TestClient(app)
@@ -472,14 +473,29 @@ def test_usect_zero_admin_operations_remain_admin_only() -> None:
     assert invalid_filter.json()["code"] == "invalid_status_filter"
 
 
-def test_usect_zero_health_is_explicitly_disabled_without_opt_in(monkeypatch) -> None:
+def test_usect_zero_health_uses_real_probe_not_legacy_flag(monkeypatch) -> None:
+    from services.usect_zero_client import CoreReply
+
     monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
+    monkeypatch.setattr(
+        usect_zero_routes,
+        "request_core",
+        lambda *args, **kwargs: CoreReply(
+            200,
+            {
+                "status": "ok",
+                "service": "USECT-ZERO",
+                "model_free": True,
+                "offline_mode": True,
+            },
+        ),
+    )
     response = client.get("/api/usect-zero/health")
-    assert response.status_code == 503
+    assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "disabled"
+    assert body["status"] == "ok"
     assert body["module"] == "usect-zero"
-    assert body["enabled"] is False
+    assert body["enabled"] is True
     assert body["model_free"] is True
 
 
