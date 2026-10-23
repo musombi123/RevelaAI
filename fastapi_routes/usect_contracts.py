@@ -13,30 +13,38 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from core_billing.licensing import LicenseError
 from core_migrate.models import MigrationPlanRequest, RobotBlueprintRequest
+from core_uncopyable.license_lock import require_entitlement
 from fastapi_routes.auth import authenticate_identity
-from fastapi_routes.evolve_migrate import (
-    _migrator,
-    _require_enterprise_license,
-    _require_organ_token,
-)
+from fastapi_routes.evolve_migrate import _migrator, _require_organ_token
 from revela_platform.database import FactoryRecord, SeedRecord, SessionLocal
 
 router = APIRouter(tags=["USECT Compatibility Contracts"])
 
 
 def _authorize(request: Request, entitlement: str, payload: dict[str, Any] | None = None):
-    """Require the organ secret, the correct signed entitlement and a backend-verified user."""
+    """Require operator authorization, a backend-verified user, and that same user's license."""
     _require_organ_token(request.headers.get("X-Organ-Admin-Token"))
-    _require_enterprise_license(request.headers.get("X-Revela-License"), entitlement)
     _identity, user_id, error = authenticate_identity(
         request.headers.get("Authorization", ""),
         dict(request.headers),
         payload or {},
     )
     if error is not None:
-        return None, error
-    return user_id, None
+        return None, None, error
+    try:
+        claims = require_entitlement(request.headers.get("X-Revela-License", ""), entitlement)
+    except LicenseError as exc:
+        message = str(exc)
+        status = 503 if ("not configured" in message.lower() or "unavailable" in message.lower()) else 402
+        return None, None, JSONResponse({"status": "error", "code": "license_required", "message": message}, status_code=status)
+    if str(claims.get("sub") or "") != user_id:
+        return None, None, JSONResponse(
+            {"status": "error", "code": "license_identity_mismatch", "message": "The license must belong to the authenticated RevelaCode user."},
+            status_code=403,
+        )
+    return user_id, claims, None
 
 
 class MigrationCompatInput(BaseModel):
@@ -68,7 +76,7 @@ class RobotBuildCompatInput(BaseModel):
 @router.post("/v1/migrate/scan", tags=["USECT-MIGRATE"])
 def scan_registered_devices(request: Request):
     """Return only devices enrolled into this service; never run an ambient network scan."""
-    user_id, error = _authorize(request, "migrate")
+    user_id, _license_claims, error = _authorize(request, "migrate")
     if error is not None:
         return error
     devices = [d for d in _migrator().list_devices() if d.owner_id == user_id]
@@ -104,7 +112,7 @@ def scan_registered_devices(request: Request):
 @router.post("/v1/migrate/migrate", status_code=202, tags=["USECT-MIGRATE"])
 def plan_seed_migration(body: MigrationCompatInput, request: Request):
     """Translate {seed_id, target_device} into a dry-run migration plan, never a remote install."""
-    user_id, error = _authorize(request, "migrate", body.model_dump())
+    user_id, license_claims, error = _authorize(request, "migrate", body.model_dump())
     if error is not None:
         return error
 
@@ -117,6 +125,9 @@ def plan_seed_migration(body: MigrationCompatInput, request: Request):
         factory = session.get(FactoryRecord, seed.parent_build_id)
         if factory is None:
             raise HTTPException(status_code=409, detail="The seed's parent factory manifest is unavailable.")
+        allowed_factory_ids = license_claims.get("factory_ids")
+        if isinstance(allowed_factory_ids, list) and seed.parent_build_id not in allowed_factory_ids:
+            raise HTTPException(status_code=403, detail="The license does not cover this factory build.")
         manifest_hash = str(factory.manifest_sha256 or "").strip().lower()
 
     if len(manifest_hash) != 64 or any(ch not in "0123456789abcdef" for ch in manifest_hash):
@@ -166,7 +177,7 @@ def _declared_resource_count(resources: dict[str, Any], names: tuple[str, ...]) 
 @router.post("/v1/migrate/build-robot", status_code=202, tags=["USECT-MIGRATE"])
 def build_robot_proposal(body: RobotBuildCompatInput, request: Request):
     """Produce a non-actuating blueprint proposal from declared resources or verified inventory."""
-    user_id, error = _authorize(request, "robot_build", body.model_dump())
+    user_id, _license_claims, error = _authorize(request, "robot_build", body.model_dump())
     if error is not None:
         return error
 
