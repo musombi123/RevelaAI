@@ -91,6 +91,119 @@ def test_compliance_pdf_is_a_draft_with_a_verifiable_qr_target():
     assert report["report_sha256"] == canonical_sha256({k: v for k, v in report.items() if k != "report_sha256"})
 
 
+def test_compliance_report_api_persists_pdf_and_verifies_exact_bytes(monkeypatch):
+    previous_overrides = dict(platform.app.dependency_overrides)
+    platform.app.dependency_overrides[platform.authenticated_user] = lambda: "user-report-test"
+    monkeypatch.setattr(
+        platform, "_active_license",
+        lambda _session, _token, user_id, country=None, tool_id=None: (
+            {"sub": user_id, "jti": "license-test", "plan": "enterprise"},
+            object(),
+        ),
+    )
+    monkeypatch.setattr(platform, "require_enterprise_claims", lambda claims, entitlement: claims)
+    try:
+        with TestClient(platform.app, raise_server_exceptions=False) as client:
+            created = client.post(
+                "/v1/auditor/reports/generate",
+                headers={"X-Revela-License": "test-license"},
+                json={
+                    "report_kind": "CE",
+                    "country": "KE",
+                    "scope": "A sample low voltage control unit; no accredited testing supplied.",
+                    "evidence_refs": ["local-reference://datasheet"],
+                    "checks": ["Nameplate and datasheet review requested"],
+                    "evidence_gaps": ["No accredited lab test report provided."],
+                },
+            )
+            assert created.status_code == 201, created.text
+            data = created.json()
+            assert data["certification_issued"] is False
+            assert data["status"] == "draft_readiness_report"
+            assert data["report_sha256"]
+            assert data["pdf_sha256"]
+
+            verified = client.get(f"/v1/auditor/reports/{data['report_id']}/verify")
+            assert verified.status_code == 200, verified.text
+            assert verified.json()["valid"] is True
+            assert verified.json()["certification_issued"] is False
+
+            downloaded = client.get(
+                f"/v1/auditor/reports/{data['report_id']}/pdf",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            assert downloaded.status_code == 200, downloaded.text
+            assert downloaded.headers["content-type"].startswith("application/pdf")
+            assert downloaded.content.startswith(b"%PDF-")
+            assert __import__("hashlib").sha256(downloaded.content).hexdigest() == data["pdf_sha256"]
+
+            # Tampering with the persisted bytes invalidates the QR verification.
+            with platform.SessionLocal() as session:
+                row = session.get(platform.ComplianceReportRecord, data["report_id"])
+                row.pdf_bytes = row.pdf_bytes + b"tampered"
+                session.commit()
+            tampered = client.get(f"/v1/auditor/reports/{data['report_id']}/verify")
+            assert tampered.status_code == 200
+            assert tampered.json()["valid"] is False
+    finally:
+        platform.app.dependency_overrides.clear()
+        platform.app.dependency_overrides.update(previous_overrides)
+
+
+def test_orchestrator_executes_steps_in_declared_zero_one_two_order(monkeypatch):
+    previous_overrides = dict(platform.app.dependency_overrides)
+    platform.app.dependency_overrides[platform.authenticated_user] = lambda: "user-pipeline-test"
+    monkeypatch.setattr(
+        platform, "_active_license",
+        lambda _session, _token, user_id, country=None, tool_id=None: (
+            {"sub": user_id, "jti": "license-pipeline", "plan": "enterprise"},
+            object(),
+        ),
+    )
+    monkeypatch.setattr(platform, "require_enterprise_claims", lambda claims, entitlement: claims)
+    monkeypatch.setattr(platform, "enforce_tool_creation_quota", lambda session, license_record: None)
+    monkeypatch.setattr(platform, "_require_owned_factory_or_tool", lambda tool_id, user_id: (user_id, tool_id))
+    order = []
+
+    def fake_zero(operation, arguments=None):
+        order.append(("zero", operation))
+        return {"status": "success", "executed": True, "result": {"proposal_only": True}}
+
+    def fake_genesis(demand, **kwargs):
+        order.append(("one", demand))
+        return {"status": "queued", "id": "queue-test"}
+
+    def fake_mind(objective, tool_name):
+        order.append(("two", tool_name))
+        return {"status": "proposal_created", "target_modified": False}
+
+    monkeypatch.setattr(platform, "execute_usect_zero_tool", fake_zero)
+    monkeypatch.setattr(platform, "queue_genesis_demand", fake_genesis)
+    monkeypatch.setattr(platform, "propose_mind_evolution", fake_mind)
+    monkeypatch.setattr(platform, "_persist_usect_event", lambda *args, **kwargs: True)
+    try:
+        with TestClient(platform.app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/v1/orchestrator/run",
+                headers={"X-Revela-License": "test-license"},
+                json={
+                    "demand": "Build a safe asset inventory review tool",
+                    "tool_id": "existing-tool",
+                    "error": "A reviewed operation failed with a validation error.",
+                    "objective": "Reduce errors without changing production behavior.",
+                },
+            )
+        assert response.status_code == 202, response.text
+        result = response.json()
+        assert result["order"] == ["USECT-ZERO", "USECT-ONE", "USECT-TWO"]
+        assert [item[0] for item in order] == ["zero", "zero", "one", "two"]
+        assert result["automatic_execution"] is False
+        assert result["human_approval_required"] is True
+    finally:
+        platform.app.dependency_overrides.clear()
+        platform.app.dependency_overrides.update(previous_overrides)
+
+
 @pytest.mark.parametrize(
     ("path", "method", "expected"),
     [
