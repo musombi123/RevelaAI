@@ -20,6 +20,13 @@ def classify_operator_tool_request(message: str) -> dict[str, str] | None:
         return None
     lower = text.casefold()
 
+    ecosystem_named = bool(re.search(r"\b(?:ecosystem|revelacode)\b", lower)) and bool(
+        re.search(r"\b(?:guardian|protection|perimeter|security)\b", lower)
+    )
+    ecosystem_action = bool(re.search(r"\b(?:run|perform|start|execute|launch|scan|audit|check)\b", lower))
+    if ecosystem_named and ecosystem_action:
+        return {"tool": "ecosystem-guardian", "operation": "guardian_sweep"}
+
     sci_named = bool(re.search(
         r"\b(?:sci[ -]?(?:defend|core)|defensive shield|shield dashboard)\b",
         lower,
@@ -65,6 +72,117 @@ def _status_is_success(payload: dict[str, Any], code: int) -> bool:
     return code < 400 and status not in {"error", "degraded", "failed", "unavailable", "blocked"}
 
 
+def _run_guardian_sweep() -> dict[str, Any]:
+    """Run a bounded cross-core status + defensive scan, never a repair or deploy."""
+    from concurrent.futures import ThreadPoolExecutor
+    from ai.core_mesh import get_core_mesh_dashboard
+    from ai.usect_zero_tools import execute_tool
+    from fastapi_routes.meta_engineer import _scan
+    from fastapi_routes.sci_core import _shield_scan
+
+    def safe_call(label: str, callback):
+        try:
+            raw = callback()
+            value, http_code = _unwrap(raw)
+            ok = _status_is_success(value, http_code)
+            return {"ok": ok, "http_status": http_code, "data": value}
+        except Exception as exc:
+            return {
+                "ok": False,
+                "http_status": None,
+                "data": {"status": "error", "failure_type": type(exc).__name__},
+            }
+
+    jobs = {
+        "core_mesh": lambda: get_core_mesh_dashboard(force_refresh=True),
+        "core_zero_diagnostics": lambda: execute_tool("diagnostics", {}),
+        "sci_defend_scan": _shield_scan,
+        "meta_engineer_scan": _scan,
+    }
+    raw_results: dict[str, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="revela-guardian") as pool:
+        futures = {name: pool.submit(safe_call, name, callback) for name, callback in jobs.items()}
+        for name, future in futures.items():
+            try:
+                raw_results[name] = future.result(timeout=50)
+            except Exception as exc:
+                raw_results[name] = {
+                    "ok": False,
+                    "http_status": None,
+                    "data": {"status": "error", "failure_type": type(exc).__name__},
+                }
+
+    mesh_raw = raw_results.get("core_mesh", {}).get("data", {})
+    mesh = mesh_raw.get("data") if isinstance(mesh_raw, dict) and isinstance(mesh_raw.get("data"), dict) else mesh_raw
+    mesh = mesh if isinstance(mesh, dict) else {}
+    cores = mesh.get("cores") if isinstance(mesh.get("cores"), dict) else {}
+    core_summary = {
+        str(name)[:16]: {
+            "status": str(info.get("status") or "unknown")[:40],
+            "reachable": info.get("reachable") if info.get("reachable") in (True, False, None) else None,
+            "version": str(info.get("version") or "")[:40] or None,
+        }
+        for name, info in list(cores.items())[:8] if isinstance(name, str) and isinstance(info, dict)
+    }
+    zero_raw = raw_results.get("core_zero_diagnostics", {}).get("data", {})
+    zero_data = zero_raw if isinstance(zero_raw, dict) else {}
+    sci_raw = raw_results.get("sci_defend_scan", {}).get("data", {})
+    sci_data = sci_raw if isinstance(sci_raw, dict) else {}
+    meta_raw = raw_results.get("meta_engineer_scan", {}).get("data", {})
+    meta_data = meta_raw if isinstance(meta_raw, dict) else {}
+
+    components = {
+        "core_mesh": {
+            "ok": raw_results.get("core_mesh", {}).get("ok") is True,
+            "status": str(mesh.get("status") or raw_results.get("core_mesh", {}).get("data", {}).get("status") or "unknown")[:40],
+            "cores": core_summary,
+            "active_signed_tools": mesh.get("active_signed_tools_count"),
+        },
+        "core_zero_diagnostics": {
+            "ok": raw_results.get("core_zero_diagnostics", {}).get("ok") is True
+                  and zero_data.get("executed") is True,
+            "status": str(zero_data.get("status") or "unknown")[:40],
+            "error_code": str(zero_data.get("error_code") or "")[:80] or None,
+            "message": str(zero_data.get("message") or "")[:240] or None,
+            "executed": zero_data.get("executed") is True,
+        },
+        "sci_defend_scan": {
+            "ok": raw_results.get("sci_defend_scan", {}).get("ok") is True,
+            "status": str(sci_data.get("status") or "unknown")[:40],
+            "defensive_only": sci_data.get("defensive_only") is True,
+            "threats_last_24h": sci_data.get("threats_last_24h"),
+            "shields_active": sci_data.get("shields_active"),
+            "counts": sci_data.get("counts") if isinstance(sci_data.get("counts"), dict) else None,
+        },
+        "meta_engineer_scan": {
+            "ok": raw_results.get("meta_engineer_scan", {}).get("ok") is True
+                  and meta_data.get("read_only") is True,
+            "status": str(meta_data.get("status") or "unknown")[:40],
+            "module_count": meta_data.get("module_count"),
+            "free_slots": meta_data.get("free_slots", [])[:10] if isinstance(meta_data.get("free_slots"), list) else [],
+            "read_only": meta_data.get("read_only") is True,
+        },
+    }
+    all_core_states = [item.get("reachable") for item in core_summary.values()]
+    all_healthy = all(component["ok"] for component in components.values()) and bool(all_core_states) and all(state is True for state in all_core_states)
+    complete_checks = sum(1 for component in components.values() if component["ok"])
+    return {
+        "status": "completed" if all_healthy else "partial",
+        "completed_checks": complete_checks,
+        "total_checks": len(components),
+        "all_cores_reachable": bool(all_core_states) and all(state is True for state in all_core_states),
+        "components": components,
+        "safety": {
+            "repair_performed": False,
+            "production_mutation_performed": False,
+            "candidate_source_execution": False,
+            "human_approval_required": True,
+            "automatic_merge": False,
+            "automatic_execution": False,
+        },
+    }
+
+
 def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str, Any] | None:
     """Invoke a narrowly allowlisted operator tool or return an explicit safe block."""
     request = classify_operator_tool_request(message)
@@ -108,7 +226,13 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
             return _format_result(tool, operation, result, success=False, proposal=False)
 
     try:
-        if tool == "sci-defend":
+        if tool == "ecosystem-guardian":
+            payload = _run_guardian_sweep()
+            success = payload.get("status") == "completed"
+            return _format_result(
+                tool, operation, payload, success=success, proposal=False
+            )
+        elif tool == "sci-defend":
             from fastapi_routes import sci_core
 
             if operation == "shield_scan":
