@@ -27,6 +27,13 @@ def classify_operator_tool_request(message: str) -> dict[str, str] | None:
     if ecosystem_named and ecosystem_action:
         return {"tool": "ecosystem-guardian", "operation": "guardian_sweep"}
 
+    genesis_named = bool(re.search(r"\bgenesis\b", lower))
+    mind_named = bool(re.search(r"\b(?:infinite mind|core[ -]?two)\b", lower))
+    if genesis_named and re.search(r"\b(?:propose|create|build|generate|develop|implement|invent|design)\b", lower):
+        return {"tool": "genesis", "operation": "invention_proposal"}
+    if mind_named and re.search(r"\b(?:propose|evolve|improve|upgrade|enhance|harden|refine)\b", lower):
+        return {"tool": "infinite-mind", "operation": "mind_proposal"}
+
     sci_named = bool(re.search(
         r"\b(?:sci[ -]?(?:defend|core)|defensive shield|shield dashboard)\b",
         lower,
@@ -35,7 +42,7 @@ def classify_operator_tool_request(message: str) -> dict[str, str] | None:
     action = bool(re.search(
         r"\b(?:run|perform|start|execute|launch|scan|audit|inspect|check|show|"
         r"get|open|view|report|propose|create|build|generate|develop|implement|"
-        r"upgrade|improve)\b",
+        r"upgrade|improve|invent|evolve|enhance|harden|refine)\b",
         lower,
     ))
     if not action:
@@ -191,7 +198,7 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
 
     tool = request["tool"]
     operation = request["operation"]
-    privileged = operation != "health"
+    privileged = operation != "health" and tool not in {"genesis", "infinite-mind"}
     actor = None
     if privileged:
         # Import lazily to keep ordinary chat independent of admin verification.
@@ -235,6 +242,28 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
             payload["_executed"] = success
             return _format_result(
                 tool, operation, payload, success=success, proposal=False
+            )
+        elif tool in {"genesis", "infinite-mind"}:
+            from fastapi_routes.core_mesh import _proposal
+
+            objective = " ".join(str(message or "").split())[:500]
+            if tool == "genesis":
+                raw = _proposal(authorization, {"demand": objective}, "genesis")
+            else:
+                raw = _proposal(
+                    authorization,
+                    {"objective": objective, "tool_name": "offline_vault_fixture"},
+                    "mind",
+                )
+            payload, http_code = _unwrap(raw)
+            success = _status_is_success(payload, http_code)
+            proposal = bool(success and http_code in (200, 201, 202))
+            payload["_http_status"] = http_code
+            payload["_execution_status"] = "proposal_created" if proposal else "failed"
+            payload["_invoked"] = http_code < 400
+            payload["_executed"] = False
+            return _format_result(
+                tool, operation, payload, success=success, proposal=proposal
             )
         elif tool == "sci-defend":
             from fastapi_routes import sci_core
@@ -302,12 +331,26 @@ def _format_result(
     invoked = result.get("_invoked") is True or result.get("invoked") is True
     executed = result.get("_executed") is True or result.get("executed") is True
     summary = str(result.get("message") or result.get("summary") or result.get("status") or status).strip()[:600]
-    if proposal:
+    if proposal and tool == "meta-engineer":
         proposal_id = result.get("idea_id") or result.get("proposal_id") or result.get("id")
         response = "Meta Engineer created a reviewable proposal. "
         if proposal_id:
             response += f"Proposal reference: {str(proposal_id)[:100]}. "
         response += "It remains subject to human review; no production code was changed, deployed, or merged."
+    elif proposal and tool == "genesis":
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        proposal_id = data.get("proposal_id") or data.get("id") or result.get("proposal_id")
+        response = "Genesis created a guarded invention proposal. "
+        if proposal_id:
+            response += f"Proposal reference: {str(proposal_id)[:100]}. "
+        response += "It awaits the existing review/approval path; no tool was activated and nothing was merged."
+    elif proposal and tool == "infinite-mind":
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        proposal_id = data.get("proposal_id") or data.get("id") or result.get("proposal_id")
+        response = "Infinite Mind created an evidence-gated improvement proposal. "
+        if proposal_id:
+            response += f"Proposal reference: {str(proposal_id)[:100]}. "
+        response += "Human review remains required; no candidate code was executed or merged."
     elif success and tool == "ecosystem-guardian":
         components = result.get("components") if isinstance(result.get("components"), dict) else {}
         parts = []
@@ -380,13 +423,19 @@ def _format_result(
         "result": public_result,
         "safety": safety,
     }
-    core = "sci-defend" if tool == "sci-defend" else "meta-engineer"
+    core = {
+        "ecosystem-guardian": "ecosystem-guardian",
+        "sci-defend": "sci-defend",
+        "meta-engineer": "meta-engineer",
+        "genesis": "core-one",
+        "infinite-mind": "core-two",
+    }.get(tool, "orchestrator")
     mesh_mode = "proposal_created" if proposal else "executed" if success else "blocked" if status == "blocked" else "dispatch_failed"
     return {
         "response": response,
         "confidence": "high" if success else "low",
         "intent": "operator_tool",
-        "domain": "security" if tool == "sci-defend" else "programming",
+        "domain": "security" if tool in {"sci-defend", "ecosystem-guardian"} else "programming",
         "provider": "revelaai-operator-dispatch",
         "model": tool,
         "capability": "operator_tool",
