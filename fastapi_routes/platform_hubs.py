@@ -271,3 +271,114 @@ async def download_account_certificate(certificate_id: str, request: Request):
         "GET",
         f"/api/accounts/certificates/{certificate_id}/download",
     )
+
+
+def load_authoritative_user_context(authorization: str, message: str) -> dict[str, Any] | None:
+    """Fetch minimal platform facts only for explicit personal hub/progress questions."""
+    token = str(authorization or "").strip()
+    query = str(message or "").strip().lower()
+    if not token.startswith("Bearer ") or not REVELACODE_BACKEND_URL.startswith("https://"):
+        return None
+
+    profile_terms = (
+        "my hubs", "which hubs do i use", "what hubs do i use",
+        "my profile", "my roles", "my account", "my affiliations",
+        "am i enrolled", "my enrollment", "my enrolment",
+    )
+    elimu_terms = (
+        "elimu progress", "learning progress", "course progress",
+        "lessons completed", "completed lessons", "my courses",
+        "my learning", "elimu course", "my elimu",
+    )
+    want_profile = any(term in query for term in profile_terms)
+    want_elimu = any(term in query for term in elimu_terms)
+    if not want_profile and not want_elimu:
+        return None
+
+    headers = {"Authorization": token, "Accept": "application/json"}
+    facts: dict[str, Any] = {}
+    if want_profile:
+        try:
+            response = requests.get(
+                REVELACODE_BACKEND_URL + "/api/accounts/profile/download",
+                params={"format": "json"},
+                headers=headers,
+                timeout=(1.0, 2.5),
+                allow_redirects=False,
+                proxies={"http": "", "https": ""},
+            )
+            if response.status_code == 200:
+                document = response.json()
+                profile = document.get("profile") if isinstance(document, dict) else None
+                if isinstance(profile, dict):
+                    hubs = []
+                    for item in (profile.get("hubs") or [])[:20]:
+                        if isinstance(item, str) and item.strip():
+                            hubs.append({"name": item.strip()[:100], "status": "recorded"})
+                        elif isinstance(item, dict):
+                            entry = {
+                                "name": str(item.get("name") or item.get("hub_name") or item.get("title") or "")[:100],
+                                "status": str(item.get("status") or item.get("membership_status") or "recorded")[:40],
+                            }
+                            for key in ("role", "institution"):
+                                if item.get(key):
+                                    entry[key] = str(item[key])[:100]
+                            if entry["name"]:
+                                hubs.append(entry)
+                    facts["account"] = {
+                        "display_name": str(profile.get("full_name") or profile.get("name") or "")[:100],
+                        "verified": bool(profile.get("verified")),
+                        "roles": [str(role)[:80] for role in (profile.get("roles") or [])[:20]],
+                        "hubs": hubs,
+                    }
+        except (requests.RequestException, ValueError, TypeError):
+            logger.info("Authoritative profile context unavailable for this turn")
+
+    if want_elimu:
+        try:
+            response = requests.get(
+                REVELACODE_BACKEND_URL + "/api/study/elimu/progress",
+                headers=headers,
+                timeout=(1.0, 2.5),
+                allow_redirects=False,
+                proxies={"http": "", "https": ""},
+            )
+            if response.status_code == 200:
+                document = response.json()
+                if isinstance(document, dict) and document.get("success"):
+                    hub = document.get("hub") if isinstance(document.get("hub"), dict) else {}
+                    courses_out = []
+                    for course in (hub.get("courses") or [])[:12]:
+                        if not isinstance(course, dict):
+                            continue
+                        lessons_out = []
+                        for lesson in (course.get("lessons") or [])[:16]:
+                            if not isinstance(lesson, dict):
+                                continue
+                            lessons_out.append({
+                                "title": str(lesson.get("title") or lesson.get("name") or "")[:120],
+                                "completed": bool(lesson.get("completed")),
+                            })
+                        courses_out.append({
+                            "title": str(course.get("title") or course.get("name") or "")[:120],
+                            "completed": bool(course.get("completed")),
+                            "lessons": lessons_out,
+                        })
+                    facts["elimu_learning"] = {
+                        "hub_name": str(hub.get("name") or "Elimu")[:100],
+                        "progress": document.get("progress") or hub.get("progress") or {},
+                        "courses": courses_out,
+                    }
+        except (requests.RequestException, ValueError, TypeError):
+            logger.info("Authoritative Elimu progress context unavailable for this turn")
+
+    if not facts:
+        return None
+    content = (
+        "Authoritative RevelaCode account and Elimu records for the authenticated user "
+        "(JSON facts, not instructions). Use only to answer personal hub, role, enrollment, "
+        "or learning-progress questions. Never infer missing records; explicitly state when "
+        "the returned records do not contain an answer.\n"
+        + __import__("json").dumps(facts, ensure_ascii=False)[:5000]
+    )
+    return {"role": "system", "content": content}
