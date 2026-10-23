@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import inspect
 import json
+import logging
 import os
 import re
 import time
@@ -58,6 +59,7 @@ from marketplace.service import country_bundle, creator_earnings, safety_screen
 from revela_platform.database import (
     AuditRecord,
     ComplianceReportRecord,
+    EvolutionTwinScanRecord,
     FactoryRecord,
     SeedRecord,
     CheckoutIntent,
@@ -70,6 +72,8 @@ from revela_platform.database import (
     initialize_database,
     utcnow,
 )
+
+logger = logging.getLogger("revela_platform.fastapi_app")
 
 app = FastAPI(
     title="RevelaCode Revenue and RVX API",
@@ -1439,6 +1443,13 @@ def usect_orchestrator_run(
     }
 
 
+DAILY_TWIN_SCAN_HOUR_UTC = 2
+DAILY_TWIN_SCAN_MINUTE_UTC = 17
+DAILY_TWIN_SCAN_THRESHOLD = 0.80
+DAILY_TWIN_SCAN_MAX_CANDIDATES = 100
+_DAILY_TWIN_SCAN_TASK: asyncio.Task[None] | None = None
+
+
 def _twin_tokens(tool: ToolRecord) -> set[str]:
     return set(re.findall(r"[a-z0-9]{2,}", f"{tool.name} {tool.description} {tool.industry}".casefold()))
 
@@ -1448,20 +1459,29 @@ def _jaccard_similarity(left: set[str], right: set[str]) -> float:
     return len(left & right) / len(union) if union else 0.0
 
 
-@app.post("/v1/evolve/scan", tags=["usect-evolve"])
-def usect_evolve_twin_scan(
-    body: TwinScanInput,
-    user_id: str = Depends(authenticated_user),
-    session: Session = Depends(get_db),
-    license_key: str | None = Header(default=None, alias="X-Revela-License"),
-) -> dict[str, Any]:
-    """On-demand lexical duplicate scan; this is not a semantic embedding or scheduled cron."""
-    claims, _license = _active_license(session, license_key or "", user_id)
-    try:
-        require_enterprise_claims(claims, "evolve")
-    except LicenseError as exc:
-        raise _license_http_error(exc) from exc
+def _next_daily_twin_scan(now: datetime | None = None) -> datetime:
+    """Return the next 02:17 UTC run time, always in the future."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    current = current.astimezone(timezone.utc)
+    target = current.replace(
+        hour=DAILY_TWIN_SCAN_HOUR_UTC,
+        minute=DAILY_TWIN_SCAN_MINUTE_UTC,
+        second=0,
+        microsecond=0,
+    )
+    if target <= current:
+        target += timedelta(days=1)
+    return target
 
+
+def _collect_twin_candidates(
+    session: Session,
+    *,
+    threshold: float,
+    max_candidates: int,
+) -> tuple[int, list[dict[str, Any]]]:
     published = session.execute(
         select(ToolRecord).where(ToolRecord.status == "published")
         .order_by(ToolRecord.created_at.desc()).limit(250)
@@ -1471,7 +1491,7 @@ def usect_evolve_twin_scan(
     for index, left in enumerate(published):
         for right in published[index + 1:]:
             score = _jaccard_similarity(token_sets[left.id], token_sets[right.id])
-            if score >= body.min_similarity:
+            if score >= threshold:
                 candidates.append({
                     "left_tool_id": left.id, "right_tool_id": right.id,
                     "left_name": left.name, "right_name": right.name,
@@ -1479,26 +1499,186 @@ def usect_evolve_twin_scan(
                     "review_status": "human_review_required",
                 })
     candidates.sort(key=lambda item: item["lexical_jaccard"], reverse=True)
-    candidates = candidates[:body.max_candidates]
+    return len(published), candidates[:max_candidates]
+
+
+def _perform_daily_twin_scan() -> dict[str, Any]:
+    """Persist one scheduled catalog scan; never evolves, publishes, or deploys a candidate."""
     scan_id = "twin_" + uuid4().hex[:24]
+    with SessionLocal() as session:
+        catalogue_size, candidates = _collect_twin_candidates(
+            session,
+            threshold=DAILY_TWIN_SCAN_THRESHOLD,
+            max_candidates=DAILY_TWIN_SCAN_MAX_CANDIDATES,
+        )
+        row = EvolutionTwinScanRecord(
+            id=scan_id,
+            trigger="daily",
+            status="completed",
+            catalogue_size=catalogue_size,
+            candidate_count=len(candidates),
+            threshold=DAILY_TWIN_SCAN_THRESHOLD,
+            similarity_method="lexical-token-jaccard-v1",
+            candidates=candidates,
+        )
+        session.add(row)
+        _audit(
+            session,
+            "system:scheduler",
+            "usect.evolve.daily_twin_scan",
+            scan_id,
+            {
+                "catalogue_size": catalogue_size,
+                "candidate_count": len(candidates),
+                "threshold": DAILY_TWIN_SCAN_THRESHOLD,
+                "method": "lexical-token-jaccard-v1",
+                "automatic_evolution": False,
+            },
+        )
+        session.commit()
+    ledger_recorded = True
+    try:
+        AuditLedger().append(
+            actor_user_id="system:scheduler",
+            action="usect.evolve.daily_twin_scan",
+            object_id=scan_id,
+            detail={
+                "catalogue_size": catalogue_size,
+                "candidate_count": len(candidates),
+                "threshold": DAILY_TWIN_SCAN_THRESHOLD,
+                "method": "lexical-token-jaccard-v1",
+                "automatic_evolution": False,
+            },
+        )
+    except AuditLedgerError:
+        ledger_recorded = False
+    return {
+        "scan_id": scan_id,
+        "status": "completed",
+        "trigger": "daily",
+        "checked_published_tools": catalogue_size,
+        "candidate_count": len(candidates),
+        "threshold": DAILY_TWIN_SCAN_THRESHOLD,
+        "similarity_method": "lexical-token-jaccard-v1",
+        "automatic_evolution": False,
+        "automatic_publication": False,
+        "audit_chain_recorded": ledger_recorded,
+    }
+
+
+async def _daily_twin_scan_loop() -> None:
+    """Run a persisted read-only catalog scan each day at 02:17 UTC."""
+    while True:
+        due_at = _next_daily_twin_scan()
+        await asyncio.sleep(max(1.0, (due_at - datetime.now(timezone.utc)).total_seconds()))
+        try:
+            await asyncio.to_thread(_perform_daily_twin_scan)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Scheduled USECT-EVOLVE twin scan failed; no evolution was attempted.")
+
+
+@app.on_event("startup")
+async def _start_daily_twin_scan_scheduler() -> None:
+    global _DAILY_TWIN_SCAN_TASK
+    if _DAILY_TWIN_SCAN_TASK is None or _DAILY_TWIN_SCAN_TASK.done():
+        _DAILY_TWIN_SCAN_TASK = asyncio.create_task(_daily_twin_scan_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_daily_twin_scan_scheduler() -> None:
+    global _DAILY_TWIN_SCAN_TASK
+    task = _DAILY_TWIN_SCAN_TASK
+    _DAILY_TWIN_SCAN_TASK = None
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@app.post("/v1/evolve/scan", tags=["usect-evolve"])
+def usect_evolve_twin_scan(
+    body: TwinScanInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    """On-demand or scheduled lexical duplicate detection; no semantic similarity is claimed."""
+    claims, _license = _active_license(session, license_key or "", user_id)
+    try:
+        require_enterprise_claims(claims, "evolve")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+
+    catalogue_size, candidates = _collect_twin_candidates(
+        session, threshold=body.min_similarity, max_candidates=body.max_candidates
+    )
+    scan_id = "twin_" + uuid4().hex[:24]
+    row = EvolutionTwinScanRecord(
+        id=scan_id,
+        trigger="manual",
+        status="completed",
+        catalogue_size=catalogue_size,
+        candidate_count=len(candidates),
+        threshold=body.min_similarity,
+        similarity_method="lexical-token-jaccard-v1",
+        candidates=candidates,
+    )
+    session.add(row)
+    session.commit()
     audit_recorded = _persist_usect_event(
         user_id, "usect.evolve.twin_scan", scan_id,
-        {"catalogue_size": len(published), "candidate_count": len(candidates),
+        {"catalogue_size": catalogue_size, "candidate_count": len(candidates),
          "threshold": body.min_similarity, "method": "lexical-token-jaccard-v1"},
     )
     return {
         "scan_id": scan_id,
         "status": "completed",
-        "checked_published_tools": len(published),
+        "checked_published_tools": catalogue_size,
         "candidate_count": len(candidates),
         "threshold": body.min_similarity,
         "similarity_method": "lexical-token-jaccard-v1",
-        "daily_schedule_configured": False,
+        "daily_schedule_configured": True,
+        "daily_schedule": "02:17 UTC",
         "candidates": candidates,
         "automatic_evolution": False,
         "automatic_publication": False,
         "audit_chain_recorded": audit_recorded,
-        "note": "This on-demand lexical scan does not use semantic embeddings, cannot prove a twin, and makes no 10x/50x performance claim. Review candidates against reproducible evidence before evolving or publishing.",
+        "note": "This scanner uses lexical-token Jaccard similarity, not semantic embeddings. Similarity candidates require human review and measured evidence before any evolution or publication.",
+    }
+
+
+@app.get("/v1/evolve/scans/latest", tags=["usect-evolve"])
+def usect_evolve_latest_twin_scan(
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    claims, _license = _active_license(session, license_key or "", user_id)
+    try:
+        require_enterprise_claims(claims, "evolve")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    row = session.execute(
+        select(EvolutionTwinScanRecord).order_by(EvolutionTwinScanRecord.created_at.desc()).limit(1)
+    ).scalars().first()
+    if row is None:
+        return {"status": "no_scan_yet", "daily_schedule": "02:17 UTC", "schedule_enabled": True}
+    return {
+        "status": row.status,
+        "scan_id": row.id,
+        "trigger": row.trigger,
+        "created_at": _to_iso(row.created_at),
+        "catalogue_size": row.catalogue_size,
+        "candidate_count": row.candidate_count,
+        "threshold": row.threshold,
+        "similarity_method": row.similarity_method,
+        "candidates": row.candidates,
+        "automatic_evolution": False,
+        "automatic_publication": False,
     }
 
 
