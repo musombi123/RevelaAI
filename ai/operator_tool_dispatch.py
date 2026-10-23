@@ -1,9 +1,9 @@
 """Explicit, fail-closed dispatch for privileged RevelaAI operator tools.
 
-Only requests that name Sci Defend/Sci-Core or Meta Engineer and clearly ask
-for a direct operation are intercepted. Explanatory questions stay in ordinary
-chat. Privileged operations require the canonical RevelaCode admin verifier.
-No code is deployed, executed, or merged by this dispatcher.
+Only explicit tool-directed operations are intercepted. Explanatory questions
+stay in ordinary chat. Sci Defend and Meta Engineer operations require canonical
+RevelaCode administrator verification; Genesis and Infinite Mind proposals use
+the Core Mesh operator gate. No candidate code is executed or automatically merged.
 """
 from __future__ import annotations
 
@@ -389,8 +389,9 @@ def _format_result(
     elif success:
         response = f"{tool} completed the {operation.replace('_', ' ')} operation."
     else:
-        code = str(result.get("code") or result.get("error") or result.get("status") or "tool_failed")[:100]
-        message = str(result.get("message") or "").strip()
+        nested_error = result.get("error") if isinstance(result.get("error"), dict) else {}
+        code = str(result.get("code") or nested_error.get("code") or result.get("status") or "tool_failed")[:100]
+        message = str(result.get("message") or nested_error.get("message") or "").strip()[:400]
         response = (
             f"{tool} {operation.replace('_', ' ')} was not completed (status: {status}; code: {code}). "
             + (message + " " if message else "")
@@ -409,6 +410,15 @@ def _format_result(
         key: value for key, value in result.items()
         if not str(key).startswith("_") and key not in {"stack", "traceback", "authorization", "token"}
     }
+    try:
+        public_bytes = json.dumps(public_result, ensure_ascii=False, default=str).encode("utf-8")
+        if len(public_bytes) > 16_000:
+            public_result = {
+                "truncated": True,
+                "summary": public_bytes[:16_000].decode("utf-8", errors="ignore"),
+            }
+    except (TypeError, ValueError):
+        public_result = {"summary": "Tool result could not be safely serialized."}
     tool_execution = {
         "source": "server_operator_dispatch",
         "tool": tool,
