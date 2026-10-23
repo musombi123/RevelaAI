@@ -222,6 +222,39 @@ def test_canonical_usect_usage_meter_map_does_not_depend_on_request_body(path, m
     assert platform._usect_meter_key(path, method) == expected
 
 
+def test_startup_rvx_dialect_reconciliation_rotates_only_when_stale(monkeypatch):
+    monkeypatch.setattr(platform, "verify_dialect", lambda: {"valid": False, "reason": "Dialect obsolete"})
+    monkeypatch.setattr(
+        platform, "evolve_dialect",
+        lambda **kwargs: {
+            "day": "2026-10-23",
+            "dialect_version": "rvx-test-day",
+            "artifact_sha256": "a" * 64,
+        },
+    )
+
+    class FakeLedger:
+        def append(self, **kwargs):
+            return {"recorded": True}
+
+    monkeypatch.setattr(platform, "AuditLedger", FakeLedger)
+    rotated = platform._ensure_current_rvx_dialect()
+    assert rotated["status"] == "rotated"
+    assert rotated["dialect_version"] == "rvx-test-day"
+
+    monkeypatch.setattr(
+        platform, "verify_dialect",
+        lambda: {"valid": True, "day": "2026-10-23", "dialect_version": "rvx-test-day"},
+    )
+    monkeypatch.setattr(
+        platform, "evolve_dialect",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("a current daily dialect must not rotate again")),
+    )
+    current = platform._ensure_current_rvx_dialect()
+    assert current["status"] == "current"
+    assert current["day"] == "2026-10-23"
+
+
 def test_daily_twin_scan_schedule_and_latest_evidence_are_real(monkeypatch):
     from datetime import datetime, timezone
 
