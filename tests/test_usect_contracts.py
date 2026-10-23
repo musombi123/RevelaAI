@@ -19,6 +19,13 @@ def test_native_ai_application_registers_documented_usect_routes():
         "/v1/migrate/scan",
         "/v1/migrate/migrate",
         "/v1/migrate/build-robot",
+        "/api/elimu/hubs",
+        "/api/elimu/progress",
+        "/api/certificates/generate",
+        "/api/certificates/{certificate_id}",
+        "/api/accounts/profile/download",
+        "/api/accounts/certificates",
+        "/api/verify/certificate/{certificate_id}",
     }
     assert required <= paths
 
@@ -121,3 +128,15 @@ def test_render_uses_documented_primary_and_fallback_gemini_models():
     assert """      - key: GEMINI_FALLBACK_MODEL
         value: "gemini-3.5-flash-lite"
 """ in blueprint
+
+
+def test_elimu_bridge_forwards_data_without_creating_a_second_store():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "fastapi_routes" / "platform_hubs.py").read_text(encoding="utf-8")
+    assert '"/api/study/elimu/hubs"' in source
+    assert '"/api/study/elimu/progress"' in source
+    assert '"/api/accounts/profile/download"' in source
+    assert "MongoClient" not in source
+    assert "MongoClient" not in source
