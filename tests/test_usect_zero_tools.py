@@ -52,7 +52,7 @@ class USECTZeroCredentialTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "unavailable")
         self.assertFalse(result["executed"])
-        self.assertEqual(result["error_code"], "usect_zero_brain_credential_missing")
+        self.assertEqual(result["error_code"], "usect_zero_brain_token_missing")
         request_core.assert_not_called()
 
 
