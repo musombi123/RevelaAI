@@ -150,7 +150,7 @@ class OperatorToolDispatchTests(unittest.TestCase):
         self.assertFalse(result["operator_tool"]["result"]["all_cores_reachable"])
         self.assertFalse(result["operator_tool"]["safety"]["target_mutation_performed"])
         mesh.assert_called_once_with(force_refresh=True)
-        zero_tool.assert_called_once_with("diagnostics", {})
+        zero_tool.assert_called_once_with("diagnostics", {}, allow_admin_read_only=True)
         sci_scan.assert_called_once_with()
         meta_scan.assert_called_once_with()
 
