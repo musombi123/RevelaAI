@@ -23,14 +23,7 @@ services:
         sync: false
       - key: REVELACODE_ADMIN_VERIFY_TIMEOUT_SECONDS
         value: "15"
-      - key: USECT_ZERO_ENABLED
-        value: "true"
       - key: USECT_ZERO_URL
-        fromService:
-          type: pserv
-          name: usect-zero-core
-          property: hostport
-      - key: USECT_ZERO_BASE_URL
         fromService:
           type: pserv
           name: usect-zero-core
@@ -40,10 +33,13 @@ services:
           type: pserv
           name: usect-zero-core
           envVarKey: USECT_ZERO_ADMIN_TOKEN
-      # A least-privilege scoped developer key issued by USECT-ZERO for the
-      # registered brain-tool scopes. Do not put the admin token here.
-      - key: USECT_ZERO_BRAIN_API_KEY
-        sync: false
+      # Generated on the private core and linked here automatically. This identity is
+      # restricted to the brain's read/proposal scopes and is never an admin credential.
+      - key: USECT_ZERO_BRAIN_TOKEN
+        fromService:
+          type: pserv
+          name: usect-zero-core
+          envVarKey: USECT_ZERO_BRAIN_TOKEN
       - key: GENESIS_BASE_URL
         fromService:
           type: pserv
@@ -102,6 +98,9 @@ services:
       - key: USECT_ZERO_DATA_DIR
         value: /var/data/usect-zero
       - key: USECT_ZERO_ADMIN_TOKEN
+        generateValue: true
+      # Separate generated service identity for bounded RevelaAI brain operations.
+      - key: USECT_ZERO_BRAIN_TOKEN
         generateValue: true
   # Core-One: standalone Genesis service. Build from the repository root so
   # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
