@@ -203,7 +203,7 @@ def _automation_entitlement_error(authorization: str) -> tuple[dict[str, Any], i
         return None
     payload, status_code = _unwrap(error)
     payload = dict(payload)
-    payload.setdefault("status", "blocked")
+    payload["status"] = "blocked"
     payload.setdefault("message", "This AI tool action is not currently entitled.")
     return payload, status_code
 
@@ -236,6 +236,7 @@ def dispatch_operator_tool(message: str, *, authorization: str = "") -> dict[str
         operator_error = _core_mesh_operator_error(authorization)
         if operator_error is not None:
             result, code = _unwrap(operator_error)
+            result["status"] = "blocked"
             result["invoked"] = False
             result["executed"] = False
             result["http_status"] = code
