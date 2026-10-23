@@ -27,6 +27,10 @@ services:
       # Model-provider secret remains server-side; the API base URL has a safe source default.
       - key: GEMINI_API_KEY
         sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-3.8-flash"
+      - key: GEMINI_FALLBACK_MODEL
+        value: "gemini-3.5-flash-lite"
       # Same license-signing keypair used across all license issuers/verifiers in this platform.
       - key: REVELA_LICENSE_PRIVATE_KEY
         sync: false
