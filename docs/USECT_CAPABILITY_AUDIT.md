@@ -1,10 +1,9 @@
 # USECT Capability Coverage Audit
 
-**Scope:** repository-level implementation and route/test evidence, based on the checked-in code.
-**Status:** changes in this branch are not production-effective until PR #96 is merged and Render deploys the Blueprint in render.yaml. The RevelaCode-Backend Elimu compatibility work is in a separate PR.
+**Scope:** repository-level implementation and route/test evidence, based on the checked-in code.  
+**Status (checked 2026-10-23):** PR #96 was merged to `main` at `f94b610b44a6d3ac5c24080ae1b1bed68f57bd0f`, and the recorded GitHub Actions checks passed. The merged `render.yaml` starts `revela_platform.fastapi_app:app`, the gateway that serves billing, marketplace, Foundry, Seed, audit, and metering routes. These are repository and CI facts—not confirmation that Render successfully deployed the revision. Live service health, runtime secrets, database durability, private-core reachability, and provider credentials still require deployment verification. The RevelaCode-Backend Elimu compatibility work is tracked separately in [PR #36](https://github.com/musombi123/RevelaCode-Backend/pull/36), which is still open as of this check.
 
 This document separates a capability that has code and routes from one that has been verified live. Neither a route nor a passing unit test proves its production credentials, private-service reachability, supplier pricing, hardware safety, or regulatory conformity.
-
 ## Capability matrix
 
 | Capability | Covered in code in this branch | Honest current boundary |
@@ -47,8 +46,8 @@ This document separates a capability that has code and routes from one that has 
 
 ## What must still be verified after deployment
 
-1. Merge PR #96 and deploy/sync the Render Blueprint so the platform revenue gateway—not only the AI sub-app—is the entry point.
-2. Merge the separate RevelaCode-Backend PR for Elimu aliases/QR URL fixes and deploy that backend.
+1. Confirm Render has successfully deployed the merged `main` revision and synced the Blueprint. From the live service, verify `GET /v1/platform/health` and `GET /v1/inspector/inspect`; confirm Core Zero, Genesis/Core One, and Infinite Mind/Core Two are reachable; and confirm the daily scheduler reports running. A successful merge and green CI checks do not prove live deployment or runtime readiness.
+2. Merge and deploy the separate [RevelaCode-Backend PR #36](https://github.com/musombi123/RevelaCode-Backend/pull/36) for Elimu route aliases and certificate QR verification, then check the public verification flow end to end.
 3. Check live health for Core Zero, Genesis/Core One, and Infinite Mind/Core Two using the deployed services; structural route presence is not upstream health.
 4. Verify deployed license signing/verification keys, payment provider configuration, database persistence, and private service links. No real secrets are stored in this repository as defaults.
 5. Run a real authenticated end-to-end license/checkout/webhook/usage/marketplace cycle in a controlled environment.
