@@ -190,11 +190,11 @@ def registered_routes(application: Any) -> set[tuple[str, str]]:
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", None)
             child = getattr(route, "app", None)
-            # FastAPI / Starlette can expose a Mount wrapped as an ASGI middleware
-            # object, so identify nested applications by their route collection as
-            # well as by the concrete Mount class.
-            child_routes = _routes_on_app(child) if child is not None and not methods else []
-            if child_routes and (isinstance(route, Mount) or not methods):
+            # Mounted applications may be wrapped as ASGI middleware objects.
+            # Recurse whenever the child exposes an actual route collection; normal
+            # endpoint callables have none and remain ordinary leaf routes.
+            child_routes = _routes_on_app(child) if child is not None else []
+            if child_routes:
                 child_prefix = _join(prefix, path) if path.strip("/") else prefix
                 walk(child, child_prefix)
                 continue
