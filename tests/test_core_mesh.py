@@ -14,6 +14,10 @@ def _online_dashboard():
     }
 
 
+def test_core_mesh_status_timeout_is_ten_seconds():
+    assert core_mesh._TIMEOUT_SECONDS == 10.0
+
+
 def test_normal_chat_does_not_trigger_core_health_fanout(monkeypatch):
     monkeypatch.setattr(core_mesh, "_cache_value", None)
 
