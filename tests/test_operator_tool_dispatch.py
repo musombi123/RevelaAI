@@ -65,8 +65,10 @@ class OperatorToolDispatchTests(unittest.TestCase):
         self.assertTrue(result["operator_tool"]["executed"])
         self.assertFalse(result["operator_tool"]["safety"]["target_mutation_performed"])
 
+    @patch("ai.operator_tool_dispatch._automation_entitlement_error", return_value=None)
+    @patch("ai.operator_tool_dispatch._core_mesh_operator_error", return_value=None)
     @patch("fastapi_routes.core_mesh._proposal")
-    def test_genesis_proposal_uses_guarded_core_mesh_operator_route(self, proposal):
+    def test_genesis_proposal_uses_guarded_core_mesh_operator_route(self, proposal, operator_error, entitlement_error):
         proposal.return_value = JSONResponse(
             {"status": "success", "data": {"proposal_id": "genesis-123"}},
             status_code=202,
@@ -84,8 +86,10 @@ class OperatorToolDispatchTests(unittest.TestCase):
         self.assertTrue(result["operator_tool"]["proposal_created"])
         self.assertIn("no tool was activated", result["response"])
 
+    @patch("ai.operator_tool_dispatch._automation_entitlement_error", return_value=None)
+    @patch("ai.operator_tool_dispatch._core_mesh_operator_error", return_value=None)
     @patch("fastapi_routes.core_mesh._proposal")
-    def test_infinite_mind_proposal_stays_approval_gated(self, proposal):
+    def test_infinite_mind_proposal_stays_approval_gated(self, proposal, operator_error, entitlement_error):
         proposal.return_value = JSONResponse(
             {"status": "success", "data": {"proposal_id": "mind-123"}},
             status_code=202,
@@ -101,13 +105,14 @@ class OperatorToolDispatchTests(unittest.TestCase):
         self.assertFalse(result["operator_tool"]["executed"])
         self.assertTrue(result["operator_tool"]["safety"]["human_approval_required"])
 
+    @patch("ai.operator_tool_dispatch._automation_entitlement_error", return_value=None)
     @patch("fastapi_routes.admin_auth.require_platform_admin")
     @patch("ai.core_mesh.get_core_mesh_dashboard")
     @patch("ai.usect_zero_tools.execute_tool")
     @patch("fastapi_routes.sci_core._shield_scan")
     @patch("fastapi_routes.meta_engineer._scan")
     def test_guardian_sweep_runs_live_components_and_reports_partial_health(
-        self, meta_scan, sci_scan, zero_tool, mesh, require_admin
+        self, meta_scan, sci_scan, zero_tool, mesh, require_admin, entitlement_error
     ):
         require_admin.return_value = ("canonical-admin-id", None)
         mesh.return_value = {
@@ -148,6 +153,29 @@ class OperatorToolDispatchTests(unittest.TestCase):
         zero_tool.assert_called_once_with("diagnostics", {})
         sci_scan.assert_called_once_with()
         meta_scan.assert_called_once_with()
+
+    @patch("ai.operator_tool_dispatch._automation_entitlement_error")
+    @patch("ai.operator_tool_dispatch._core_mesh_operator_error", return_value=None)
+    @patch("fastapi_routes.core_mesh._proposal")
+    def test_core_mesh_proposal_is_blocked_when_central_entitlement_denies(self, proposal, operator_error, entitlement):
+        entitlement.return_value = (
+            {
+                "status": "blocked",
+                "code": "premium_entitlement_required",
+                "message": "Start the Smart AI trial or subscribe.",
+            },
+            402,
+        )
+        result = dispatch_operator_tool(
+            "Create a safe, reviewable tool through Genesis (Core One) for ecosystem monitoring",
+            authorization="Bearer authenticated-operator-token",
+        )
+        proposal.assert_not_called()
+        self.assertEqual(result["operator_tool"]["status"], "blocked")
+        self.assertFalse(result["operator_tool"]["invoked"])
+        self.assertFalse(result["operator_tool"]["executed"])
+        self.assertEqual(result["operator_tool"]["http_status"], 402)
+        self.assertEqual(result["operator_tool"]["code"], "premium_entitlement_required")
 
     @patch("fastapi_routes.admin_auth.require_platform_admin")
     @patch("fastapi_routes.meta_engineer._propose")
