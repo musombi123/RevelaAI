@@ -102,7 +102,7 @@ def _run_guardian_sweep() -> dict[str, Any]:
 
     jobs = {
         "core_mesh": lambda: get_core_mesh_dashboard(force_refresh=True),
-        "core_zero_diagnostics": lambda: execute_tool("diagnostics", {}),
+        "core_zero_diagnostics": lambda: execute_tool("diagnostics", {}, allow_admin_read_only=True),
         "sci_defend_scan": _shield_scan,
         "meta_engineer_scan": _scan,
     }
