@@ -1,6 +1,6 @@
 # USECT-ZERO backend integration
 
-The Flask backend exposes the model-free Go core through a bounded gateway. The core remains an independent service: the adapter does not execute candidate code, auto-deploy changes, operate hardware, or substitute a paid AI model.
+The native FastAPI gateway exposes the model-free Go core through a bounded gateway. The core remains an independent service: the adapter does not execute candidate code, auto-deploy changes, operate hardware, or substitute a paid AI model.
 
 ## Safe-by-default configuration
 
@@ -32,7 +32,7 @@ The repository's `render.yaml` now describes two services: the public Flask gate
 - The new persistent store starts empty. Records that existed only in a previous ephemeral or unreachable core instance are not automatically migrated; preserve/export them from that instance first if it is still available.
 
 
-The local HTTP URL above is suitable only when both processes share the same host/network namespace. In production, the Render Blueprint supplies `USECT_ZERO_URL` through the private-service reference; Do not expose the Go admin endpoints directly to the public internet. If the service crosses an untrusted network, use TLS and network access controls.
+The local HTTP URL above is suitable only when both processes share the same host/network namespace. In production, the Render Blueprint supplies `USECT_ZERO_URL` through the private-service reference. Do not expose the Go admin endpoints directly to the public internet. If the service crosses an untrusted network, use TLS and network access controls.
 
 The backend's `USECT_ZERO_ADMIN_TOKEN` must match the Go core secret. The Flask route only sends it after the existing authoritative platform-admin check succeeds. Do not send this token from the browser. Never forward the frontend's bearer JWT to the Go service.
 
