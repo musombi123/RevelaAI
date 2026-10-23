@@ -80,6 +80,7 @@ from ai.core_mesh import (
     propose_genesis_invention,
     propose_mind_evolution,
 )
+from ai.operator_tool_dispatch import dispatch_operator_tool
 from ai.tool_registry import (
     GenesisToolRegistryError,
     execute_active_tool,
@@ -1096,6 +1097,7 @@ def process_message(
     country: str = "KE",
     language: str = "",
     allow_genesis_tools: bool = True,
+    authorization: str = "",
 ) -> dict:
     """
     Execute the RevelaAI intelligence pipeline.
@@ -1301,6 +1303,21 @@ def process_message(
 
             "error_code": None,
         }
+
+    # =====================================================
+    # DIRECT SCI-DEFEND / META-ENGINEER DISPATCH
+    # =====================================================
+    #
+    # Only named, explicit operator actions are intercepted. The dispatcher
+    # verifies platform-admin identity server-side and returns the actual tool
+    # outcome; ordinary explanatory questions continue through normal chat.
+    #
+    operator_tool_result = dispatch_operator_tool(
+        normalized_message,
+        authorization=authorization,
+    )
+    if operator_tool_result is not None:
+        return operator_tool_result
 
     # =====================================================
     # FIRST-CLASS USECT-ZERO TOOL DISPATCH
