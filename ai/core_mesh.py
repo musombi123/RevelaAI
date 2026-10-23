@@ -329,16 +329,19 @@ def _dashboard_snapshot() -> dict:
             "feedback_count": learning_count,
         },
         "configuration": {
-            "zero_url_configured": bool(os.getenv("USECT_ZERO_URL") or os.getenv("USECT_ZERO_BASE_URL")),
+            # Render links the private URL and generated brain credential through
+            # the Blueprint. Do not require a manually provisioned developer key,
+            # duplicated URL alias, feature flag, or timeout override.
+            "zero_url_configured": bool(core_base_url("zero")),
             "zero_admin_token_configured": bool(core_admin_token("zero")),
+            "zero_brain_token_configured": bool(os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()),
             "zero_enabled": usect_zero_is_enabled(),
-            "zero_brain_key_configured": bool(os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()),
             "zero_tools_ready": bool(
                 usect_zero_is_enabled()
-                and (os.getenv("USECT_ZERO_URL") or os.getenv("USECT_ZERO_BASE_URL"))
-                and core_admin_token("zero")
-                and os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
+                and core_base_url("zero")
+                and os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
             ),
+            "zero_admin_actions_ready": bool(core_base_url("zero") and core_admin_token("zero")),
             "genesis_url_configured": bool(os.getenv("GENESIS_BASE_URL")),
             "genesis_proxy_credential_configured": bool(os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")),
             "genesis_orchestrator_tools_enabled": os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
