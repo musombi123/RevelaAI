@@ -1264,12 +1264,7 @@ def usect_zero_heal(
     The current Go core produces a repository-level recovery proposal. It cannot
     prove or claim that the supplied tool_id was repaired by this request.
     """
-    claims, license_record = _active_license(session, license_key or "", user_id)
-    try:
-        enforce_tool_creation_quota(session, license_record)
-    except LicenseError as exc:
-        raise _license_http_error(exc) from exc
-
+    claims, _license_record = _active_license(session, license_key or "", user_id)
     error_digest = hashlib.sha256(body.error.encode("utf-8")).hexdigest()
     proposal = execute_usect_zero_tool("heal", {})
     status = str(proposal.get("status") or "unknown")
