@@ -176,8 +176,31 @@ def _routes_on_app(app: Any) -> list[Any]:
     return []
 
 
+def _openapi_registered_routes(application: Any) -> set[tuple[str, str]]:
+    """Use FastAPI's compiled OpenAPI paths to cover lazily included routers."""
+    discovered: set[tuple[str, str]] = set()
+    schema_builder = getattr(application, "openapi", None)
+    if not callable(schema_builder):
+        return discovered
+    try:
+        schema = schema_builder()
+    except Exception:
+        return discovered
+    paths = schema.get("paths", {}) if isinstance(schema, dict) else {}
+    if not isinstance(paths, dict):
+        return discovered
+    for path, operations in paths.items():
+        if not isinstance(path, str) or not isinstance(operations, dict):
+            continue
+        for method in operations:
+            normalized = str(method).upper()
+            if normalized in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                discovered.add((normalized, path))
+    return discovered
+
+
 def registered_routes(application: Any) -> set[tuple[str, str]]:
-    """Read real FastAPI/Starlette route registrations, recursively including mounted apps."""
+    """Read actual FastAPI/Starlette routes, including mounted and lazily included routers."""
     discovered: set[tuple[str, str]] = set()
     visited: set[tuple[int, str]] = set()
 
@@ -186,6 +209,10 @@ def registered_routes(application: Any) -> set[tuple[str, str]]:
         if marker in visited:
             return
         visited.add(marker)
+        discovered.update(
+            (_method, _join(prefix, _path) if prefix else _path)
+            for _method, _path in _openapi_registered_routes(app)
+        )
         for route in _routes_on_app(app):
             path = getattr(route, "path", "")
             methods = getattr(route, "methods", None)
