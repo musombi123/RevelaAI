@@ -390,7 +390,7 @@ def _record_activity(outcome: dict[str, Any]) -> None:
 
 
 def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Invoke one known tool using a dedicated scoped brain key, never admin credentials."""
+    """Invoke one known tool using its dedicated scoped brain key, never admin credentials."""
     spec = _CATALOG_BY_OPERATION.get(str(operation or ""))
     if spec is None:
         return {
@@ -417,12 +417,16 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
         })
         return result
 
-    api_key = os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
+    # Match the canonical Render Blueprint name and retain the legacy alias.
+    api_key = (
+        os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
+        or os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
+    )
     if not api_key:
         result.update({
             "status": "unavailable",
             "error_code": "usect_zero_brain_token_missing",
-            "message": "The generated USECT-ZERO brain credential is not linked to RevelaAI. Sync the Render Blueprint.",
+            "message": "Scoped USECT-ZERO tool access is unavailable for this operation.",
         })
         return result
 

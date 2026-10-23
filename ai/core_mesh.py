@@ -25,7 +25,8 @@ from services.usect_zero_client import is_enabled as usect_zero_is_enabled
 
 CACHE_TTL_SECONDS = 12.0
 MAX_RESPONSE_BYTES = 1_000_000
-_TIMEOUT_SECONDS = 1.8
+# Match the requested ten-second window for hosted private-core status probes.
+_TIMEOUT_SECONDS = 10.0
 
 _cache_lock = threading.Lock()
 _cache_value: dict | None = None
