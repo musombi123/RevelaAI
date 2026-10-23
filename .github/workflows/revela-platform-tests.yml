@@ -18,7 +18,7 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt "pytest>=8,<10"
       - name: Compile all new Python modules
-        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor ai/core_mesh.py ai/tool_registry.py ai/operator_tool_dispatch.py services/ai_service.py fastapi_routes/ai.py fastapi_routes/chat.py fastapi_routes/core_mesh.py
+        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor core_inspector ai/core_mesh.py ai/tool_registry.py ai/operator_tool_dispatch.py services/ai_service.py fastapi_routes/ai.py fastapi_routes/chat.py fastapi_routes/core_mesh.py
       - name: Test direct operator tool dispatch and Guardian safety gates
         run: python -m pytest -q tests/test_operator_tool_dispatch.py
       - name: Import FastAPI and verify route registration
@@ -35,6 +35,16 @@ jobs:
               "/v1/foundry/build",
               "/v1/seed/{build_id}",
               "/v1/auditor/verify",
+              "/v1/zero/heal",
+              "/v1/one/genesis",
+              "/v1/two/improve/{tool_id}",
+              "/v1/orchestrator/run",
+              "/v1/evolve/scan",
+              "/v1/evolve/evolve",
+              "/v1/inspector/inspect",
+              "/v1/inspector/produce",
+              "/v1/auditor/reports/generate",
+              "/v1/auditor/reports/{report_id}/verify",
           }
           missing = sorted(required - paths)
           assert not missing, f"Required routes missing: {missing}"
@@ -42,5 +52,7 @@ jobs:
           PY
       - name: Run Genesis registry and Core Mesh integration tests
         run: python -m pytest -q tests/test_genesis_tool_registry.py tests/test_core_mesh.py
+      - name: Run USECT evidence inventory, report verification, ordered pipeline and metering tests
+        run: python -m pytest -q tests/test_usect_capability_surface.py
       - name: Run RVX, key, license, Foundry, Seed and Auditor tests
         run: python -m pytest -q tests/test_revela_security.py tests/test_fastapi_revenue.py tests/test_mesh_receiver.py
