@@ -84,3 +84,21 @@ The diagnostics report samples at most 50 paths per drift category while retaini
 - It does not make the existing Meta-Engineer or Brain OS routes depend on USECT-ZERO.
 
 Deploy and test the Go core as a private service first, then enable the Flask adapter with the environment variables above. Keep the feature flag off until the private core service and secret are configured.
+
+
+## Deployment wiring (automatic)
+
+The Render Blueprint is the source of truth for the RevelaAI-to-USECT-ZERO connection. Syncing
+`render.yaml` links the private core address and its generated credentials automatically; no
+manually created `USECT_ZERO_BRAIN_API_KEY`, enable flag, or timeout variable is required.
+
+The generated `USECT_ZERO_BRAIN_TOKEN` is a separate machine identity, not an admin token or a
+human-issued developer key. The Go API accepts it only for `scan:read`, `heal:propose`,
+`assemble:propose`, `radar:compare`, `bridge:propose`, and `mind:compile`, with per-scope
+rate limiting. It cannot approve key requests, apply recovery, perform admin actions, or authorize
+hardware actuation. The admin token remains separate and is linked from the core service by the
+Blueprint. Health is determined by the real `/v1/health` response; a missing service address or an
+unreachable core remains an explicit error rather than a synthetic healthy status.
+
+The HTTP client uses a fixed 10-second connect/read timeout. The legacy `USECT_ZERO_ENABLED` and
+`USECT_ZERO_TIMEOUT_SECONDS` variables no longer control runtime behavior.
