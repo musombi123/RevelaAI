@@ -6,7 +6,7 @@ services:
     name: RevelaAI
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn asgi:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: uvicorn revela_platform.fastapi_app:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: REVELAAI_TEXT_PROVIDERS
         value: "gemini,hf,mvi"

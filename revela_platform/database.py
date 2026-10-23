@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, String, Text, UniqueConstraint, create_engine, event
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, JSON, LargeBinary, String, Text, UniqueConstraint, create_engine, event
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 
@@ -142,6 +142,32 @@ class AuditRecord(Base):
     action: Mapped[str] = mapped_column(String(100), index=True)
     object_id: Mapped[str] = mapped_column(String(160), default="")
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class ComplianceReportRecord(Base):
+    """Persist a draft report and its exact PDF so its QR can verify the issued artifact."""
+    __tablename__ = "revela_compliance_reports"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    owner_user_id: Mapped[str] = mapped_column(String(160), index=True)
+    report_kind: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="draft_readiness_report", index=True)
+    report_sha256: Mapped[str] = mapped_column(String(64))
+    report_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    pdf_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+class EvolutionTwinScanRecord(Base):
+    """Immutable evidence snapshot from a manual or scheduled catalog similarity scan."""
+    __tablename__ = "revela_evolution_twin_scans"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    trigger: Mapped[str] = mapped_column(String(24), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="completed", index=True)
+    catalogue_size: Mapped[int] = mapped_column(Integer, default=0)
+    candidate_count: Mapped[int] = mapped_column(Integer, default=0)
+    threshold: Mapped[float] = mapped_column(Float, default=0.8)
+    similarity_method: Mapped[str] = mapped_column(String(64), default="lexical-token-jaccard-v1")
+    candidates: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
