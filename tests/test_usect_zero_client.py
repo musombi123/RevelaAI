@@ -17,6 +17,7 @@ def clear_zero_configuration(monkeypatch):
         "RENDER_EXTERNAL_URL",
         "K_SERVICE",
         "DYNO",
+        "ENVIRONMENT",
     ):
         monkeypatch.delenv(name, raising=False)
 
