@@ -83,7 +83,7 @@ The diagnostics report samples at most 50 paths per drift category while retaini
 - The React admin console consumes the Flask gateway; the core service itself does not serve a separate admin dashboard.
 - It does not make the existing Meta-Engineer or Brain OS routes depend on USECT-ZERO.
 
-Deploy and test the Go core as a private service first, then enable the Flask adapter with the environment variables above. Keep the feature flag off until the private core service and secret are configured.
+Deploy the Go core as a private service and sync the Render Blueprint. The Blueprint supplies the private service address and links generated service credentials automatically. The integration has no manual enable flag, manual brain-key, or timeout override; missing wiring is reported as a real configuration error.
 
 
 ## Deployment wiring (automatic)
