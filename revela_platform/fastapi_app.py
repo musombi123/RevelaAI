@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -42,9 +42,21 @@ from core_seed.seed_runner import SeedError, SeedRunner
 from core_uncopyable.dna_vault_guard import DnaVaultError, sign_tool_watermark, verify_tool_watermark
 from core_uncopyable.license_lock import require_enterprise_claims
 from core_auditor.ledger import AuditLedger, AuditLedgerError
+from core_auditor.compliance_reports import (
+    DRAFT_WARNING,
+    SUPPORTED_REPORT_KINDS,
+    build_compliance_readiness_pdf,
+    canonical_sha256,
+)
+from core_inspector.inspector import inspect_capabilities
+from core_evolve.engine import EvolutionEngine, EvolutionError
+from core_evolve.models import EvolutionRequest, MetricTarget
+from ai.core_mesh import CoreMeshError, queue_genesis_demand, propose_mind_evolution
+from ai.usect_zero_tools import execute_tool as execute_usect_zero_tool
 from marketplace.service import country_bundle, creator_earnings, safety_screen
 from revela_platform.database import (
     AuditRecord,
+    ComplianceReportRecord,
     FactoryRecord,
     SeedRecord,
     CheckoutIntent,
@@ -90,6 +102,8 @@ app.add_middleware(
     allow_headers=[
         "Authorization", "Content-Type", "userId", "X-User-ID",
         "X-Session-ID", "X-Request-ID", "Accept", "Origin",
+        "X-Revela-License", "X-Country", "X-API-Key", "X-Device-Token",
+        "X-Admin-Token", "X-Organ-Admin-Token",
     ],
 )
 
@@ -1134,6 +1148,729 @@ async def licensed_tool_guard(request: Request, call_next):
     return response
 
 
+
+
+# =========================================================
+# CANONICAL USECT CORE SURFACE
+# =========================================================
+# These endpoints route through the existing signed licensing, billing,
+# audit and core-service boundaries. They return proposals, not auto-deployments.
+
+class ZeroHealInput(BaseModel):
+    tool_id: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    error: str = Field(min_length=1, max_length=3000)
+
+
+class GenesisDemandInput(BaseModel):
+    demand: str = Field(min_length=1, max_length=3999)
+    country: str = Field(default="KE", min_length=2, max_length=2)
+    language: str = Field(default="en", min_length=2, max_length=5)
+
+
+class ImproveToolInput(BaseModel):
+    objective: str = Field(min_length=8, max_length=500)
+
+
+class OrchestratorRunInput(BaseModel):
+    demand: str = Field(min_length=8, max_length=3999)
+    tool_id: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+    error: str = Field(min_length=1, max_length=3000)
+    objective: str = Field(
+        default="Assess a safe, evidence-backed improvement while preserving existing safeguards.",
+        min_length=8, max_length=500,
+    )
+    country: str = Field(default="KE", min_length=2, max_length=2)
+    language: str = Field(default="en", min_length=2, max_length=5)
+
+
+class TwinScanInput(BaseModel):
+    min_similarity: float = Field(default=0.80, ge=0.50, le=1.0)
+    max_candidates: int = Field(default=50, ge=1, le=100)
+
+
+class EvolutionStartInput(BaseModel):
+    factory_id: str = Field(min_length=1, max_length=160, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+    objective: str = Field(min_length=8, max_length=2000)
+    metrics: list[MetricTarget] = Field(min_length=1, max_length=12)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+    requested_depth: int = Field(default=1, ge=1, le=3)
+    twin_baseline: dict[str, float] = Field(default_factory=dict, max_length=20)
+
+
+class InspectorProduceInput(BaseModel):
+    demand: str = Field(min_length=8, max_length=3000)
+    country: str = Field(default="KE", min_length=2, max_length=2)
+    language: str = Field(default="en", min_length=2, max_length=5)
+    requirements: list[str] = Field(default_factory=list, max_length=50)
+    resources_available: dict[str, int | float | str | bool] = Field(default_factory=dict, max_length=50)
+    simulate_human_usage: bool = True
+
+
+class ComplianceReportInput(BaseModel):
+    report_kind: str = Field(pattern=r"^(CE|UL|ISO9001|ROHS|FCC)$")
+    country: str = Field(default="KE", min_length=2, max_length=2)
+    scope: str = Field(min_length=8, max_length=3000)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=25)
+    checks: list[str] = Field(default_factory=list, max_length=40)
+    evidence_gaps: list[str] = Field(default_factory=list, max_length=40)
+
+
+def _persist_usect_event(actor: str, action: str, object_id: str,
+                          detail: dict[str, Any] | None = None) -> bool:
+    """Write a minimal operation record; never accept raw prompts, tokens or errors."""
+    safe_detail = detail or {}
+    try:
+        with SessionLocal() as session:
+            _audit(session, actor, action, object_id, safe_detail)
+            session.commit()
+    except Exception:
+        # If SQL audit is unavailable the caller still receives its operation result;
+        # the hash-chain result is separately reported where required.
+        pass
+    try:
+        AuditLedger().append(
+            actor_user_id=actor, action=action, object_id=object_id,
+            detail=safe_detail,
+        )
+        return True
+    except AuditLedgerError:
+        return False
+
+
+def _require_owned_factory_or_tool(resource_id: str, user_id: str) -> tuple[str, str]:
+    with SessionLocal() as session:
+        factory = session.get(FactoryRecord, resource_id)
+        tool = session.get(ToolRecord, resource_id)
+        record = factory or tool
+        if record is None:
+            raise HTTPException(status_code=404, detail="The target factory/tool was not found in the RevelaCode registry.")
+        owner = record.owner_user_id if factory else record.creator_user_id
+        if owner != user_id and not _reviewer(user_id):
+            raise HTTPException(status_code=403, detail="Only the target owner or an approved reviewer may request this improvement.")
+        label = record.name
+        return owner, label
+
+
+@app.post("/v1/zero/heal", status_code=202, tags=["usect-zero"])
+def usect_zero_heal(
+    body: ZeroHealInput,
+    request: Request,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    """Ask Core Zero to propose repository recovery for a reported tool failure.
+
+    The current Go core produces a repository-level recovery proposal. It cannot
+    prove or claim that the supplied tool_id was repaired by this request.
+    """
+    claims, license_record = _active_license(session, license_key or "", user_id)
+    try:
+        enforce_tool_creation_quota(session, license_record)
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+
+    error_digest = hashlib.sha256(body.error.encode("utf-8")).hexdigest()
+    proposal = execute_usect_zero_tool("heal", {})
+    status = str(proposal.get("status") or "unknown")
+    audit_recorded = _persist_usect_event(
+        user_id, "usect.zero.heal_proposed", body.tool_id,
+        {"error_sha256": error_digest, "error_length": len(body.error),
+         "license_id": str(claims.get("jti") or ""), "proposal_status": status},
+    )
+    return {
+        "status": "proposal_created" if status == "success" else "unavailable",
+        "core": "USECT-ZERO",
+        "tool_id": body.tool_id,
+        "reported_error_sha256": error_digest,
+        "recovery_proposal": proposal,
+        "tool_repaired": False,
+        "automatic_repair": False,
+        "human_approval_required": True,
+        "audit_chain_recorded": audit_recorded,
+        "note": "The current Core Zero integration creates a bounded repository recovery proposal; the supplied tool_id is audit context, not proof that this individual tool was fixed.",
+    }
+
+
+@app.post("/v1/one/genesis", status_code=202, tags=["usect-one"])
+def usect_one_genesis(
+    body: GenesisDemandInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    """Queue a free-text tool demand in Genesis; no code is deployed by this endpoint."""
+    claims, license_record = _active_license(session, license_key or "", user_id, country=_country(body.country))
+    try:
+        enforce_tool_creation_quota(session, license_record)
+        queued = queue_genesis_demand(
+            body.demand, source="revelacode-usect-api",
+            country=_country(body.country), language=body.language,
+        )
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    except CoreMeshError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+    demand_sha256 = hashlib.sha256(body.demand.encode("utf-8")).hexdigest()
+    audit_recorded = _persist_usect_event(
+        user_id, "usect.one.genesis_queued", str(queued.get("id") or queued.get("queue_id") or "queued"),
+        {"demand_sha256": demand_sha256, "country": _country(body.country),
+         "language": body.language, "license_id": str(claims.get("jti") or "")},
+    )
+    return {
+        "core": "USECT-ONE",
+        "status": str(queued.get("status") or "queued"),
+        "demand_sha256": demand_sha256,
+        "queue_result": queued,
+        "artifact_created": False,
+        "human_review_required": True,
+        "automatic_execution": False,
+        "audit_chain_recorded": audit_recorded,
+    }
+
+
+@app.post("/v1/two/improve/{tool_id}", status_code=202, tags=["usect-two"])
+def usect_two_improve(
+    tool_id: str,
+    body: ImproveToolInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    """Ask Infinite Mind for an evidence-backed improvement proposal for an owned target."""
+    claims, _license = _active_license(session, license_key or "", user_id)
+    try:
+        require_enterprise_claims(claims, "evolve")
+        _owner, target_name = _require_owned_factory_or_tool(tool_id, user_id)
+        result = propose_mind_evolution(body.objective, tool_id)
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    except CoreMeshError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}) from exc
+    except HTTPException:
+        raise
+    audit_recorded = _persist_usect_event(
+        user_id, "usect.two.improvement_proposed", tool_id,
+        {"target_name": target_name[:120], "license_id": str(claims.get("jti") or ""),
+         "proposal_only": True},
+    )
+    return {
+        "core": "USECT-TWO",
+        "tool_id": tool_id,
+        "status": str(result.get("status") or "proposal_created"),
+        "improvement": result,
+        "performance_multiplier_claimed": None,
+        "target_modified": False,
+        "automatic_execution": False,
+        "human_review_required": True,
+        "audit_chain_recorded": audit_recorded,
+    }
+
+
+@app.post("/v1/orchestrator/run", status_code=202, tags=["usect-orchestrator"])
+def usect_orchestrator_run(
+    body: OrchestratorRunInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    """Run the Zero → One → Two proposal pipeline in order, continuing with explicit per-step failures."""
+    claims, license_record = _active_license(session, license_key or "", user_id, country=_country(body.country))
+    try:
+        require_enterprise_claims(claims, "evolve")
+        enforce_tool_creation_quota(session, license_record)
+        _require_owned_factory_or_tool(body.tool_id, user_id)
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+
+    steps: list[dict[str, Any]] = []
+    # ZERO: collect actual diagnostics first, then propose recovery for the failure described.
+    diagnostic = execute_usect_zero_tool("diagnostics", {})
+    steps.append({"core": "USECT-ZERO", "operation": "diagnostics",
+                  "status": diagnostic.get("status", "unknown"), "result": diagnostic})
+    error_sha256 = hashlib.sha256(body.error.encode("utf-8")).hexdigest()
+    recovery = execute_usect_zero_tool("heal", {}) if body.error.strip() else {
+        "status": "skipped", "message": "No tool failure was supplied."
+    }
+    steps.append({"core": "USECT-ZERO", "operation": "recovery_proposal",
+                  "status": recovery.get("status", "unknown"), "result": recovery,
+                  "tool_id": body.tool_id, "reported_error_sha256": error_sha256,
+                  "automatic_repair": False})
+
+    # ONE: queue the free-text demand. This does not mean a tool was born yet.
+    demand_sha256 = hashlib.sha256(body.demand.encode("utf-8")).hexdigest()
+    try:
+        genesis = queue_genesis_demand(
+            body.demand, source="revelacode-usect-orchestrator",
+            country=_country(body.country), language=body.language,
+        )
+        steps.append({"core": "USECT-ONE", "operation": "genesis_queue",
+                      "status": genesis.get("status", "queued"), "result": genesis,
+                      "demand_sha256": demand_sha256, "artifact_created": False})
+    except CoreMeshError as exc:
+        steps.append({"core": "USECT-ONE", "operation": "genesis_queue",
+                      "status": "unavailable", "error_code": exc.code,
+                      "message": str(exc)[:300]})
+
+    # TWO: request an improvement proposal for the authenticated user's owned target.
+    try:
+        two = propose_mind_evolution(body.objective, body.tool_id)
+        steps.append({"core": "USECT-TWO", "operation": "improvement_proposal",
+                      "status": two.get("status", "proposal_created"), "result": two,
+                      "target_modified": False})
+    except CoreMeshError as exc:
+        steps.append({"core": "USECT-TWO", "operation": "improvement_proposal",
+                      "status": "unavailable", "error_code": exc.code,
+                      "message": str(exc)[:300]})
+
+    complete = all(step.get("status") not in {"unavailable", "error", "blocked"} for step in steps)
+    audit_recorded = _persist_usect_event(
+        user_id, "usect.orchestrator.pipeline_proposed", body.tool_id,
+        {"demand_sha256": demand_sha256, "error_sha256": error_sha256,
+         "step_count": len(steps), "complete": complete,
+         "license_id": str(claims.get("jti") or "")},
+    )
+    return {
+        "orchestrator": "USECT-ORCHESTRATOR",
+        "status": "proposal_pipeline_completed" if complete else "partial",
+        "order": ["USECT-ZERO", "USECT-ONE", "USECT-TWO"],
+        "steps": steps,
+        "production_merge": False,
+        "automatic_execution": False,
+        "human_approval_required": True,
+        "audit_chain_recorded": audit_recorded,
+        "note": "This runs the ordered diagnostics/recovery-proposal, Genesis queue, and Mind improvement-proposal path. A successful response is not a claim that repair, invention, improvement, or deployment completed.",
+    }
+
+
+def _twin_tokens(tool: ToolRecord) -> set[str]:
+    return set(re.findall(r"[a-z0-9]{2,}", f"{tool.name} {tool.description} {tool.industry}".casefold()))
+
+
+def _jaccard_similarity(left: set[str], right: set[str]) -> float:
+    union = left | right
+    return len(left & right) / len(union) if union else 0.0
+
+
+@app.post("/v1/evolve/scan", tags=["usect-evolve"])
+def usect_evolve_twin_scan(
+    body: TwinScanInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    """On-demand lexical duplicate scan; this is not a semantic embedding or scheduled cron."""
+    claims, _license = _active_license(session, license_key or "", user_id)
+    try:
+        require_enterprise_claims(claims, "evolve")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+
+    published = session.execute(
+        select(ToolRecord).where(ToolRecord.status == "published")
+        .order_by(ToolRecord.created_at.desc()).limit(250)
+    ).scalars().all()
+    token_sets = {tool.id: _twin_tokens(tool) for tool in published}
+    candidates: list[dict[str, Any]] = []
+    for index, left in enumerate(published):
+        for right in published[index + 1:]:
+            score = _jaccard_similarity(token_sets[left.id], token_sets[right.id])
+            if score >= body.min_similarity:
+                candidates.append({
+                    "left_tool_id": left.id, "right_tool_id": right.id,
+                    "left_name": left.name, "right_name": right.name,
+                    "lexical_jaccard": round(score, 4),
+                    "review_status": "human_review_required",
+                })
+    candidates.sort(key=lambda item: item["lexical_jaccard"], reverse=True)
+    candidates = candidates[:body.max_candidates]
+    scan_id = "twin_" + uuid4().hex[:24]
+    audit_recorded = _persist_usect_event(
+        user_id, "usect.evolve.twin_scan", scan_id,
+        {"catalogue_size": len(published), "candidate_count": len(candidates),
+         "threshold": body.min_similarity, "method": "lexical-token-jaccard-v1"},
+    )
+    return {
+        "scan_id": scan_id,
+        "status": "completed",
+        "checked_published_tools": len(published),
+        "candidate_count": len(candidates),
+        "threshold": body.min_similarity,
+        "similarity_method": "lexical-token-jaccard-v1",
+        "daily_schedule_configured": False,
+        "candidates": candidates,
+        "automatic_evolution": False,
+        "automatic_publication": False,
+        "audit_chain_recorded": audit_recorded,
+        "note": "This on-demand lexical scan does not use semantic embeddings, cannot prove a twin, and makes no 10x/50x performance claim. Review candidates against reproducible evidence before evolving or publishing.",
+    }
+
+
+@app.post("/v1/evolve/evolve", status_code=202, tags=["usect-evolve"])
+def usect_evolve_start(
+    body: EvolutionStartInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    claims, _license = _active_license(session, license_key or "", user_id)
+    try:
+        require_enterprise_claims(claims, "evolve")
+        _require_owned_factory_or_tool(body.factory_id, user_id)
+        request_model = EvolutionRequest(
+            system_id=body.factory_id,
+            objective=body.objective,
+            metrics=body.metrics,
+            evidence_refs=body.evidence_refs,
+            requested_depth=body.requested_depth,
+            twin_baseline=body.twin_baseline,
+        )
+        proposal = EvolutionEngine().propose(request_model)
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    except EvolutionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    audit_recorded = _persist_usect_event(
+        user_id, "usect.evolve.proposal_created", proposal.proposal_id,
+        {"system_id": body.factory_id, "generation": proposal.generation,
+         "evidence_ref_count": len(body.evidence_refs), "automatic_merge": False},
+    )
+    return {
+        "proposal": proposal.model_dump(mode="json"),
+        "status": "proposal_created",
+        "improvement_factor": None,
+        "benchmark_required": True,
+        "human_review_required": True,
+        "automatic_merge": False,
+        "automatic_deployment": False,
+        "audit_chain_recorded": audit_recorded,
+    }
+
+
+@app.get("/v1/inspector/inspect", tags=["usect-inspector"])
+def usect_inspector_inspect(
+    user_id: str = Depends(authenticated_user),
+) -> dict[str, Any]:
+    report = inspect_capabilities(app)
+    report["inspected_by"] = user_id
+    return report
+
+
+@app.post("/v1/inspector/produce", status_code=202, tags=["usect-inspector"])
+def usect_inspector_produce(
+    body: InspectorProduceInput,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    claims, license_record = _active_license(session, license_key or "", user_id, country=_country(body.country))
+    try:
+        require_enterprise_claims(claims, "factory_build")
+        enforce_tool_creation_quota(session, license_record)
+        demand_sha256 = hashlib.sha256(body.demand.encode("utf-8")).hexdigest()
+        supplied_requirements = body.requirements or [body.demand[:300]]
+        proposal = FoundryBuilder().build_plan(
+            owner_user_id=user_id,
+            name=("Inspector: " + body.demand.strip())[:140],
+            description=body.demand,
+            requirements=supplied_requirements,
+            country=_country(body.country),
+            language=body.language,
+            industry="inspector-simulation",
+            adapters=(),
+        )
+        watermark = sign_tool_watermark(
+            tool_id=proposal["build_id"], creator_user_id=user_id,
+            factory_id=proposal["build_id"], artifact_sha256=proposal["manifest_sha256"],
+        )
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+    except FactoryBuildError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except DnaVaultError as exc:
+        raise HTTPException(status_code=503, detail="Founder watermark signing is unavailable; the simulation was not saved.") from exc
+
+    record = FactoryRecord(
+        id=proposal["build_id"], owner_user_id=user_id,
+        name=proposal["manifest"]["factory"]["name"],
+        status="await_merge", country=_country(body.country),
+        manifest_sha256=proposal["manifest_sha256"],
+        manifest_json=proposal["manifest"],
+    )
+    session.add(record)
+    _audit(session, user_id, "inspector.human_production_simulated", record.id,
+           {"manifest_sha256": record.manifest_sha256, "demand_sha256": demand_sha256,
+            "resource_claim_count": len(body.resources_available), "license_id": claims["jti"]})
+    session.commit()
+    audit_chain_recorded = True
+    try:
+        AuditLedger().append(
+            actor_user_id=user_id, action="inspector.human_production_simulated",
+            object_id=record.id,
+            detail={"manifest_sha256": record.manifest_sha256, "demand_sha256": demand_sha256,
+                    "resource_claim_count": len(body.resources_available), "license_id": claims["jti"]},
+        )
+    except AuditLedgerError:
+        audit_chain_recorded = False
+
+    resource_claims = [
+        {"resource": str(key)[:100], "declared_value": value, "independently_verified": False}
+        for key, value in list(body.resources_available.items())[:50]
+    ]
+    simulation = {
+        "status": "proposal_only",
+        "invention_steps": [
+            "Normalize the requested demand and constraints.",
+            "Generate a bounded Foundry workflow manifest.",
+            "Identify missing resources, datasheets, acceptance tests and safeguards for human review.",
+            "Hold the package for signed human approval before production use.",
+        ],
+        "resources_gathered": [],
+        "resources_declared_unverified": resource_claims,
+        "production_line": [
+            {"step": "requirements_review", "executed": False},
+            {"step": "prototype_and_bench_test", "executed": False},
+            {"step": "qualified_safety_review", "executed": False},
+            {"step": "human_release_approval", "executed": False},
+        ],
+        "usage_world": {
+            "simulate_human_usage_requested": body.simulate_human_usage,
+            "target_devices_verified": False,
+            "device_migration_performed": False,
+            "remote_deployment_performed": False,
+            "physical_actuation_enabled": False,
+        },
+        "audit_pack": {
+            "status": "not_issued",
+            "note": "A separate draft evidence/readiness report may be generated; no legal certification is included.",
+        },
+        "endpoint": None,
+        "guide_human": {
+            "language": body.language,
+            "country": _country(body.country),
+            "next_steps": ["Obtain current supplier quotations.", "Verify exact datasheets and legal requirements.",
+                           "Run reproducible tests.", "Secure qualified and human approval."],
+        },
+    }
+    return {
+        "factory_id": record.id,
+        "seed_id": None,
+        "status": "await_merge",
+        "manifest_sha256": record.manifest_sha256,
+        "provenance_watermark": watermark,
+        "manifest": proposal["manifest"],
+        "human_production_simulation": simulation,
+        "production_deployed": False,
+        "physical_actuation_enabled": False,
+        "audit_chain_recorded": audit_chain_recorded,
+    }
+
+
+@app.post("/v1/auditor/reports/generate", status_code=201, tags=["usect-auditor"])
+@app.post("/v1/audit/generate", status_code=201, tags=["usect-auditor"], include_in_schema=False)
+def generate_compliance_readiness_report(
+    body: ComplianceReportInput,
+    request: Request,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict[str, Any]:
+    claims, _license = _active_license(session, license_key or "", user_id, country=_country(body.country))
+    try:
+        require_enterprise_claims(claims, "compliance_draft")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
+
+    report_id = "cr_" + uuid4().hex[:24]
+    created_at = utcnow().isoformat()
+    report_data: dict[str, Any] = {
+        "report_id": report_id,
+        "owner_user_id": user_id,
+        "report_kind": body.report_kind,
+        "country": _country(body.country),
+        "scope": body.scope,
+        "evidence_refs": body.evidence_refs,
+        "checks": body.checks,
+        "evidence_gaps": body.evidence_gaps or [
+            "No independent laboratory test report was attached or verified.",
+            "No conformity assessment by a competent authority was performed.",
+            "Applicable standards, product category and jurisdiction must be independently reviewed.",
+        ],
+        "created_at": created_at,
+        "status": "draft_readiness_report",
+        "certification_issued": False,
+        "certification_authority": None,
+    }
+    report_hash = canonical_sha256(report_data)
+    report_data["report_sha256"] = report_hash
+    verification_url = str(request.url_for("verify_compliance_report", report_id=report_id))
+    try:
+        pdf_bytes = build_compliance_readiness_pdf(report_data, verification_url=verification_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    pdf_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    report_data["pdf_sha256"] = pdf_hash
+    record = ComplianceReportRecord(
+        id=report_id, owner_user_id=user_id, report_kind=body.report_kind,
+        status="draft_readiness_report", report_sha256=report_hash,
+        report_json=report_data, pdf_bytes=pdf_bytes,
+    )
+    session.add(record)
+    _audit(session, user_id, "auditor.compliance_readiness_draft_generated", report_id,
+           {"report_kind": body.report_kind, "country": _country(body.country),
+            "report_sha256": report_hash, "pdf_sha256": pdf_hash,
+            "certification_issued": False, "license_id": str(claims.get("jti") or "")})
+    session.commit()
+    audit_chain_recorded = True
+    try:
+        AuditLedger().append(
+            actor_user_id=user_id, action="auditor.compliance_readiness_draft_generated",
+            object_id=report_id,
+            detail={"report_kind": body.report_kind, "country": _country(body.country),
+                    "report_sha256": report_hash, "pdf_sha256": pdf_hash,
+                    "certification_issued": False, "license_id": str(claims.get("jti") or "")},
+        )
+    except AuditLedgerError:
+        audit_chain_recorded = False
+    return {
+        "report_id": report_id,
+        "report_kind": body.report_kind,
+        "status": "draft_readiness_report",
+        "report_sha256": report_hash,
+        "pdf_sha256": pdf_hash,
+        "pdf_url": str(request.url_for("download_compliance_readiness_pdf", report_id=report_id)),
+        "verification_url": verification_url,
+        "certification_issued": False,
+        "audit_chain_recorded": audit_chain_recorded,
+        "warning": DRAFT_WARNING,
+    }
+
+
+@app.get("/v1/auditor/reports/{report_id}/verify", tags=["usect-auditor"], name="verify_compliance_report")
+def verify_compliance_readiness_report(
+    report_id: str,
+    session: Session = Depends(get_db),
+) -> dict[str, Any]:
+    record = session.get(ComplianceReportRecord, report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Compliance readiness report not found.")
+    data = dict(record.report_json or {})
+    expected_report_hash = str(data.get("report_sha256") or "")
+    expected_pdf_hash = str(data.get("pdf_sha256") or "")
+    hash_basis = dict(data)
+    hash_basis.pop("report_sha256", None)
+    hash_basis.pop("pdf_sha256", None)
+    actual_report_hash = canonical_sha256(hash_basis)
+    actual_pdf_hash = hashlib.sha256(record.pdf_bytes).hexdigest()
+    valid = (
+        record.status == "draft_readiness_report"
+        and expected_report_hash == record.report_sha256 == actual_report_hash
+        and expected_pdf_hash == actual_pdf_hash
+    )
+    return {
+        "valid": valid,
+        "report_id": record.id,
+        "report_kind": record.report_kind,
+        "status": record.status,
+        "report_sha256": record.report_sha256,
+        "pdf_sha256": actual_pdf_hash,
+        "created_at": _to_iso(record.created_at),
+        "certification_issued": False,
+        "verification_scope": "Authenticates report bytes and stored readiness metadata only; does not verify product conformity or confer a regulatory certificate.",
+    }
+
+
+@app.get("/v1/auditor/reports/{report_id}/pdf", tags=["usect-auditor"], name="download_compliance_readiness_pdf")
+def download_compliance_readiness_pdf(
+    report_id: str,
+    user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+) -> Response:
+    record = session.get(ComplianceReportRecord, report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Compliance readiness report not found.")
+    if record.owner_user_id != user_id and not _reviewer(user_id):
+        raise HTTPException(status_code=403, detail="Only the report owner or a reviewer may download this report.")
+    return Response(
+        content=record.pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{record.id}-{record.report_kind}-draft.pdf"',
+            "X-Report-SHA256": record.report_json.get("pdf_sha256", ""),
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+def _usect_meter_key(path: str, method: str) -> str | None:
+    """Canonical operation meter map. Body and query values are deliberately ignored."""
+    if path == "/v1/zero/heal" and method == "POST":
+        return "usect-zero-heal"
+    if path == "/v1/one/genesis" and method == "POST":
+        return "usect-one-genesis"
+    if path.startswith("/v1/two/improve/") and method == "POST":
+        return "usect-two-improve"
+    if path == "/v1/orchestrator/run" and method == "POST":
+        return "usect-orchestrator-run"
+    if path.startswith("/v1/evolve/") and method in {"POST", "GET"}:
+        return "usect-evolve"
+    if path.startswith("/v1/foundry/") or path == "/v1/inspector/produce":
+        if method in {"POST", "PATCH", "PUT"}:
+            return "usect-foundry-inspector"
+    if path.startswith("/v1/seed/") and method in {"POST", "GET"}:
+        return "usect-seed"
+    if path.startswith("/v1/auditor/") or path.startswith("/v1/audit/"):
+        return "usect-auditor"
+    if path.startswith("/api/usect/evolve/") or path.startswith("/api/usect/migrate/"):
+        return "usect-evolve-migrate"
+    if path.startswith("/api/usect-zero/") and method in {"POST", "GET"}:
+        return "usect-zero-gateway"
+    if path.startswith("/api/core-mesh/genesis/") and method in {"POST", "GET"}:
+        return "usect-one-core-mesh"
+    if path.startswith("/api/core-mesh/mind/") and method in {"POST", "GET"}:
+        return "usect-two-core-mesh"
+    if path in {"/api/chat", "/api/chat/", "/api/revelaai/v2/brain/chat"} and method == "POST":
+        return "usect-living-brain"
+    return None
+
+
+@app.middleware("http")
+async def meter_usect_core_operations(request: Request, call_next):
+    """Meter core use without logging prompts, arbitrary request fields or credentials."""
+    path = request.url.path
+    method = request.method.upper()
+    meter_key = _usect_meter_key(path, method)
+    if meter_key is None:
+        return await call_next(request)
+
+    identity: str | None = None
+    try:
+        identity = str(_claims_from_bearer(request.headers.get("Authorization"))["sub"])
+    except HTTPException:
+        # Public health/report verification probes and unauthenticated failures
+        # have no account identity; they must not be assigned to a guessed user.
+        identity = None
+
+    country = "KE"
+    country_hint = request.headers.get("X-Country") or request.query_params.get("country") or "KE"
+    try:
+        country = _country(country_hint)
+    except HTTPException:
+        country = "KE"
+
+    started = time.perf_counter()
+    response = await call_next(request)
+    if identity:
+        _record_usage_safely(
+            user_id=identity, tool_id=meter_key, country=country,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            success=response.status_code < 400,
+            cost_saved_usd=0.0,
+        )
+    return response
+
 # Mount RevelaAI's actual ASGI application after the platform routes above.
 # The platform endpoints win by routing order; unresolved paths dispatch to FastAPI.
 from asgi import app as revelaai_app  # noqa: E402
@@ -1200,3 +1937,15 @@ async def invoke_licensed_tool(
 
 
 app.mount("/", revelaai_app, name="revelaai-native-gateway")
+
+
+@app.on_event("startup")
+async def _startup_mounted_revelaai() -> None:
+    """Sub-app startup hooks are not propagated by a Starlette Mount."""
+    await revelaai_app.router.startup()
+
+
+@app.on_event("shutdown")
+async def _shutdown_mounted_revelaai() -> None:
+    await revelaai_app.router.shutdown()
+
