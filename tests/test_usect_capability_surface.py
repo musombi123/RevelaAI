@@ -33,6 +33,7 @@ def test_native_platform_entrypoint_exposes_billing_and_all_required_core_surfac
         ("POST", "/v1/orchestrator/run"),
         ("POST", "/v1/evolve/scan"),
         ("POST", "/v1/evolve/evolve"),
+        ("GET", "/v1/evolve/scans/latest"),
         ("GET", "/v1/inspector/inspect"),
         ("POST", "/v1/inspector/produce"),
         ("POST", "/v1/auditor/reports/generate"),
@@ -219,6 +220,97 @@ def test_orchestrator_executes_steps_in_declared_zero_one_two_order(monkeypatch)
 )
 def test_canonical_usect_usage_meter_map_does_not_depend_on_request_body(path, method, expected):
     assert platform._usect_meter_key(path, method) == expected
+
+
+def test_daily_twin_scan_schedule_and_latest_evidence_are_real(monkeypatch):
+    from datetime import datetime, timezone
+
+    morning = datetime(2026, 10, 23, 1, 0, tzinfo=timezone.utc)
+    late = datetime(2026, 10, 23, 22, 0, tzinfo=timezone.utc)
+    assert platform._next_daily_twin_scan(morning) == datetime(2026, 10, 23, 2, 17, tzinfo=timezone.utc)
+    assert platform._next_daily_twin_scan(late) == datetime(2026, 10, 24, 2, 17, tzinfo=timezone.utc)
+    assert platform.DAILY_TWIN_SCAN_THRESHOLD == 0.80
+    assert platform.DAILY_TWIN_SCAN_MAX_CANDIDATES == 100
+
+
+def test_manual_twin_scan_stores_candidates_and_latest_route_returns_evidence(monkeypatch):
+    monkeypatch.setattr(platform, "_claims_from_bearer", lambda _token: {"sub": "twin-scan-user", "jti": "test-jwt"})
+    monkeypatch.setattr(
+        platform, "_active_license",
+        lambda _session, _token, user_id, country=None, tool_id=None: (
+            {"sub": user_id, "jti": "twin-scan-license", "plan": "enterprise"},
+            object(),
+        ),
+    )
+    monkeypatch.setattr(platform, "require_enterprise_claims", lambda claims, entitlement: claims)
+    monkeypatch.setattr(platform, "_persist_usect_event", lambda *args, **kwargs: True)
+    platform.initialize_database()
+    left_id = "twin-left-" + platform.uuid4().hex[:10]
+    right_id = "twin-right-" + platform.uuid4().hex[:10]
+    try:
+        with platform.SessionLocal() as session:
+            session.add_all([
+                platform.ToolRecord(
+                    id=left_id, creator_user_id="creator-1",
+                    name="Garden Crop Sensor", description="Monitor crop soil moisture and garden irrigation",
+                    industry="agriculture", country_origin="KE", endpoint="/v1/example/garden-a",
+                    price_usd_cents=500, status="published", bom_by_country={}, guides_by_language={},
+                ),
+                platform.ToolRecord(
+                    id=right_id, creator_user_id="creator-2",
+                    name="Garden Crop Sensor Pro", description="Monitor crop soil moisture and garden irrigation with alerts",
+                    industry="agriculture", country_origin="KE", endpoint="/v1/example/garden-b",
+                    price_usd_cents=700, status="published", bom_by_country={}, guides_by_language={},
+                ),
+            ])
+            session.commit()
+
+        with TestClient(platform.app, raise_server_exceptions=False) as client:
+            headers = {"Authorization": "Bearer test-token", "X-Revela-License": "test-license"}
+            scanned = client.post(
+                "/v1/evolve/scan",
+                headers=headers,
+                json={"min_similarity": 0.70, "max_candidates": 20},
+            )
+            assert scanned.status_code == 200, scanned.text
+            result = scanned.json()
+            assert result["status"] == "completed"
+            assert result["daily_schedule_configured"] is True
+            assert result["daily_schedule"] == "02:17 UTC"
+            assert result["similarity_method"] == "lexical-token-jaccard-v1"
+            assert result["automatic_evolution"] is False
+            assert any(
+                {candidate["left_tool_id"], candidate["right_tool_id"]} == {left_id, right_id}
+                for candidate in result["candidates"]
+            )
+
+            latest = client.get("/v1/evolve/scans/latest", headers=headers)
+            assert latest.status_code == 200, latest.text
+            assert latest.json()["scan_id"] == result["scan_id"]
+            assert latest.json()["trigger"] == "manual"
+            assert latest.json()["automatic_publication"] is False
+
+        with platform.SessionLocal() as session:
+            saved = session.get(platform.EvolutionTwinScanRecord, result["scan_id"])
+            assert saved is not None
+            assert saved.candidate_count == len(result["candidates"])
+    finally:
+        with platform.SessionLocal() as session:
+            session.query(platform.EvolutionTwinScanRecord).filter(
+                platform.EvolutionTwinScanRecord.trigger == "manual",
+                platform.EvolutionTwinScanRecord.candidates.is_not(None),
+            ).all()
+            session.query(platform.ToolRecord).filter(
+                platform.ToolRecord.id.in_([left_id, right_id])
+            ).delete(synchronize_session=False)
+            # Only remove the test's scan, never any previously stored production evidence.
+            scans = session.query(platform.EvolutionTwinScanRecord).filter(
+                platform.EvolutionTwinScanRecord.id.like("twin_%")
+            ).all()
+            for item in scans:
+                if {row.get("left_tool_id") for row in item.candidates or []} & {left_id, right_id}:
+                    session.delete(item)
+            session.commit()
 
 
 def test_usage_meter_middleware_records_identity_not_prompt(monkeypatch):
