@@ -66,6 +66,54 @@ class OperatorToolDispatchTests(unittest.TestCase):
         self.assertFalse(result["operator_tool"]["safety"]["target_mutation_performed"])
 
     @patch("fastapi_routes.admin_auth.require_platform_admin")
+    @patch("ai.core_mesh.get_core_mesh_dashboard")
+    @patch("ai.usect_zero_tools.execute_tool")
+    @patch("fastapi_routes.sci_core._shield_scan")
+    @patch("fastapi_routes.meta_engineer._scan")
+    def test_guardian_sweep_runs_live_components_and_reports_partial_health(
+        self, meta_scan, sci_scan, zero_tool, mesh, require_admin
+    ):
+        require_admin.return_value = ("canonical-admin-id", None)
+        mesh.return_value = {
+            "status": "partial",
+            "cores": {
+                "zero": {"status": "ok", "reachable": True},
+                "one": {"status": "offline", "reachable": False},
+                "two": {"status": "ok", "reachable": True},
+            },
+            "active_signed_tools_count": 2,
+        }
+        zero_tool.return_value = {
+            "status": "success", "executed": True, "operation": "diagnostics",
+            "result": {"write_ready": True},
+        }
+        sci_scan.return_value = {
+            "status": "completed", "defensive_only": True,
+            "threats_last_24h": 0, "shields_active": 1,
+        }
+        meta_scan.return_value = {
+            "status": "ok", "module_count": 25,
+            "free_slots": [], "read_only": True,
+        }
+
+        result = dispatch_operator_tool(
+            "Run a full Guardian check across the RevelaCode ecosystem",
+            authorization="Bearer verified-admin-token",
+        )
+        self.assertEqual(result["operator_tool"]["status"], "partial")
+        self.assertTrue(result["operator_tool"]["executed"])
+        components = result["operator_tool"]["result"]["components"]
+        self.assertTrue(components["core_zero_diagnostics"]["ok"])
+        self.assertTrue(components["sci_defend_scan"]["ok"])
+        self.assertTrue(components["meta_engineer_scan"]["ok"])
+        self.assertFalse(result["operator_tool"]["result"]["all_cores_reachable"])
+        self.assertFalse(result["operator_tool"]["safety"]["target_mutation_performed"])
+        mesh.assert_called_once_with(force_refresh=True)
+        zero_tool.assert_called_once_with("diagnostics", {})
+        sci_scan.assert_called_once_with()
+        meta_scan.assert_called_once_with()
+
+    @patch("fastapi_routes.admin_auth.require_platform_admin")
     @patch("fastapi_routes.meta_engineer._propose")
     def test_meta_proposal_is_not_misreported_as_production_execution(self, propose, require_admin):
         require_admin.return_value = ("canonical-admin-id", None)
