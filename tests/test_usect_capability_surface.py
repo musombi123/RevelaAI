@@ -53,7 +53,7 @@ def test_inspector_reports_structure_but_never_promises_production_readiness():
     assert report["external_capabilities"] >= 1
     assert report["ready_for_production"] is False
     assert any(item["id"] == "elimu_external" and item["status"] == "external_not_checked" for item in report["checks"])
-    assert "do not issue" not in report["interpretation"].lower()  # interpretation is an inventory note, not an invented status
+    assert "not proof" in report["interpretation"].lower()
 
 
 def test_inspector_can_detect_missing_sources_routes_and_tests(tmp_path):
