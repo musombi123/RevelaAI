@@ -240,9 +240,19 @@ async def download_account_profile(
 
 @router.post("/api/accounts/certificates")
 async def create_account_certificate(request: Request):
-    payload = await _payload(request)
-    if isinstance(payload, JSONResponse):
-        return payload
+    # The authoritative backend intentionally issues this idempotent certificate
+    # without requiring a request body; still accept an optional JSON object.
+    raw = await request.body()
+    if not raw:
+        payload: dict[str, Any] = {}
+    else:
+        try:
+            value = await request.json()
+        except Exception:
+            return JSONResponse({"status": "error", "code": "invalid_json"}, status_code=400)
+        if not isinstance(value, dict):
+            return JSONResponse({"status": "error", "code": "json_object_required"}, status_code=422)
+        payload = value
     return await run_in_threadpool(
         _proxy_sync, request, "POST", "/api/accounts/certificates", payload=payload
     )
