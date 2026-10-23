@@ -139,4 +139,4 @@ def test_elimu_bridge_forwards_data_without_creating_a_second_store():
     assert '"/api/study/elimu/progress"' in source
     assert '"/api/accounts/profile/download"' in source
     assert "MongoClient" not in source
-    assert "MongoClient" not in source
+    assert "pymongo" not in source.lower()
