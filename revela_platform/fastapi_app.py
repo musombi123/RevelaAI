@@ -1270,12 +1270,17 @@ def usect_zero_heal(
     prove or claim that the supplied tool_id was repaired by this request.
     """
     claims, _license_record = _active_license(session, license_key or "", user_id)
+    try:
+        _target_owner, target_name = _require_owned_factory_or_tool(body.tool_id, user_id)
+    except HTTPException:
+        raise
     error_digest = hashlib.sha256(body.error.encode("utf-8")).hexdigest()
     proposal = execute_usect_zero_tool("heal", {})
     status = str(proposal.get("status") or "unknown")
     audit_recorded = _persist_usect_event(
         user_id, "usect.zero.heal_proposed", body.tool_id,
         {"error_sha256": error_digest, "error_length": len(body.error),
+         "target_name": target_name[:120],
          "license_id": str(claims.get("jti") or ""), "proposal_status": status},
     )
     return {
@@ -1457,6 +1462,11 @@ def _twin_tokens(tool: ToolRecord) -> set[str]:
 def _jaccard_similarity(left: set[str], right: set[str]) -> float:
     union = left | right
     return len(left & right) / len(union) if union else 0.0
+
+
+def _daily_twin_scheduler_running() -> bool:
+    task = _DAILY_TWIN_SCAN_TASK
+    return task is not None and not task.done()
 
 
 def _next_daily_twin_scan(now: datetime | None = None) -> datetime:
@@ -1643,6 +1653,7 @@ def usect_evolve_twin_scan(
         "similarity_method": "lexical-token-jaccard-v1",
         "daily_schedule_configured": True,
         "daily_schedule": "02:17 UTC",
+        "scheduler_running": _daily_twin_scheduler_running(),
         "candidates": candidates,
         "automatic_evolution": False,
         "automatic_publication": False,
@@ -1666,7 +1677,12 @@ def usect_evolve_latest_twin_scan(
         select(EvolutionTwinScanRecord).order_by(EvolutionTwinScanRecord.created_at.desc()).limit(1)
     ).scalars().first()
     if row is None:
-        return {"status": "no_scan_yet", "daily_schedule": "02:17 UTC", "schedule_enabled": True}
+        return {
+            "status": "no_scan_yet",
+            "daily_schedule": "02:17 UTC",
+            "scheduler_configured": True,
+            "scheduler_running": _daily_twin_scheduler_running(),
+        }
     return {
         "status": row.status,
         "scan_id": row.id,
@@ -1676,6 +1692,9 @@ def usect_evolve_latest_twin_scan(
         "candidate_count": row.candidate_count,
         "threshold": row.threshold,
         "similarity_method": row.similarity_method,
+        "daily_schedule": "02:17 UTC",
+        "scheduler_configured": True,
+        "scheduler_running": _daily_twin_scheduler_running(),
         "candidates": row.candidates,
         "automatic_evolution": False,
         "automatic_publication": False,
@@ -1728,7 +1747,14 @@ def usect_evolve_start(
 @app.get("/v1/inspector/inspect", tags=["usect-inspector"])
 def usect_inspector_inspect(
     user_id: str = Depends(authenticated_user),
+    session: Session = Depends(get_db),
+    license_key: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict[str, Any]:
+    claims, _license = _active_license(session, license_key or "", user_id)
+    try:
+        require_enterprise_claims(claims, "factory_build")
+    except LicenseError as exc:
+        raise _license_http_error(exc) from exc
     report = inspect_capabilities(app)
     report["inspected_by"] = user_id
     return report
