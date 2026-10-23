@@ -871,3 +871,48 @@ func TestAssemblyAndCompilationRequireExplicitScopes(t *testing.T) {
 		})
 	}
 }
+
+
+func TestGeneratedBrainTokenIsScopedAndNotAdmin(t *testing.T) {
+	t.Setenv("USECT_ZERO_BRAIN_TOKEN", "test-generated-brain-token-long-random-value")
+	_, h := newTestServer(t)
+
+	code, body := call(
+		t,
+		h,
+		http.MethodGet,
+		"/v1/scan",
+		"",
+		map[string]string{"X-API-Key": "test-generated-brain-token-long-random-value"},
+	)
+	if code != http.StatusOK || body["read_only"] != true {
+		t.Fatalf("generated brain token should allow read scope: status=%d body=%v", code, body)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/scan", nil)
+	req.Header.Set("X-API-Key", "test-generated-brain-token-long-random-value")
+	recorder := httptest.NewRecorder()
+	_, ok := h.requireScope(recorder, req, "admin:write")
+	if ok || recorder.Code != http.StatusForbidden {
+		t.Fatalf("generated brain token must reject unapproved scopes: status=%d", recorder.Code)
+	}
+	var denied map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &denied); err != nil {
+		t.Fatalf("decode scope rejection: %v", err)
+	}
+	if denied["code"] != "internal_brain_scope_denied" {
+		t.Fatalf("unexpected scope rejection: %v", denied)
+	}
+
+	code, body = call(
+		t,
+		h,
+		http.MethodGet,
+		"/v1/keys/issued",
+		"",
+		map[string]string{"X-API-Key": "test-generated-brain-token-long-random-value"},
+	)
+	if code != http.StatusUnauthorized || body["code"] != "admin_approval_required" {
+		t.Fatalf("brain token must not grant admin access: status=%d body=%v", code, body)
+	}
+}

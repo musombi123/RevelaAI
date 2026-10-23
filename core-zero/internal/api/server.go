@@ -309,6 +309,15 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func internalBrainScopeAllowed(scope string) bool {
+	switch scope {
+	case "scan:read", "heal:propose", "assemble:propose", "radar:compare", "bridge:propose", "mind:compile":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) requireScope(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -331,6 +340,32 @@ func (s *Server) requireScope(
 			Message: "Supply an active X-API-Key with scope " + scope + ". Key requests remain pending until human approval.",
 		})
 		return "", false
+	}
+
+	// The generated service-to-service brain token is distinct from human-issued
+	// developer keys and admin credentials. It can invoke only bounded read/proposal
+	// scopes; administrator actions use a separate credential and route.
+	brainToken := strings.TrimSpace(os.Getenv("USECT_ZERO_BRAIN_TOKEN"))
+	if constantTimeTokenEqual(key, brainToken) {
+		if !internalBrainScopeAllowed(scope) {
+			replyJSON(w, http.StatusForbidden, apiError{
+				Status:  "error",
+				Code:    "internal_brain_scope_denied",
+				Message: "The RevelaAI service identity is limited to approved read/proposal scopes.",
+			})
+			return "", false
+		}
+		const actor = "revelaai-brain"
+		if !s.allowScopeRate(actor, scope) {
+			w.Header().Set("Retry-After", "60")
+			replyJSON(w, http.StatusTooManyRequests, apiError{
+				Status:  "error",
+				Code:    "scope_rate_limit_exceeded",
+				Message: "The internal brain identity has exceeded the request limit for this scope.",
+			})
+			return "", false
+		}
+		return actor, true
 	}
 
 	ok, id := s.Keys.Validate(key, scope)

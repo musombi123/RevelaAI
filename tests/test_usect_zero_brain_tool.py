@@ -71,8 +71,7 @@ def test_radar_requires_user_supplied_current_and_candidate_evidence():
 
 
 def test_execution_uses_dedicated_scoped_key_and_redacts_repository_root(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setenv("USECT_ZERO_BRAIN_API_KEY", "brain-tool-key")
+    monkeypatch.setenv("USECT_ZERO_BRAIN_TOKEN", "brain-tool-key")
     core_call = Mock(return_value=type("Reply", (), {
         "status_code": 200,
         "payload": {
@@ -109,24 +108,22 @@ def test_execution_uses_dedicated_scoped_key_and_redacts_repository_root(monkeyp
     )
 
 
-def test_matched_tool_fails_closed_when_disabled(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
-    monkeypatch.delenv("USECT_ZERO_BRAIN_API_KEY", raising=False)
-    core_call = Mock(side_effect=AssertionError("disabled core must not be called"))
+def test_matched_tool_fails_closed_when_generated_brain_token_is_missing(monkeypatch):
+    monkeypatch.delenv("USECT_ZERO_BRAIN_TOKEN", raising=False)
+    core_call = Mock(side_effect=AssertionError("missing token must not call the core"))
     monkeypatch.setattr(tools, "request_core", core_call)
 
     outcome = tools.execute_for_message("Scan this repository and list its files.")
 
     assert outcome is not None
     assert outcome["status"] == "unavailable"
-    assert outcome["error_code"] == "usect_zero_disabled"
+    assert outcome["error_code"] == "usect_zero_brain_token_missing"
     assert outcome["fallback"] is False
     core_call.assert_not_called()
 
 
 def test_tool_key_is_not_a_provider_key_or_admin_token(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setenv("USECT_ZERO_BRAIN_API_KEY", "scoped-developer-key")
+    monkeypatch.setenv("USECT_ZERO_BRAIN_TOKEN", "scoped-developer-key")
     core_call = Mock(return_value=type("Reply", (), {
         "status_code": 200,
         "payload": {"status": "ok", "read_only": True},
@@ -176,7 +173,7 @@ def test_primary_brain_does_not_invoke_model_when_required_tool_is_unavailable(m
                     "status": "unavailable",
                     "executed": False,
                     "fallback": False,
-                    "error_code": "usect_zero_disabled",
+                    "error_code": "usect_zero_brain_token_missing",
                 },
             )
 

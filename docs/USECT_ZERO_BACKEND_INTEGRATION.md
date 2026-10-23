@@ -1,10 +1,10 @@
 # USECT-ZERO backend integration
 
-The Flask backend exposes the model-free Go core through a bounded gateway. The core remains an independent service: the adapter does not execute candidate code, auto-deploy changes, operate hardware, or substitute a paid AI model.
+The native FastAPI gateway exposes the model-free Go core through a bounded gateway. The core remains an independent service: the adapter does not execute candidate code, auto-deploy changes, operate hardware, or substitute a paid AI model.
 
 ## Safe-by-default configuration
 
-The adapter is disabled unless `USECT_ZERO_ENABLED=true`. Until the Go service is built and reachable, existing backend behavior remains unchanged.
+The gateway has a code-owned integration path. Availability comes from the real Go core health response; the legacy `USECT_ZERO_ENABLED` flag no longer controls it. If the core address is missing or the service cannot be reached, the gateway returns a configuration/unavailable status instead of pretending the integration is disabled.
 
 For local development, build and start the core from the repository root:
 
@@ -18,14 +18,7 @@ export USECT_ZERO_ADMIN_TOKEN='replace-with-a-long-random-secret'
 ./core-zero/usect-zero -mode serve -root . -listen 127.0.0.1:8780
 ```
 
-Set these variables in the Flask backend environment:
-
-```text
-USECT_ZERO_ENABLED=true
-USECT_ZERO_URL=http://127.0.0.1:8780
-USECT_ZERO_ADMIN_TOKEN=<same secret configured for the Go core>
-USECT_ZERO_TIMEOUT_SECONDS=5
-```
+For local development, set the core URL and the matching server-side admin token for the two local processes. If testing the RevelaAI brain tools locally, set the same random `USECT_ZERO_BRAIN_TOKEN` in both processes. Production does not require manually creating that brain token: the Render Blueprint generates it on the private core and links it to RevelaAI. The HTTP client uses a fixed 10-second connect/read timeout.
 
 For a private Render service, `USECT_ZERO_URL` may instead be the internal `host:port` value supplied by a Blueprint `fromService.property: hostport` reference. The adapter validates that host/port value and adds the internal HTTP scheme. Keep the Go core private; do not point this variable at a public URL unless you have deliberately reviewed and secured that exposure.
 
@@ -39,16 +32,16 @@ The repository's `render.yaml` now describes two services: the public Flask gate
 - The new persistent store starts empty. Records that existed only in a previous ephemeral or unreachable core instance are not automatically migrated; preserve/export them from that instance first if it is still available.
 
 
-The HTTP URL above is suitable only when both processes share the same host/network namespace. For production, run the Go core as a private internal service and set `USECT_ZERO_URL` to its private HTTP(S) address. Do not expose the Go admin endpoints directly to the public internet. If the service crosses an untrusted network, use TLS and network access controls.
+The local HTTP URL above is suitable only when both processes share the same host/network namespace. In production, the Render Blueprint supplies `USECT_ZERO_URL` through the private-service reference. Do not expose the Go admin endpoints directly to the public internet. If the service crosses an untrusted network, use TLS and network access controls.
 
 The backend's `USECT_ZERO_ADMIN_TOKEN` must match the Go core secret. The Flask route only sends it after the existing authoritative platform-admin check succeeds. Do not send this token from the browser. Never forward the frontend's bearer JWT to the Go service.
 
-## Production prerequisites before enabling the feature flag
+## Production readiness checklist
 
 - Put the Go service on a private network. Do not publish its admin-token endpoints directly.
 - Configure gateway/ingress rate limits for the public `POST /api/usect-zero/keys/request` route before accepting external traffic. The adapter bounds payloads but does not implement a shared, multi-instance rate limiter.
 - The current Go core persists key requests, issued-key hashes, baseline, evidence and audit events as files under `core-zero/state/`, `core-zero/evidence/` and `core-zero/audit_log/`. On a host with ephemeral storage, those records can be lost on restart/redeploy. Use persistent storage with restricted permissions and backups, or move the storage layer to a durable database before production key issuance.
-- Keep the feature flag off until the private service, persistent storage, rate limit and matching secret are verified.
+- Sync the Render Blueprint so the private service address and generated credentials are linked. Do not add a manual enable flag or timeout override. Keep the admin token separate from the generated brain token.
 
 ## Backend routes
 
@@ -83,4 +76,22 @@ The diagnostics report samples at most 50 paths per drift category while retaini
 - The React admin console consumes the Flask gateway; the core service itself does not serve a separate admin dashboard.
 - It does not make the existing Meta-Engineer or Brain OS routes depend on USECT-ZERO.
 
-Deploy and test the Go core as a private service first, then enable the Flask adapter with the environment variables above. Keep the feature flag off until the private core service and secret are configured.
+Deploy the Go core as a private service and sync the Render Blueprint. The Blueprint supplies the private service address and links generated service credentials automatically. The integration has no manual enable flag, manual brain-key, or timeout override; missing wiring is reported as a real configuration error.
+
+
+## Deployment wiring (automatic)
+
+The Render Blueprint is the source of truth for the RevelaAI-to-USECT-ZERO connection. Syncing
+`render.yaml` links the private core address and its generated credentials automatically; no
+manually created `USECT_ZERO_BRAIN_API_KEY`, enable flag, or timeout variable is required.
+
+The generated `USECT_ZERO_BRAIN_TOKEN` is a separate machine identity, not an admin token or a
+human-issued developer key. The Go API accepts it only for `scan:read`, `heal:propose`,
+`assemble:propose`, `radar:compare`, `bridge:propose`, and `mind:compile`, with per-scope
+rate limiting. It cannot approve key requests, apply recovery, perform admin actions, or authorize
+hardware actuation. The admin token remains separate and is linked from the core service by the
+Blueprint. Health is determined by the real `/v1/health` response; a missing service address or an
+unreachable core remains an explicit error rather than a synthetic healthy status.
+
+The HTTP client uses a fixed 10-second connect/read timeout. The legacy `USECT_ZERO_ENABLED` and
+`USECT_ZERO_TIMEOUT_SECONDS` variables no longer control runtime behavior.

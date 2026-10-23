@@ -18,7 +18,6 @@ def test_client():
 
 
 def test_public_key_request_stays_pending_and_needs_no_platform_admin(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -69,7 +68,6 @@ def test_admin_key_list_fails_closed_before_calling_core(monkeypatch, test_clien
 
 
 def test_admin_approval_uses_internal_admin_channel(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user-42", None))
     observed = {}
 
@@ -92,7 +90,6 @@ def test_admin_approval_uses_internal_admin_channel(monkeypatch, test_client):
 
 
 def test_scoped_api_key_is_forwarded_but_bearer_token_is_not(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setattr(routes, "request_core", lambda *args, **kwargs: client.CoreReply(200, {"read_only": True}))
     observed = {}
     original = client.request_core
@@ -138,32 +135,23 @@ def test_scoped_api_key_is_forwarded_but_bearer_token_is_not(monkeypatch, test_c
     assert "X-Admin-Token" not in observed["http_headers"]
 
 
-def test_disabled_core_does_not_make_network_call(monkeypatch):
+def test_legacy_disabled_flag_does_not_disable_the_client(monkeypatch):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
-
-    def unexpected_http(*args, **kwargs):
-        raise AssertionError("disabled integration must not call the network")
-
-    monkeypatch.setattr(client.requests, "request", unexpected_http)
-    with pytest.raises(client.USECTZeroDisabled):
-        client.request_core("GET", "/v1/health")
+    assert client.is_enabled() is True
 
 
 def test_admin_actions_require_separate_server_side_token(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.delenv("USECT_ZERO_ADMIN_TOKEN", raising=False)
     with pytest.raises(client.USECTZeroAdminTokenMissing):
         client.request_core("POST", "/v1/heal/baseline", admin=True)
 
 
 def test_forwarded_path_cannot_escape_versioned_api(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     with pytest.raises(client.USECTZeroConfigurationError):
         client.request_core("GET", "/v1/../keys/requests")
 
 
 def test_post_body_is_bounded_and_must_be_json(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setattr(
         routes,
         "request_core",
@@ -192,7 +180,6 @@ def test_invalid_admin_resource_identifier_is_rejected(monkeypatch, test_client)
 
 
 def test_core_response_stream_is_capped(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
 
     class OversizedHTTPResponse:
         status_code = 200
@@ -215,7 +202,6 @@ def test_core_response_stream_is_capped(monkeypatch):
 
 
 def test_health_response_does_not_expose_repository_path(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setattr(
         routes,
         "request_core",
@@ -243,22 +229,25 @@ def test_health_response_does_not_expose_repository_path(monkeypatch, test_clien
     assert "/srv/private/repository" not in response.text
 
 
-def test_health_when_disabled_does_not_call_core(monkeypatch, test_client):
+def test_health_ignores_legacy_disabled_flag_and_probes_core(monkeypatch, test_client):
     monkeypatch.setenv("USECT_ZERO_ENABLED", "false")
     monkeypatch.setattr(
         routes,
         "request_core",
-        lambda *args, **kwargs: pytest.fail("disabled health must not call the core"),
+        lambda *args, **kwargs: client.CoreReply(
+            200,
+            {"status": "ok", "service": "USECT-ZERO", "model_free": True, "offline_mode": True},
+        ),
     )
 
     response = test_client.get("/api/usect-zero/health")
 
-    assert response.status_code == 503
-    assert response.json()["status"] == "disabled"
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+    assert response.json()["enabled"] is True
 
 
 def test_client_uses_server_side_admin_token_without_forwarding_authorization(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setenv("USECT_ZERO_ADMIN_TOKEN", "server-side-admin-secret")
     monkeypatch.setenv("USECT_ZERO_URL", "http://127.0.0.1:8780")
     observed = {}
@@ -288,7 +277,6 @@ def test_client_uses_server_side_admin_token_without_forwarding_authorization(mo
     assert observed["stream"] is True
 
 def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     monkeypatch.setattr(routes, "require_platform_admin", lambda _authorization: ("admin-user-42", None))
     observed = {}
 
@@ -324,7 +312,6 @@ def test_admin_issued_key_list_uses_admin_channel_without_exposing_hash(monkeypa
 
 
 def test_diagnostics_route_uses_scoped_developer_key_channel(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -358,7 +345,6 @@ def test_diagnostics_route_uses_scoped_developer_key_channel(monkeypatch, test_c
 
 
 def test_assembly_template_catalog_uses_scoped_read_channel(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -396,7 +382,6 @@ def test_assembly_template_catalog_uses_scoped_read_channel(monkeypatch, test_cl
 
 
 def test_assembly_board_profiles_proxy_through_scoped_gateway(monkeypatch, test_client):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
     observed = {}
 
     def fake_core(method, path, **kwargs):
