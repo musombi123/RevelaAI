@@ -107,3 +107,17 @@ def test_render_declares_runtime_dependencies_and_guarded_admin_secret():
     assert """      - key: REVELA_ORGAN_ADMIN_TOKEN
         generateValue: true
 """ in blueprint
+
+
+
+def test_render_uses_documented_primary_and_fallback_gemini_models():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    blueprint = (root / "render.yaml").read_text(encoding="utf-8")
+    assert """      - key: GEMINI_MODEL
+        value: "gemini-3.8-flash"
+""" in blueprint
+    assert """      - key: GEMINI_FALLBACK_MODEL
+        value: "gemini-3.5-flash-lite"
+""" in blueprint
