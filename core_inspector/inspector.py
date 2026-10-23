@@ -159,17 +159,42 @@ def _join(prefix: str, path: str) -> str:
     return left + "/" + right if left else "/" + right
 
 
+def _routes_on_app(app: Any) -> list[Any]:
+    """Unwrap Starlette middleware stacks until the underlying router is reached."""
+    current = app
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        routes = getattr(current, "routes", None)
+        if routes is not None:
+            return list(routes)
+        router = getattr(current, "router", None)
+        routes = getattr(router, "routes", None)
+        if routes is not None:
+            return list(routes)
+        current = getattr(current, "app", None)
+    return []
+
+
 def registered_routes(application: Any) -> set[tuple[str, str]]:
-    """Read real FastAPI/Starlette route registrations, recursively including mounts."""
+    """Read real FastAPI/Starlette route registrations, recursively including mounted apps."""
     discovered: set[tuple[str, str]] = set()
+    visited: set[tuple[int, str]] = set()
 
     def walk(app: Any, prefix: str = "") -> None:
-        for route in getattr(app, "routes", []):
+        marker = (id(app), prefix)
+        if marker in visited:
+            return
+        visited.add(marker)
+        for route in _routes_on_app(app):
             path = getattr(route, "path", "")
             child = getattr(route, "app", None)
-            if isinstance(route, Mount) and child is not None and hasattr(child, "routes"):
-                walk(child, _join(prefix, path) if path.strip("/") else prefix)
-                continue
+            if isinstance(route, Mount) and child is not None:
+                child_prefix = _join(prefix, path) if path.strip("/") else prefix
+                child_routes = _routes_on_app(child)
+                if child_routes:
+                    walk(child, child_prefix)
+                    continue
             methods = getattr(route, "methods", None)
             if not path or not methods:
                 continue
