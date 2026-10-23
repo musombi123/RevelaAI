@@ -14,8 +14,7 @@ def test_diagnostics_intent_selects_the_named_read_only_tool():
 
 
 def test_diagnostics_dispatch_uses_scoped_key_not_admin_channel(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setenv("USECT_ZERO_BRAIN_API_KEY", "scoped-brain-key")
+    monkeypatch.setenv("USECT_ZERO_BRAIN_TOKEN", "scoped-brain-key")
     monkeypatch.setenv("USECT_ZERO_ADMIN_TOKEN", "must-not-be-used-for-brain-tools")
     observed = {}
 
@@ -61,8 +60,7 @@ def test_assembly_catalog_intent_selects_read_only_catalog_tool():
 
 
 def test_assembly_catalog_dispatch_uses_scoped_key_only(monkeypatch):
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setenv("USECT_ZERO_BRAIN_API_KEY", "scoped-brain-key")
+    monkeypatch.setenv("USECT_ZERO_BRAIN_TOKEN", "scoped-brain-key")
     observed = {}
 
     def fake_core(method, path, **kwargs):
@@ -101,8 +99,7 @@ def test_board_profile_catalog_selects_and_dispatches_read_only_tool(monkeypatch
     assert contract["method"] == "GET"
     assert contract["path"] == "/v1/assemble/boards"
 
-    monkeypatch.setenv("USECT_ZERO_ENABLED", "true")
-    monkeypatch.setenv("USECT_ZERO_BRAIN_API_KEY", "scoped-brain-key")
+    monkeypatch.setenv("USECT_ZERO_BRAIN_TOKEN", "scoped-brain-key")
     observed = {}
 
     def fake_core(method, path, **kwargs):
