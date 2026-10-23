@@ -677,8 +677,8 @@ def propose_mind_evolution(objective: str, tool_name: str) -> dict:
     )
     result = _public_proposal(payload)
     result.update({
-        "target_core": "core-two",
-        "operation_kind": "core_two_improvement_proposal",
+        "target_core": "core-one",
+        "operation_kind": "core_one_improvement_proposal",
         "target_modified": False,
         "human_approval_required": True,
         "automatic_merge": False,
