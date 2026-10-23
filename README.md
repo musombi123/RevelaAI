@@ -184,6 +184,9 @@ The platform gateway starts with `uvicorn revela_platform.fastapi_app:app`. It s
 - `POST /v1/two/improve/{tool_id}` — an omitted objective receives a safe default. The target must be registered and owned/authorized; the response remains a proposal.
 - `POST /v1/orchestrator/run` — accepts `{"demand":"..."}`; `tool_id` and `error` are optional. Without a registry target, Mind receives a demand-scoped proposal target whose `target_exists_in_registry` is explicitly `false`. The route never reports a production merge or automatic execution.
 - `GET /api/memory/{user_id}/history` — authenticated, user-scoped, entitlement-gated history in the `revelai` database.
+- `GET /api/elimu/hubs`, `GET/POST /api/elimu/progress`, and `GET /api/elimu/hubs/{hub_id}` — same-origin AI routes that forward the signed user session to the existing RevelaCode Backend paths under `/api/study/elimu/...`.
+- `POST /api/certificates/generate` and `GET /api/certificates/{certificate_id}` — forward Elimu learning-certificate issuance/download to the authoritative backend; `GET /api/verify/certificate/{certificate_id}` routes `RC-EL-...` IDs to the Elimu verifier and `RC-AC-...` IDs to the account verifier.
+- `GET /api/accounts/profile/download?format=pdf|json`, `POST /api/accounts/certificates`, and `GET /api/accounts/certificates/{certificate_id}/download` — forward to account-document APIs. These routes store no profile, progress, or certificate records in RevelaAI.
 - `POST /v1/seed/create` — accepts `factory_id` and optional `child_name`, `buyer_country`, and `purchase_id`. It delegates to the same approved-factory, license, quota, ownership/purchase, and bundle-signing checks as the build-ID route.
 - `POST /v1/migrate/scan` — returns only explicitly enrolled, verified inventory for the authenticated owner; no ambient network scan is performed.
 - `POST /v1/migrate/migrate` — accepts `seed_id` and `target_device`, then creates a dry-run plan. It does not move a Seed or run remote commands.
@@ -192,6 +195,12 @@ The platform gateway starts with `uvicorn revela_platform.fastapi_app:app`. It s
 
 The Migration compatibility routes require a backend-verified Bearer JWT, `X-Revela-License` with the relevant entitlement, and the server-side `X-Organ-Admin-Token`. Never put either secret in browser code.
 
+### Render runtime prerequisites
+
+The Render Blueprint now declares the required environment slots and links the USECT-ZERO private-service URL to both `USECT_ZERO_URL` and `USECT_ZERO_BASE_URL`, with `USECT_ZERO_ENABLED=true`. It also declares `MONGO_URI`, `REVELAAI_SERVICE_KEY`, `REVELA_DATABASE_URL`, `GEMINI_API_KEY`, the platform-license keypair, and a generated server-side `REVELA_ORGAN_ADMIN_TOKEN`.
+
+Those values still must be correctly supplied in Render: `MONGO_URI` must point to the intended cluster/database; `REVELAAI_SERVICE_KEY` must match the shared secret in RevelaCode-Backend; `REVELA_DATABASE_URL` should point to durable PostgreSQL for billing, factories, licenses, and usage; the license public/private keys must be the matching platform keypair; and `GEMINI_API_KEY` must authorize the selected models. Defining a `sync: false` variable is a required slot, not proof that it is populated. Applying the Blueprint is a deployment action and still needs live smoke tests.
+
 ### What these routes do not claim
 
 - USECT-EVOLVE currently uses lexical-token Jaccard similarity for twin candidates, not embedding similarity, and it does not automatically evolve or publish a factory.
@@ -199,6 +208,6 @@ The Migration compatibility routes require a backend-verified Bearer JWT, `X-Rev
 - USECT-MIGRATE creates inventory-backed plans; it does not discover arbitrary network devices, silently migrate software, issue remote commands, or actuate robots.
 - USECT-SEED returns a signed child bundle subject to the configured license and offline lease. This does not prove a separate Raspberry Pi image builder, automatic 30-day self-wipe, or Phoenix restore works on physical hardware.
 - USECT-UNCOPYABLE reports lock configuration and supports authenticated restore/dialect workflows. Destructive self-wipe is deliberately disabled; do not describe all five locks as operational unless their live secrets and target-specific tests pass.
-- The Elimu hub's school, profile, progress, and certificate records remain platform/account APIs in RevelaCode-Backend. RevelaAI should call those existing authenticated endpoints rather than creating a duplicate Elimu datastore.
+- The Elimu hub's school, profile, progress, and certificate records remain in RevelaCode-Backend; the new RevelaAI bridge forwards authenticated requests instead of creating duplicate stores. The main domain's shared Elimu/account QR verifier also needs the companion backend fix in PR #37 before `RC-EL-...` QR URLs are repaired on `revelacode.co.ke`.
 
 The regression tests in `tests/test_usect_contracts.py` cover route registration, path precedence, demand-only orchestration inputs, and the marketplace/seed compatibility contracts. A deployed health endpoint alone does not validate credentials, persistence, upstream core reachability, or a complete paid flow; those need authenticated staging checks against the live services.
