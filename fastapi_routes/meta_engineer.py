@@ -477,12 +477,12 @@ async def ingest_fieldkit_finding(request: Request):
         "fieldkit_review": record,
         "changelog_path": None,
         "changelog": (
-            "# Field Engine Security Review\\n\\n"
-            + "- Finding: " + finding_id + "\\n"
-            + "- Severity: " + record["severity"] + "\\n"
-            + "- Scope: " + record["scope"] + "\\n"
-            + "- Simulated: " + str(record["simulated"]) + "\\n"
-            + "- Status: awaiting_approval\\n\\n"
+            "# Field Engine Security Review\n\n"
+            + "- Finding: " + finding_id + "\n"
+            + "- Severity: " + record["severity"] + "\n"
+            + "- Scope: " + record["scope"] + "\n"
+            + "- Simulated: " + str(record["simulated"]) + "\n"
+            + "- Status: awaiting_approval\n\n"
             + "No host change or remediation was executed. Human review is required."
         ),
         "approval_required": True,
