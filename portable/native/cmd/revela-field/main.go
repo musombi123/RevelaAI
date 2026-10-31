@@ -386,6 +386,17 @@ func findingSeverity(value string) string {
 	}
 }
 
+func limitText(value string, maxRunes int) string {
+	if maxRunes < 1 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
+}
+
 func buildVulnerabilityFinding(match vulnfeed.Match, feed vulnfeed.VerifiedFeed, manifestPath, manifestHash string, manifestBytes int64, now time.Time) contract.Finding {
 	identity := feed.Feed.FeedID + "|" + match.Advisory.ID + "|" + match.Package.PackageURL + "|" + match.Package.Version
 	sum := sha256.Sum256([]byte(identity))
@@ -394,9 +405,17 @@ func buildVulnerabilityFinding(match vulnfeed.Match, feed vulnfeed.VerifiedFeed,
 		recommendation = "Review the vendor advisory and plan an update to one of these reported fixed versions: " +
 			strings.Join(match.Advisory.FixedVersions, ", ") + ". Validate application compatibility and approve the change before installation."
 	}
-	summary := match.Advisory.Summary
-	if len(match.Advisory.References) > 0 {
-		summary += " References: " + strings.Join(match.Advisory.References, " ")
+	summary := limitText(match.Advisory.Summary, 4000)
+	evidence := []contract.Evidence{
+		{Kind: "local_package_manifest", Ref: manifestPath + "#" + match.Package.PackageURL, SHA256: manifestHash, Bytes: manifestBytes, Note: "Exact package URL and version found in the supplied local manifest."},
+		{Kind: "signed_vulnerability_feed", Ref: "feed://" + feed.Feed.FeedID, SHA256: feed.PayloadSHA256, Note: "Ed25519 signature and pinned public-key fingerprint verified; feed is within its validity period."},
+	}
+	for _, reference := range match.Advisory.References {
+		evidence = append(evidence, contract.Evidence{
+			Kind: "publisher_advisory_reference",
+			Ref: reference,
+			Note: "Publisher-supplied reference; the Field Engine did not fetch or independently verify this URL.",
+		})
 	}
 	return contract.Finding{
 		SchemaVersion: contract.SchemaVersion,
@@ -406,12 +425,9 @@ func buildVulnerabilityFinding(match vulnfeed.Match, feed vulnfeed.VerifiedFeed,
 		Target: match.Package.PackageURL,
 		Category: "software_vulnerability",
 		Severity: findingSeverity(match.Advisory.Severity),
-		Title: match.Advisory.ID + " affects " + match.Package.Name + " " + match.Package.Version,
+		Title: limitText(match.Advisory.ID + " affects " + match.Package.Name + " " + match.Package.Version, 240),
 		Summary: summary,
-		Evidence: []contract.Evidence{
-			{Kind: "local_package_manifest", Ref: manifestPath + "#" + match.Package.PackageURL, SHA256: manifestHash, Bytes: manifestBytes, Note: "Exact package URL and version found in the supplied local manifest."},
-			{Kind: "signed_vulnerability_feed", Ref: "feed://" + feed.Feed.FeedID, SHA256: feed.PayloadSHA256, Note: "Ed25519 signature and pinned public-key fingerprint verified; feed is within its validity period."},
-		},
+		Evidence: evidence,
 		Recommendation: recommendation,
 		Scope: "local",
 		Simulated: false,
@@ -500,6 +516,8 @@ func runVulnerabilityScan(args []string) error {
 		"feed_expires_at": verified.Feed.ExpiresAt,
 		"feed_payload_sha256": verified.PayloadSHA256,
 		"manifest_sha256": hex.EncodeToString(manifestSum[:]),
+		"manifest_source": manifest.Source,
+		"manifest_generated_at": manifest.GeneratedAt,
 		"packages_assessed": len(manifest.Packages),
 		"advisories_in_feed": verified.AdvisoryCount,
 		"exact_matches": len(findings),
