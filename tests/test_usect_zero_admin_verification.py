@@ -1,18 +1,14 @@
-"""Regression tests for native FastAPI administrator verification."""
+"""Regression tests for authoritative, single-session FastAPI admin verification."""
 from __future__ import annotations
 
 import json
 import logging
-import time
-from unittest.mock import patch
 
-import jwt
 import pytest
 import requests
 
 from fastapi_routes import admin_auth
 
-TEST_SECRET = "native-fastapi-admin-test-secret"
 ADMIN_ID = "admin-user-42"
 
 
@@ -27,21 +23,8 @@ class FakeResponse:
         return self._payload
 
 
-def _token(user_id=ADMIN_ID):
-    return jwt.encode(
-        {
-            "sub": user_id,
-            "iat": int(time.time()),
-            "exp": int(time.time()) + 300,
-        },
-        TEST_SECRET,
-        algorithm="HS256",
-    )
-
-
 def call_verifier(monkeypatch, response=None, *, exception=None, authorization=None):
-    """Exercise the active ASGI admin verifier with a stubbed backend request."""
-    monkeypatch.setattr(admin_auth, "JWT_SECRET", TEST_SECRET)
+    """Exercise the active ASGI admin verifier with a stubbed RevelaCode call."""
     monkeypatch.setattr(admin_auth, "BACKEND_URL", "https://backend.example.test")
     observed = {}
 
@@ -53,8 +36,8 @@ def call_verifier(monkeypatch, response=None, *, exception=None, authorization=N
         return response
 
     monkeypatch.setattr(admin_auth.requests, "get", fake_get)
-    token = authorization if authorization is not None else f"Bearer {_token()}"
-    result = admin_auth.require_platform_admin(token)
+    bearer = authorization if authorization is not None else "Bearer session-issued-by-revelacode"
+    result = admin_auth.require_platform_admin(bearer)
     return result, observed
 
 
@@ -62,17 +45,18 @@ def _error_body(response):
     return json.loads(response.body.decode("utf-8"))
 
 
-def test_admin_verification_uses_authoritative_backend_and_bounded_timeout(monkeypatch):
+def test_admin_verification_forwards_existing_revelacode_session_and_uses_bounded_timeout(monkeypatch):
     upstream = FakeResponse(
         200,
         {
             "success": True,
+            "authenticated": True,
             "authorized": True,
             "userId": ADMIN_ID,
             "role": "platform_admin",
         },
     )
-    token = f"Bearer {_token()}"
+    token = "Bearer session-issued-by-revelacode"
     result, observed = call_verifier(monkeypatch, upstream, authorization=token)
 
     actor, error = result
@@ -83,6 +67,7 @@ def test_admin_verification_uses_authoritative_backend_and_bounded_timeout(monke
     assert observed["allow_redirects"] is False
     assert observed["timeout"] == (3.05, admin_auth.ADMIN_TIMEOUT)
     assert 5 <= admin_auth.ADMIN_TIMEOUT <= 30
+    assert not hasattr(admin_auth, "JWT_SECRET")
 
 
 def test_admin_verification_fails_closed_and_logs_upstream_reason(monkeypatch, caplog):
@@ -98,12 +83,11 @@ def test_admin_verification_fails_closed_and_logs_upstream_reason(monkeypatch, c
     assert error.status_code == 503
     assert _error_body(error)["code"] == "admin_verification_unavailable"
     assert "role_lookup_unavailable" in caplog.text
-    assert "native-fastapi-admin-test-secret" not in caplog.text
 
 
 def test_admin_verification_timeout_fails_closed_without_logging_token(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
-    token = f"Bearer {_token()}"
+    token = "Bearer private-session-value"
     (actor, error), observed = call_verifier(
         monkeypatch,
         exception=requests.Timeout("upstream timed out"),
@@ -170,26 +154,22 @@ def test_malformed_success_payload_fails_closed(monkeypatch):
     assert _error_body(error)["code"] == "admin_verification_unavailable"
 
 
-def test_missing_jwt_secret_is_reported_as_server_configuration_error(monkeypatch):
-    monkeypatch.setattr(admin_auth, "JWT_SECRET", "")
-
+def test_missing_bearer_is_rejected_without_an_upstream_request(monkeypatch):
     def unexpected_get(*args, **kwargs):
-        pytest.fail("missing JWT configuration must fail before an upstream call")
+        pytest.fail("a missing bearer must be rejected before an upstream call")
 
     monkeypatch.setattr(admin_auth.requests, "get", unexpected_get)
-    actor, error = admin_auth.require_platform_admin("Bearer any-token")
+    actor, error = admin_auth.require_platform_admin("")
 
     assert actor is None
     assert error is not None
-    assert error.status_code == 503
-    assert _error_body(error)["code"] == "jwt_verifier_not_configured"
+    assert error.status_code == 401
+    assert _error_body(error)["code"] == "authentication_required"
 
 
-def test_invalid_bearer_is_rejected_before_upstream_request(monkeypatch):
-    monkeypatch.setattr(admin_auth, "JWT_SECRET", TEST_SECRET)
-
+def test_non_bearer_authorization_scheme_is_rejected_without_an_upstream_request(monkeypatch):
     def unexpected_get(*args, **kwargs):
-        pytest.fail("invalid bearer must be rejected before an upstream call")
+        pytest.fail("a non-bearer scheme must be rejected before an upstream call")
 
     monkeypatch.setattr(admin_auth.requests, "get", unexpected_get)
     actor, error = admin_auth.require_platform_admin("Basic not-a-bearer")
