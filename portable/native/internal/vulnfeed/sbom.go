@@ -21,11 +21,7 @@ type cyclonedxBOM struct {
 	SpecVersion string `json:"specVersion"`
 	Metadata struct {
 		Timestamp string `json:"timestamp"`
-		Tools []struct {
-			Vendor string `json:"vendor"`
-			Name string `json:"name"`
-			Version string `json:"version"`
-		} `json:"tools"`
+		Tools json.RawMessage `json:"tools"`
 	} `json:"metadata"`
 	Components []cyclonedxComponent `json:"components"`
 }
@@ -143,13 +139,43 @@ func ParseCycloneDXJSON(data []byte) (SBOMImportResult, error) {
 		return SBOMImportResult{}, err
 	}
 	source := "CycloneDX " + bom.SpecVersion
-	if len(bom.Metadata.Tools) > 0 {
-		tool := bom.Metadata.Tools[0]
-		parts := []string{}
-		if strings.TrimSpace(tool.Vendor) != "" { parts = append(parts, strings.TrimSpace(tool.Vendor)) }
-		if strings.TrimSpace(tool.Name) != "" { parts = append(parts, strings.TrimSpace(tool.Name)) }
-		if strings.TrimSpace(tool.Version) != "" { parts = append(parts, strings.TrimSpace(tool.Version)) }
-		if len(parts) > 0 { source = strings.Join(parts, " ") + " (CycloneDX " + bom.SpecVersion + ")" }
+	if len(bom.Metadata.Tools) > 0 && string(bom.Metadata.Tools) != "null" {
+		type legacyTool struct {
+			Vendor string `json:"vendor"`
+			Name string `json:"name"`
+			Version string `json:"version"`
+		}
+		type toolComponent struct {
+			Name string `json:"name"`
+			Version string `json:"version"`
+		}
+		type toolSet struct {
+			Components []toolComponent `json:"components"`
+		}
+		tools := []legacyTool{}
+		var structured toolSet
+		if len(bom.Metadata.Tools) > 0 && bom.Metadata.Tools[0] == '[' {
+			if err := json.Unmarshal(bom.Metadata.Tools, &tools); err != nil {
+				return SBOMImportResult{}, fmt.Errorf("decode CycloneDX legacy tools: %w", err)
+			}
+		} else if len(bom.Metadata.Tools) > 0 && bom.Metadata.Tools[0] == '{' {
+			if err := json.Unmarshal(bom.Metadata.Tools, &structured); err != nil {
+				return SBOMImportResult{}, fmt.Errorf("decode CycloneDX tools object: %w", err)
+			}
+			for _, component := range structured.Components {
+				tools = append(tools, legacyTool{Name: component.Name, Version: component.Version})
+			}
+		} else {
+			return SBOMImportResult{}, errors.New("CycloneDX metadata.tools must be an object or legacy array")
+		}
+		if len(tools) > 0 {
+			tool := tools[0]
+			parts := []string{}
+			if strings.TrimSpace(tool.Vendor) != "" { parts = append(parts, strings.TrimSpace(tool.Vendor)) }
+			if strings.TrimSpace(tool.Name) != "" { parts = append(parts, strings.TrimSpace(tool.Name)) }
+			if strings.TrimSpace(tool.Version) != "" { parts = append(parts, strings.TrimSpace(tool.Version)) }
+			if len(parts) > 0 { source = strings.Join(parts, " ") + " (CycloneDX " + bom.SpecVersion + ")" }
+		}
 	}
 	result := SBOMImportResult{
 		Manifest: Manifest{SchemaVersion: ManifestSchema, GeneratedAt: generatedAt, Source: source, Packages: []Package{}},
