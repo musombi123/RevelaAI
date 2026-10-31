@@ -15,3 +15,8 @@ Ghidra, radare2/Cutter, Capstone, LIEF, YARA, JADX, APKTool, Androguard and Frid
 
 ## Analysis record
 Record input SHA-256, original source, acquisition time, tool versions, operating system, architecture, analysis steps, observations, hypotheses, confidence, limitations and references.
+
+
+## Field Kit built-in header inspection
+
+Run `python -m revela_fieldkit binary inspect FILE --hash` to parse basic PE, ELF, thin Mach-O and WebAssembly headers, or to list an APK's manifest/DEX/native-library structure. This is static header/package triage only: no binary is executed, no archive member is extracted, and Android binary XML is not decoded. Use Ghidra/JADX/Androguard and a controlled lab for deeper analysis.

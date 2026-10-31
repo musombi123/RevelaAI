@@ -27,6 +27,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 from . import __version__
+from .binary_analysis import inspect_binary
 
 MAX_FILES = 25000
 MAX_SECRET_FILE_BYTES = 8 * 1024 * 1024
@@ -172,16 +173,64 @@ def load_case(case_dir: Path) -> dict[str, Any]:
         raise ValueError("Unsupported or invalid case metadata.")
     return data
 
+def _custody_record_hash(record: dict[str, Any]) -> str:
+    payload = {key: value for key, value in record.items() if key != "event_sha256"}
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def verify_custody_log(case_dir: Path) -> dict[str, Any]:
+    """Verify the append-only event hash chain; this detects edits but is not a digital signature."""
+    log_path = case_dir / "chain_of_custody.jsonl"
+    if not log_path.exists():
+        return {"status": "missing", "entries": 0, "head_sha256": None}
+    if log_path.is_symlink() or not log_path.is_file():
+        return {"status": "unavailable", "entries": 0, "head_sha256": None}
+    previous = "0" * 64
+    entries = 0
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {"status": "unavailable", "entries": 0, "head_sha256": None}
+    if not lines:
+        return {"status": "empty", "entries": 0, "head_sha256": previous}
+    for line_number, line in enumerate(lines, start=1):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            return {"status": "invalid_json", "entries": entries, "failed_line": line_number, "head_sha256": previous}
+        if not isinstance(record, dict) or not isinstance(record.get("event_sha256"), str):
+            return {"status": "legacy_unsealed", "entries": entries, "failed_line": line_number, "head_sha256": previous}
+        if record.get("previous_event_sha256") != previous:
+            return {"status": "chain_link_mismatch", "entries": entries, "failed_line": line_number, "head_sha256": previous}
+        actual = _custody_record_hash(record)
+        if not re.fullmatch(r"[0-9a-f]{64}", record["event_sha256"]) or actual != record["event_sha256"]:
+            return {"status": "event_hash_mismatch", "entries": entries, "failed_line": line_number, "head_sha256": previous}
+        previous = actual
+        entries += 1
+    return {"status": "verified", "entries": entries, "head_sha256": previous}
+
+
 def append_custody(case_dir: Path, event: str, operator: str, details: dict[str, Any]) -> None:
+    log_path = case_dir / "chain_of_custody.jsonl"
+    existing = verify_custody_log(case_dir) if log_path.exists() else {"status": "empty", "head_sha256": "0" * 64}
+    if existing.get("status") not in {"verified", "empty"}:
+        raise ValueError(
+            "Custody log is not appendable because its integrity is not verified "
+            f"({existing.get('status')}). Preserve it and start a new case rather than rewriting history."
+        )
     record = {
         "timestamp_utc": utc_now(),
         "event": event[:120],
         "operator": operator[:120],
         "details": details,
+        "previous_event_sha256": existing.get("head_sha256") or ("0" * 64),
     }
-    log_path = case_dir / "chain_of_custody.jsonl"
+    record["event_sha256"] = _custody_record_hash(record)
     with log_path.open("a", encoding="utf-8", newline="\n") as stream:
         stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
 
 def create_case(root: Path, case_id: str, title: str, operator: str) -> dict[str, Any]:
     case_id = case_id.strip().upper()
@@ -582,6 +631,17 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("path", type=Path)
     inspect.add_argument("--hash", action="store_true", help="Compute a full SHA-256 in addition to the sample.")
 
+    binary = commands.add_parser("binary", help="Read-only PE, ELF, Mach-O, WebAssembly and APK structure inspection.")
+    binary_sub = binary.add_subparsers(dest="binary_action", required=True)
+    binary_inspect = binary_sub.add_parser("inspect", help="Inspect executable headers or APK package layout without running the file.")
+    binary_inspect.add_argument("path", type=Path)
+    binary_inspect.add_argument("--hash", action="store_true", help="Include the complete input SHA-256.")
+
+    custody = commands.add_parser("custody", help="Verify the tamper-evident case event log.")
+    custody_sub = custody.add_subparsers(dest="custody_action", required=True)
+    custody_verify = custody_sub.add_parser("verify", help="Verify every event hash and chain link.")
+    custody_verify.add_argument("--case", type=Path, required=True)
+
     secrets = commands.add_parser("secrets", help="Run local defensive source-file checks.")
     secrets_sub = secrets.add_subparsers(dest="secrets_action", required=True)
     scan = secrets_sub.add_parser("scan", help="Detect common secret patterns; values are redacted.")
@@ -628,7 +688,7 @@ def interactive_menu() -> int:
                 "  case create --root cases --id CASE-001 --title \"USB evidence triage\"\n"
                 "  inventory --case cases/CASE-001 --source ./sample-data\n"
                 "  verify --case cases/CASE-001\n"
-                "  inspect ./sample-data/file.bin --hash\n"
+                "  inspect ./sample-data/file.bin --hash\n  binary inspect ./sample-data/app.exe --hash\n  custody verify --case cases/CASE-001\n"
                 "  secrets scan ./my-source-code\n"
                 "  knowledge search deleted files timeline\n"
                 "  ask --model gemma4:e2b --question \"Explain evidence handling\"\n"
@@ -660,6 +720,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if result["status"] == "verified" else 2
         elif args.command == "inspect":
             emit(inspect_file(args.path, args.hash))
+        elif args.command == "binary" and args.binary_action == "inspect":
+            emit(inspect_binary(args.path, args.hash))
+        elif args.command == "custody" and args.custody_action == "verify":
+            result = verify_custody_log(args.case)
+            emit(result)
+            return 0 if result["status"] == "verified" else 2
         elif args.command == "secrets" and args.secrets_action == "scan":
             emit(scan_secrets(args.path, args.include_hidden))
         elif args.command == "doctor":

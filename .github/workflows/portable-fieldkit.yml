@@ -37,14 +37,14 @@ jobs:
         run: |
           mkdir -p dist
           cd portable
-          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.1.0.zip . \
+          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.2.0.zip . \
             -x "tests/*" "__pycache__/*" "*.pyc"
 
       - name: Upload USB package
         uses: actions/upload-artifact@v4
         with:
           name: RevelaAI-Portable-Field-Kit
-          path: dist/RevelaAI-Portable-Field-Kit-0.1.0.zip
+          path: dist/RevelaAI-Portable-Field-Kit-0.2.0.zip
           if-no-files-found: error
 
 

@@ -1,5 +1,6 @@
 import json
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from revela_fieldkit import cli
+from revela_fieldkit.binary_analysis import inspect_binary
 
 
 class FieldKitTests(unittest.TestCase):
@@ -119,6 +121,70 @@ class FieldKitTests(unittest.TestCase):
         result = cli.create_report(case_dir, "tester")
         self.assertTrue(Path(result["report"]).is_file())
         self.assertEqual(result["evidence_records"], 2)
+
+    def test_custody_log_is_hash_chained_and_verifiable(self):
+        case_dir = self.create_case()
+        cli.append_custody(case_dir, "analyst_note", "tester", {"note": "first"})
+        result = cli.verify_custody_log(case_dir)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["entries"], 2)
+
+    def test_custody_log_detects_tampered_event_and_blocks_append(self):
+        case_dir = self.create_case()
+        log_path = case_dir / "chain_of_custody.jsonl"
+        rows = log_path.read_text(encoding="utf-8").splitlines()
+        record = json.loads(rows[0])
+        record["operator"] = "tampered"
+        rows[0] = json.dumps(record)
+        log_path.write_text("\\n".join(rows) + "\\n", encoding="utf-8")
+        self.assertNotEqual(cli.verify_custody_log(case_dir)["status"], "verified")
+        with self.assertRaises(ValueError):
+            cli.append_custody(case_dir, "new_event", "tester", {})
+
+    def test_binary_inspector_parses_elf64_header_without_execution(self):
+        ident = b"\\x7fELF" + bytes([2, 1, 1, 0]) + (b"\\x00" * 8)
+        elf_header = struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0x400000, 64, 0, 0, 64, 56, 0, 64, 0, 0)
+        path = self.root / "fixture.elf"
+        path.write_bytes(ident + elf_header)
+        result = inspect_binary(path, full_hash=True)
+        self.assertEqual(result["format"], "ELF")
+        self.assertEqual(result["architecture"], "x86-64")
+        self.assertFalse(result["execution_performed"])
+        self.assertEqual(len(result["sha256"]), 64)
+
+    def test_binary_inspector_parses_pe64_headers_and_sections(self):
+        data = bytearray(0x80 + 24 + 0xF0 + 40)
+        data[:2] = b"MZ"
+        struct.pack_into("<I", data, 0x3C, 0x80)
+        data[0x80:0x84] = b"PE\\x00\\x00"
+        struct.pack_into("<HHIIIHH", data, 0x84, 0x8664, 1, 123456789, 0, 0, 0xF0, 0x22)
+        optional = 0x80 + 24
+        struct.pack_into("<H", data, optional, 0x20B)
+        struct.pack_into("<I", data, optional + 16, 0x1000)
+        struct.pack_into("<Q", data, optional + 24, 0x140000000)
+        section = optional + 0xF0
+        data[section:section + 5] = b".text"
+        struct.pack_into("<IIII", data, section + 8, 0x200, 0x1000, 0x200, 0x400)
+        path = self.root / "fixture.exe"
+        path.write_bytes(data)
+        result = inspect_binary(path)
+        self.assertEqual(result["format"], "PE")
+        self.assertEqual(result["architecture"], "x86-64")
+        self.assertEqual(result["sections"][0]["name"], ".text")
+        self.assertEqual(result["entry_point_rva"], "0x1000")
+
+    def test_binary_inspector_lists_apk_structure_without_extracting(self):
+        import zipfile
+        path = self.root / "fixture.apk"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("AndroidManifest.xml", b"synthetic manifest")
+            archive.writestr("classes.dex", b"synthetic dex")
+            archive.writestr("lib/arm64-v8a/libsample.so", b"synthetic native")
+        result = inspect_binary(path)
+        self.assertEqual(result["format"], "Android APK")
+        self.assertEqual(result["dex_count"], 1)
+        self.assertEqual(result["native_library_count"], 1)
+        self.assertFalse(result["execution_performed"])
 
 
 if __name__ == "__main__":

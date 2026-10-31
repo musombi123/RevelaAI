@@ -1,6 +1,6 @@
 # RevelaAI Portable Field Kit
 
-**Version:** 0.1.0  
+**Version:** 0.2.0  
 **Purpose:** USB-carried, local-first utilities for evidence triage, case documentation, file inspection, source-secret review and offline reference search.
 
 This is the local companion to the RevelaAI AI repository. It deliberately uses only the Python standard library. It does not install third-party tools, upload evidence, execute inspected files, acquire physical disks, perform network scans or make changes to source evidence.
@@ -12,6 +12,8 @@ This is the local companion to the RevelaAI AI repository. It deliberately uses 
 | Case workspace | python -m revela_fieldkit case create ... | Create case metadata, evidence and report folders, and a custody log. |
 | Evidence inventory | python -m revela_fieldkit inventory ... | Hash regular files with SHA-256 and save an integrity manifest. |
 | Integrity verification | python -m revela_fieldkit verify ... | Re-hash source files and compare them to the saved manifest. |
+| Custody log verification | python -m revela_fieldkit custody verify ... | Verify the event hash chain; tampered logs are not silently appended. |
+| Binary analysis | python -m revela_fieldkit binary inspect FILE | Read PE/ELF/Mach-O/WebAssembly headers and APK package layout without executing or extracting files. |
 | File inspection | python -m revela_fieldkit inspect FILE --hash | Report file metadata, a small magic-byte signature set, sample entropy and optional SHA-256. |
 | Source secret audit | python -m revela_fieldkit secrets scan PATH | Detect selected credential patterns and redact values in output. |
 | Tool discovery | python -m revela_fieldkit doctor | Check whether specialist applications are already installed. |
@@ -59,12 +61,14 @@ Requires Python 3.10 or newer. No pip install is required.
     python -m revela_fieldkit inventory --case cases/CASE-001 --source ./sample-data
     python -m revela_fieldkit verify --case cases/CASE-001
     python -m revela_fieldkit inspect ./sample-data/example.bin --hash
+    python -m revela_fieldkit binary inspect ./sample-data/program.exe --hash
+    python -m revela_fieldkit custody verify --case cases/CASE-001
     python -m revela_fieldkit secrets scan ./my-repository
     python -m revela_fieldkit doctor
     python -m revela_fieldkit knowledge search "deleted files timeline"
     python -m revela_fieldkit report --case cases/CASE-001
 
-Inventory reads and hashes source files; it does not modify them. A single-file source and a directory source are both supported.
+Inventory reads and hashes source files; it does not modify them. A single-file source and a directory source are both supported. The custody log links each event with SHA-256; this detects accidental or partial record edits but is not a digital signature or protection against an attacker who can rewrite the entire case folder.
 
 ## Specialist tools are separate components
 
