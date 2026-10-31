@@ -112,7 +112,7 @@ jobs:
               windows-amd64) export GOOS=windows; export GOARCH=amd64; ext=".exe" ;;
               linux-amd64) export GOOS=linux; export GOARCH=amd64; ext="" ;;
             esac
-            out="portable/bin/$target"
+            out="$GITHUB_WORKSPACE/portable/bin/$target"
             mkdir -p "$out"
 
             go -C portable/native build -trimpath -ldflags="-s -w" -o "$out/revela-field$ext" ./cmd/revela-field
