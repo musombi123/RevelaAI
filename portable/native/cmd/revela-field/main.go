@@ -4,7 +4,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -14,10 +16,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/musombi123/revela-field-engine/internal/contract"
@@ -79,6 +85,8 @@ func main() {
 		err = runGuardian(os.Args[2:])
 	case "core-status":
 		err = runCoreStatus()
+	case "core-start":
+		err = runCoreStart(os.Args[2:])
 	case "sync":
 		err = runSync(os.Args[2:])
 	case "help", "-h", "--help":
@@ -108,6 +116,7 @@ Commands:
   guardian --action ACTION --scope local|lab --authorized
                                Evaluate a request using the fail-closed policy
   core-status                  Probe only the local ZERO/ONE/TWO health endpoints
+  core-start --authorized      Start bundled ZERO/ONE/TWO services on loopback
   sync --finding FILE --url ORIGIN
                                Send one finding to Meta Engineer (REVELA_ADMIN_BEARER required)
   version                      Print version
@@ -401,6 +410,247 @@ func runSync(args []string) error {
 	})
 }
 
+
+type coreServiceSpec struct {
+	Name string
+	Binary string
+	Args []string
+	Endpoint string
+}
+
+func randomSecret() (string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func portableRootFromExecutable() (string, string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", "", err
+	}
+	binDir := filepath.Dir(exe)
+	platformDir := filepath.Base(binDir)
+	if platformDir != "windows-amd64" && platformDir != "linux-amd64" {
+		return "", "", fmt.Errorf("unsupported USB binary directory %q", platformDir)
+	}
+	// Executable layout: portable/bin/<os>-<arch>/revela-field[.exe]
+	root := filepath.Dir(filepath.Dir(binDir))
+	return root, platformDir, nil
+}
+
+func minimalCoreEnvironment(overrides map[string]string) []string {
+	allowed := map[string]bool{
+		"PATH": true, "HOME": true, "USERPROFILE": true, "HOMEDRIVE": true, "HOMEPATH": true,
+		"SystemRoot": true, "WINDIR": true, "COMSPEC": true, "PATHEXT": true,
+		"TEMP": true, "TMP": true, "TMPDIR": true, "APPDATA": true, "LOCALAPPDATA": true,
+		"LANG": true, "LC_ALL": true, "TZ": true,
+		// Preserve the existing owner-recipe enforcement gate; never copy the key itself.
+		"REVELA_UNCOPYABLE_ENFORCE": true, "REVELA_MASTER_KEY_PATH": true, "REVELA_RECIPE_EXPECTED_SHA256": true,
+	}
+	values := map[string]string{}
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if ok && allowed[key] {
+			values[key] = value
+		}
+	}
+	for key, value := range overrides {
+		values[key] = value
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	env := make([]string, 0, len(keys))
+	for _, key := range keys {
+		env = append(env, key+"="+values[key])
+	}
+	return env
+}
+
+func waitForCoreHealth(ctx context.Context, name, endpoint string, exits <-chan error) error {
+	deadline := time.NewTimer(40 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	client := &http.Client{
+		Timeout: 900 * time.Millisecond,
+		Transport: &http.Transport{Proxy: nil},
+	}
+	for {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if req != nil {
+			resp, err := client.Do(req)
+			if err == nil {
+				_ = resp.Body.Close()
+				if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+					return nil
+				}
+			}
+		}
+		select {
+		case err := <-exits:
+			return fmt.Errorf("%s exited before becoming healthy: %w", name, err)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("%s health check timed out at %s", name, endpoint)
+		case <-ticker.C:
+		}
+	}
+}
+
+func runCoreStart(args []string) error {
+	fs := flag.NewFlagSet("core-start", flag.ContinueOnError)
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to start local RevelaAI core services on this computer")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "start_local_core_services", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+
+	root, platformDir, err := portableRootFromExecutable()
+	if err != nil {
+		return err
+	}
+	runtimeRoot := filepath.Join(root, "runtime-source")
+	for _, required := range []string{
+		filepath.Join(runtimeRoot, "core-zero", "go.mod"),
+		filepath.Join(runtimeRoot, "core-zero", "guardian", "rules.yaml"),
+		filepath.Join(runtimeRoot, "core-zero", "guardian", "worldwide_rules.yaml"),
+		filepath.Join(runtimeRoot, "core-one", "go.mod"),
+		filepath.Join(runtimeRoot, "core-one", "guardian", "rules.yaml"),
+		filepath.Join(runtimeRoot, "core-two", "go.mod"),
+		filepath.Join(runtimeRoot, "core-two", "guardian", "rules.yaml"),
+	} {
+		if info, statErr := os.Stat(required); statErr != nil || info.IsDir() {
+			return fmt.Errorf("USB core runtime source is incomplete; missing %s", required)
+		}
+	}
+	suffix := ""
+	if runtime.GOOS == "windows" {
+		suffix = ".exe"
+	}
+
+	zeroToken, err := randomSecret()
+	if err != nil { return err }
+	genesisToken, err := randomSecret()
+	if err != nil { return err }
+	mindToken, err := randomSecret()
+	if err != nil { return err }
+
+	logDir := filepath.Join(root, "data", "logs")
+	zeroDataDir := filepath.Join(root, "data", "runtime", "core-zero")
+	for _, dir := range []string{logDir, zeroDataDir} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("prepare USB runtime directory: %w", err)
+		}
+	}
+
+	overrides := map[string]string{
+		"USECT_ZERO_ADMIN_TOKEN": zeroToken,
+		"GENESIS_ADMIN_TOKEN": genesisToken,
+		"MIND_ADMIN_TOKEN": mindToken,
+		"USECT_ZERO_DATA_DIR": zeroDataDir,
+		"USECT_ZERO_BASE_URL": "http://127.0.0.1:8780",
+		"GENESIS_BASE_URL": "http://127.0.0.1:8781",
+		"MIND_AUTO_EVOLVE": "0",
+	}
+	childEnv := minimalCoreEnvironment(overrides)
+	specs := []coreServiceSpec{
+		{
+			Name: "Core-ZERO", Binary: "usect-zero" + suffix,
+			Args: []string{"-mode", "serve", "-root", runtimeRoot, "-listen", "127.0.0.1:8780"},
+			Endpoint: "http://127.0.0.1:8780/v1/health",
+		},
+		{
+			Name: "Core-ONE / Genesis", Binary: "revela-genesis" + suffix,
+			Args: []string{"-mode", "serve", "-repo-root", runtimeRoot, "-listen", "127.0.0.1:8781"},
+			Endpoint: "http://127.0.0.1:8781/v1/genesis/health",
+		},
+		{
+			Name: "Core-TWO / Infinite Mind", Binary: "revela-mind" + suffix,
+			Args: []string{"-daemon", "-repo-root", runtimeRoot, "-listen", "127.0.0.1:8782", "-interval", "24h"},
+			Endpoint: "http://127.0.0.1:8782/v1/mind/health",
+		},
+	}
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	exits := make(chan error, len(specs))
+	var waiters sync.WaitGroup
+	children := []*exec.Cmd{}
+	shutdown := func() {
+		cancel()
+		for _, child := range children {
+			if child.Process != nil {
+				_ = child.Process.Kill()
+			}
+		}
+		waiters.Wait()
+	}
+
+	for _, spec := range specs {
+		binaryPath := filepath.Join(root, "bin", platformDir, spec.Binary)
+		if info, statErr := os.Stat(binaryPath); statErr != nil || !info.Mode().IsRegular() {
+			shutdown()
+			return fmt.Errorf("required bundled core binary is missing: %s", binaryPath)
+		}
+		logPath := filepath.Join(logDir, strings.ToLower(strings.ReplaceAll(spec.Name, " / ", "-"))+".log")
+		logFile, openErr := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if openErr != nil {
+			shutdown()
+			return fmt.Errorf("open core log for %s: %w", spec.Name, openErr)
+		}
+		cmd := exec.CommandContext(ctx, binaryPath, spec.Args...)
+		cmd.Dir = runtimeRoot
+		cmd.Env = childEnv
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		if startErr := cmd.Start(); startErr != nil {
+			_ = logFile.Close()
+			shutdown()
+			return fmt.Errorf("start %s: %w", spec.Name, startErr)
+		}
+		children = append(children, cmd)
+		waiters.Add(1)
+		go func(name string, child *exec.Cmd, logHandle *os.File) {
+			defer waiters.Done()
+			waitErr := child.Wait()
+			_ = logHandle.Close()
+			if waitErr != nil {
+				exits <- fmt.Errorf("%s stopped: %w", name, waitErr)
+			} else {
+				exits <- fmt.Errorf("%s stopped unexpectedly", name)
+			}
+		}(spec.Name, cmd, logFile)
+
+		if healthErr := waitForCoreHealth(ctx, spec.Name, spec.Endpoint, exits); healthErr != nil {
+			shutdown()
+			return healthErr
+		}
+		fmt.Printf("%s healthy at %s\n", spec.Name, spec.Endpoint)
+	}
+
+	fmt.Println("All three USECT cores are reachable on loopback. No provider credentials were inherited.")
+	fmt.Println("Guardian remains enabled; Mind auto-evolution is disabled. Press Ctrl+C to stop the local stack.")
+	select {
+	case <-ctx.Done():
+		fmt.Println("Stopping local USECT core stack...")
+		shutdown()
+		return nil
+	case childErr := <-exits:
+		shutdown()
+		return childErr
+	}
+}
+
 func runCoreStatus() error {
 	type target struct{name, address, path string}
 	targets := []target{
@@ -447,6 +697,7 @@ func runMenu() error {
 		fmt.Println("3) Synthetic adversary-emulation exercise")
 		fmt.Println("4) Inventory an authorised local directory")
 		fmt.Println("5) Core health status (loopback only)")
+		fmt.Println("6) Start bundled ZERO/ONE/TWO locally")
 		fmt.Println("0) Exit")
 		fmt.Print("Select: ")
 		value, err := reader.ReadString('\n')
@@ -473,6 +724,12 @@ func runMenu() error {
 			if err := runAudit([]string{"--root", strings.TrimSpace(path), "--authorized"}); err != nil { fmt.Println(err) }
 		case "5":
 			if err := runCoreStatus(); err != nil { return err }
+		case "6":
+			fmt.Print("Starting services on loopback will write runtime logs/state to this USB. Type START to continue: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "START" { fmt.Println("Cancelled."); continue }
+			if err := runCoreStart([]string{"--authorized"}); err != nil { fmt.Println(err) }
 		case "0":
 			return nil
 		default:
