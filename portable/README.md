@@ -146,6 +146,20 @@ Cloud RevelaAI, hosted providers and any unbundled connectors remain online serv
 
 Remote sync is allowlisted to `revelaai.onrender.com` by default. A deployment using a different approved HTTPS hostname must explicitly configure `REVELA_FIELD_ALLOWED_SYNC_HOSTS` as a comma-separated list in the local launch environment. Only exact hostnames are accepted; custom remote ports and redirects are rejected. The Field Engine applies its Guardian sync gate before transmission.
 
+
+### Import a real SBOM before vulnerability matching
+
+The USB supports offline imports from CycloneDX JSON 1.4–1.7 and SPDX JSON 2.3:
+
+```text
+revela-field manifest import --format cyclonedx --file ./data/bom.json --out ./data/package-manifest.json --authorized
+revela-field manifest import --format spdx-json --file ./data/software.spdx.json --out ./data/package-manifest.json --authorized
+```
+
+The importer preserves the SBOM creation timestamp and tool provenance, normalizes component Package URLs by separating the version, traverses nested CycloneDX components, and deduplicates exact package/version entries. Entries missing an exact version or Package URL are counted as skipped. The output manifest must be a new path; the source SBOM is never edited.
+
+After import, run the signed-feed `vuln scan` command described below. CycloneDX XML, SPDX 3.x, direct OS package-database acquisition and dependency-range resolution are not included yet. An SBOM is only as complete and current as its producer; an empty scan is not proof of a clean system.
+
 ## Signed offline vulnerability assessment
 
 The native engine includes two additional commands:
