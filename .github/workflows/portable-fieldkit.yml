@@ -56,6 +56,53 @@ jobs:
           go -C core-two test -race ./...
           go -C core-two vet ./...
 
+      - name: Smoke-test the existing ZERO + Genesis + Mind composition
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$RUNNER_TEMP/revela-core-runtime"
+          mkdir -p "$scratch"
+          cp -a core-zero core-one core-two lib "$scratch/"
+          go -C core-two build -trimpath -o "$RUNNER_TEMP/revela-stack" ./cmd/revela
+          export USECT_ZERO_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export GENESIS_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export MIND_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export USECT_ZERO_BASE_URL="http://127.0.0.1:8780"
+          export GENESIS_BASE_URL="http://127.0.0.1:8781"
+          export USECT_ZERO_DATA_DIR="$RUNNER_TEMP/revela-zero-data"
+          mkdir -p "$USECT_ZERO_DATA_DIR"
+          "$RUNNER_TEMP/revela-stack" --daemon -repo-root "$scratch" >"$RUNNER_TEMP/revela-stack.log" 2>&1 &
+          pid=$!
+          cleanup() {
+            kill -INT "$pid" 2>/dev/null || true
+            for attempt in $(seq 1 10); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            cat "$RUNNER_TEMP/revela-stack.log"
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --silent --show-error --fail http://127.0.0.1:8780/v1/health -o "$RUNNER_TEMP/zero-health.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8781/v1/genesis/health -o "$RUNNER_TEMP/genesis-health.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8782/v1/mind/health -o "$RUNNER_TEMP/mind-health.json"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/revela-stack.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          test -s "$RUNNER_TEMP/zero-health.json"
+          test -s "$RUNNER_TEMP/genesis-health.json"
+          test -s "$RUNNER_TEMP/mind-health.json"
+
       - name: Cross-compile Field Engine and core services for Windows and Linux
         shell: bash
         run: |
@@ -74,6 +121,11 @@ jobs:
             go -C core-two build -trimpath -ldflags="-s -w" -o "$out/revela-mind$ext" ./cmd/revela-mind
           done
 
+      - name: Stage the three core source trees and Guardian policies on the USB
+        run: |
+          mkdir -p portable/runtime-source
+          cp -a core-zero core-one core-two lib portable/runtime-source/
+
       - name: Create native binary checksums
         run: |
           find portable/bin -type f -print0 | sort -z | xargs -0 sha256sum > portable/bin/SHA256SUMS.txt
@@ -82,7 +134,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: revela-field-engine-native-binaries
-          path: portable/bin/
+          path: |
+            portable/bin/
+            portable/runtime-source/
           if-no-files-found: error
           retention-days: 14
 
@@ -98,7 +152,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: revela-field-engine-native-binaries
-          path: portable/bin/
+          path: portable/
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -136,7 +190,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: revela-field-engine-native-binaries
-          path: portable/bin/
+          path: portable/
 
       - name: Prepare verified embedded Python runtime
         shell: pwsh
