@@ -38,6 +38,7 @@ var allowedScopes = map[string]map[string]struct{}{
 	"remediation_plan":          {"local": {}, "lab": {}},
 	"repair_verification":       {"local": {}, "lab": {}},
 	"core_health_probe":         {"local": {}},
+	"start_local_core_services": {"local": {}},
 }
 
 func Evaluate(req Request) Decision {
