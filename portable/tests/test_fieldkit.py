@@ -136,13 +136,13 @@ class FieldKitTests(unittest.TestCase):
         record = json.loads(rows[0])
         record["operator"] = "tampered"
         rows[0] = json.dumps(record)
-        log_path.write_text("\\n".join(rows) + "\\n", encoding="utf-8")
+        log_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         self.assertNotEqual(cli.verify_custody_log(case_dir)["status"], "verified")
         with self.assertRaises(ValueError):
             cli.append_custody(case_dir, "new_event", "tester", {})
 
     def test_binary_inspector_parses_elf64_header_without_execution(self):
-        ident = b"\\x7fELF" + bytes([2, 1, 1, 0]) + (b"\\x00" * 8)
+        ident = b"\x7fELF" + bytes([2, 1, 1, 0]) + (b"\x00" * 8)
         elf_header = struct.pack("<HHIQQQIHHHHHH", 2, 62, 1, 0x400000, 64, 0, 0, 64, 56, 0, 64, 0, 0)
         path = self.root / "fixture.elf"
         path.write_bytes(ident + elf_header)
@@ -156,7 +156,7 @@ class FieldKitTests(unittest.TestCase):
         data = bytearray(0x80 + 24 + 0xF0 + 40)
         data[:2] = b"MZ"
         struct.pack_into("<I", data, 0x3C, 0x80)
-        data[0x80:0x84] = b"PE\\x00\\x00"
+        data[0x80:0x84] = b"PE\x00\x00"
         struct.pack_into("<HHIIIHH", data, 0x84, 0x8664, 1, 123456789, 0, 0, 0xF0, 0x22)
         optional = 0x80 + 24
         struct.pack_into("<H", data, optional, 0x20B)
