@@ -295,6 +295,19 @@ func runGuardian(args []string) error {
 }
 
 
+func syncHostAllowed(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "revelaai.onrender.com" {
+		return true
+	}
+	for _, candidate := range strings.Split(os.Getenv("REVELA_FIELD_ALLOWED_SYNC_HOSTS"), ",") {
+		if strings.EqualFold(strings.TrimSpace(candidate), host) && host != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func validateSyncOrigin(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -311,8 +324,16 @@ func validateSyncOrigin(raw string) (string, error) {
 	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && loopback) {
 		return "", errors.New("remote Meta Engineer connections require HTTPS; plain HTTP is allowed only for loopback testing")
 	}
-	if parsed.Scheme != "https" && !loopback {
-		return "", errors.New("non-loopback Meta Engineer host must use HTTPS")
+	if !loopback {
+		if parsed.Scheme != "https" {
+			return "", errors.New("non-loopback Meta Engineer host must use HTTPS")
+		}
+		if port := parsed.Port(); port != "" && port != "443" {
+			return "", errors.New("remote Meta Engineer connections must use the standard HTTPS port")
+		}
+		if !syncHostAllowed(host) {
+			return "", errors.New("remote Meta Engineer host is not on the approved destination allowlist")
+		}
 	}
 	return strings.TrimRight(parsed.String(), "/"), nil
 }
@@ -337,6 +358,20 @@ func runSync(args []string) error {
 	base, err := validateSyncOrigin(*origin)
 	if err != nil {
 		return err
+	}
+	parsedBase, _ := url.Parse(base)
+	scope := "remote"
+	host := strings.Trim(parsedBase.Hostname(), "[]")
+	if strings.EqualFold(host, "localhost") {
+		scope = "local"
+	} else if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		scope = "local"
+	}
+	decision := guardian.Evaluate(guardian.Request{
+		Action: "meta_engineer_sync", Scope: scope, Authorized: true,
+	})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
 	}
 	info, err := os.Lstat(*findingPath)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 65536 {
