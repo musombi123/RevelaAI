@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"context"
 	"encoding/hex"
 	"encoding/json"
