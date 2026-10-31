@@ -70,11 +70,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Remove-Item -Path portable\tests -Recurse -Force
-          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64.zip -Force
+          Get-ChildItem -Path portable -Directory -Filter __pycache__ -Recurse | Remove-Item -Recurse -Force
+          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64-v0.2.0.zip -Force
 
       - name: Upload Windows USB Edition
         uses: actions/upload-artifact@v4
         with:
           name: RevelaAI-USB-Edition-Windows-x64
-          path: dist/RevelaAI-USB-Edition-Windows-x64.zip
+          path: dist/RevelaAI-USB-Edition-Windows-x64-v0.2.0.zip
           if-no-files-found: error

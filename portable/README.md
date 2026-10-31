@@ -29,11 +29,13 @@ This sends a prompt and local reference notes to an Ollama server bound to 127.0
 
 Ollama's local generate API is documented at https://docs.ollama.com/api/generate. Ollama documents a local Gemma 4 E2B model download of about 7.2 GB and recommends 8 GB available VRAM/unified memory; actual performance depends on hardware and context length. See https://docs.ollama.com/quickstart.
 
+To prepare local AI, install Ollama on a compatible Windows/Linux host, open one terminal on the USB and run Start-LocalAI.ps1 (Windows), then use a second terminal to run prepare-local-model.ps1. After the model is downloaded into the USB model folder, the ask command can use it without an internet connection. The Ollama engine itself must be installed on the host; it is not yet shipped as a fully self-contained executable in this bundle.
+
 ## USB layout
 
 Copy the portable/ directory to the USB drive. The Windows runtime preparation script can place the official Python embeddable distribution under runtimes/python-win-x64/. Linux currently uses a local Python 3.10+ installation; a standalone Linux runtime can be added as a separate platform-specific bundle.
 
-Recommended drive: 32 GB minimum for tools and case work; 64 GB or larger if you plan to store a local model. Keep client evidence on an encrypted, access-controlled volume. Avoid storing sensitive cases on a shared USB drive.
+Recommended drive: 32 GB minimum for tools and case work; 64 GB or larger if you plan to store a local model. Format the drive as exFAT or NTFS rather than FAT32 when using multi-gigabyte model files. Keep client evidence on an encrypted, access-controlled volume. Avoid storing sensitive cases on a shared USB drive. The Windows launcher changes its working directory to the USB, so default case folders are created on the drive.
 
 ## Prepare Windows
 
@@ -45,7 +47,7 @@ Open PowerShell from the portable/ directory and run:
 
 The preparation script downloads the official Python 3.14.10 Windows x64 embeddable ZIP from python.org and extracts it into the USB runtime directory. It verifies the archive SHA-256 against the checksum published on the official Python release page. The embedded runtime is isolated and does not include pip; the Field Kit has no third-party Python dependencies.
 
-Or run Start-RevelaAI.cmd from File Explorer.
+Or run Start-RevelaAI.cmd from File Explorer. This starts the local utility menu; it does not launch Ollama automatically.
 
 ## Linux
 
