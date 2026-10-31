@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,7 @@ from starlette.concurrency import run_in_threadpool
 
 from fastapi_routes.admin_auth import require_platform_admin
 from meta_engineer.generator import generate_feature
+from meta_engineer.fieldkit_adapter import FieldKitFindingError, prepare_review_record
 from meta_engineer.introspector import scan_architecture
 from meta_engineer.integrator import audit, db, get_idea, save_idea, update_idea
 from meta_engineer.pruner import audit_unused
@@ -417,6 +419,138 @@ async def propose(request: Request):
         return error
     payload = await _body(request)
     return await run_in_threadpool(_propose, actor, payload)
+
+
+
+@router.post("/fieldkit/findings")
+async def ingest_fieldkit_finding(request: Request):
+    """Receive one versioned Field Engine finding as a review-only Meta-Engineer item."""
+    actor, error = _authorized(dict(request.headers))
+    if error:
+        return error
+
+    try:
+        chunks = []
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > 65536:
+                return JSONResponse({"status": "error", "code": "payload_too_large"}, status_code=413)
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+    except Exception:
+        return JSONResponse({"status": "error", "code": "invalid_body"}, status_code=400)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JSONResponse({"status": "error", "code": "invalid_json"}, status_code=400)
+
+    try:
+        record = prepare_review_record(payload, actor)
+    except FieldKitFindingError as exc:
+        return JSONResponse(
+            {"status": "error", "code": "invalid_fieldkit_finding", "message": str(exc)},
+            status_code=422,
+        )
+
+    now = datetime.now(timezone.utc)
+    finding_id = record["finding_id"]
+    code_path = "fieldkit/" + finding_id + ".json"
+    validation = {
+        "passed": True,
+        "validation_only": True,
+        "coverage": 0.0,
+        "logs": (
+            "Field Finding contract validation passed. No remediation code was generated or executed. "
+            "A repair-specific candidate test is still required before any repair can be approved."
+        ),
+    }
+    if db is not None:
+        try:
+            existing = db["ideas"].find_one({"fieldkit_review.finding_id": finding_id})
+            if existing:
+                return JSONResponse(
+                    {
+                        "status": "already_received",
+                        "ideaId": str(existing.get("_id", "")),
+                        "findingId": finding_id,
+                        "approval_required": True,
+                        "auto_execution": False,
+                        "message": "This finding is already present in the Meta-Engineer review queue.",
+                    },
+                    status_code=200,
+                )
+        except Exception:
+            logger.exception("Field Engine finding idempotency check failed")
+            return JSONResponse(
+                {"status": "error", "code": "fieldkit_idempotency_check_failed"},
+                status_code=503,
+            )
+
+    doc = {
+        "spec": record["spec"],
+        "code_path": code_path,
+        "generated_code": None,
+        "generated_files": [],
+        "test_result": validation,
+        "status": "awaiting_approval",
+        "createdAt": now,
+        "updatedAt": now,
+        "actor": actor,
+        "target": "security",
+        "feature": "fieldkit_finding_review",
+        "kind": "fieldkit_security_review",
+        "source": "revela-field-engine",
+        "fieldkit_review": record,
+        "changelog_path": None,
+        "changelog": (
+            "# Field Engine Security Review\n\n"
+            + "- Finding: " + finding_id + "\n"
+            + "- Severity: " + record["severity"] + "\n"
+            + "- Scope: " + record["scope"] + "\n"
+            + "- Simulated: " + str(record["simulated"]) + "\n"
+            + "- Status: awaiting_approval\n\n"
+            + "No host change or remediation was executed. Human review is required."
+        ),
+        "approval_required": True,
+        "auto_execution": False,
+        "auto_deploy": False,
+    }
+
+    try:
+        idea_id = save_idea(doc)
+        audit(
+            "fieldkit_finding_ingested",
+            record["spec"],
+            code_path,
+            validation,
+            actor,
+            {
+                "ideaId": idea_id,
+                "findingId": finding_id,
+                "scope": record["scope"],
+                "simulated": record["simulated"],
+                "auto_execution": False,
+            },
+        )
+        return JSONResponse(
+            {
+                "status": "awaiting_review",
+                "ideaId": str(idea_id),
+                "findingId": finding_id,
+                "approval_required": True,
+                "auto_execution": False,
+                "auto_deploy": False,
+                "message": "Finding recorded for human review. No repair has been executed.",
+            },
+            status_code=202,
+        )
+    except Exception:
+        logger.exception("Field Engine finding ingestion failed")
+        return JSONResponse(
+            {"status": "error", "code": "fieldkit_ingest_failed"},
+            status_code=503,
+        )
 
 
 @router.post("/approve/{idea_id}")

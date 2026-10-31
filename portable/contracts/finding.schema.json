@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://revelacode.co.ke/schemas/revela-field-finding-1.0.json",
+  "title": "Revela Field Engine Finding",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "source", "observed_at", "target", "category", "severity", "title", "summary", "evidence", "recommendation", "scope", "simulated"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^field-[a-f0-9]{16}$"},
+    "source": {"const": "revela-field-engine"},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "target": {"type": "string", "minLength": 1, "maxLength": 512},
+    "category": {"type": "string", "minLength": 1, "maxLength": 80},
+    "severity": {"enum": ["informational", "low", "medium", "high", "critical"]},
+    "title": {"type": "string", "minLength": 1, "maxLength": 240},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "evidence": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": {"type": "string", "minLength": 1, "maxLength": 80},
+          "ref": {"type": "string", "minLength": 1, "maxLength": 1024},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "note": {"type": "string", "maxLength": 1000}
+        }
+      }
+    },
+    "recommendation": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "scope": {"enum": ["local", "lab"]},
+    "simulated": {"type": "boolean"},
+    "techniques": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["framework", "name"],
+        "properties": {
+          "framework": {"type": "string", "minLength": 1, "maxLength": 120},
+          "id": {"type": "string", "maxLength": 32},
+          "name": {"type": "string", "minLength": 1, "maxLength": 160},
+          "tactic": {"type": "string", "maxLength": 120}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"simulated": {"const": true}}},
+      "then": {"properties": {"scope": {"const": "lab"}}}
+    },
+    {
+      "if": {"properties": {"simulated": {"const": false}}},
+      "then": {"properties": {"scope": {"const": "local"}}}
+    }
+  ]
+}

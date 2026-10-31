@@ -1,6 +1,15 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
+
+# Prefer the self-contained Go Field Engine. It does not need Ollama or Go installed.
+$Native = Join-Path $Root "bin\windows-amd64\revela-field.exe"
+if (Test-Path $Native) {
+    & $Native menu
+    exit $LASTEXITCODE
+}
+
+# Keep the Python evidence/case-workspace tools as a compatibility fallback.
 $Runtime = Join-Path $Root "runtimes\python-win-x64\python.exe"
 $env:PYTHONPATH = Join-Path $Root "src"
 
@@ -27,6 +36,6 @@ if ($Python) {
     }
 }
 
-Write-Host "No compatible Python runtime found." -ForegroundColor Red
-Write-Host "Run .\prepare-windows-runtime.ps1 to place an isolated Python runtime on this USB."
+Write-Host "No compatible native Field Engine or Python runtime found." -ForegroundColor Red
+Write-Host "Use the CI-built USB Edition or run .\prepare-windows-runtime.ps1 for the Python companion."
 exit 1

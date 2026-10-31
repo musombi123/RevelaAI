@@ -1,90 +1,147 @@
-# RevelaAI Portable Field Kit
+# RevelaAI USB Field Engine
 
-**Version:** 0.2.0  
-**Purpose:** USB-carried, local-first utilities for evidence triage, case documentation, file inspection, source-secret review and offline reference search.
+**Version:** 0.3.0 foundation
+**Purpose:** Portable, model-free system inspection, evidence triage and controlled defensive validation.
 
-This is the local companion to the RevelaAI AI repository. It deliberately uses only the Python standard library. It does not install third-party tools, upload evidence, execute inspected files, acquire physical disks, perform network scans or make changes to source evidence.
+The primary field runtime is a precompiled Go application. The native commands do not require Ollama, a cloud model, a Go compiler or third-party Go modules on the target computer. The existing Python Field Kit remains as a companion for case work, binary inspection, custody records, secret-pattern review and offline notes.
 
-## What works offline
+## Native Go Field Engine
+
+The release workflow builds executables for Windows x64 and Linux x64 under `bin/<os>-<arch>/`. The Windows and Linux launchers prefer the native engine. Use:
+
+```text
+revela-field doctor
+revela-field system
+revela-field network
+revela-field audit --root ./authorised-directory --authorized
+revela-field simulate --scenario auth-failure-burst
+revela-field simulate --scenario startup-entry
+revela-field simulate --scenario vpn-observation
+revela-field core-status
+revela-field core-start --authorized
+```
+
+`doctor` reports whether the separately built Core-ZERO, Core-ONE and Core-TWO executables are present. `core-status` probes only their local health endpoints on ports 8780, 8781 and 8782. Binary presence and HTTP reachability are not proof that Guardian enforcement or cross-core integration is correct.
+
+### Start the three USECT cores from the USB
+
+The Windows/Linux USB release contains:
+- `bin/<platform>/` — precompiled Field Engine and ZERO/ONE/TWO service executables.
+- `runtime-source/` — the matching core modules, worldwide library and Guardian policy files.
+- `data/logs/` and `data/runtime/` — local service logs and state, created on demand.
+
+Run `revela-field core-start --authorized` or choose menu option 6 and type `START`. The supervisor verifies the core source and Guardian policy files, generates temporary service tokens, starts each core on loopback only, checks the three health endpoints, and stops the child services when the operator exits. Mind auto-evolution is disabled. Provider/model credentials and the host's general environment are not passed into the core processes. Runtime logs and data remain on the USB.
+
+This is a local stack startup, not proof that every internal package is healthy. The CI suite must pass the Go tests and the three-core startup smoke test for the specific release commit.
+
+### Safe adversary emulation
+
+The simulator uses synthetic fixtures to validate defensive detection logic. It currently includes authentication-failure bursts, a fictional startup-entry change and VPN tunnel visibility. The scenarios do not create real accounts, startup entries, scheduled tasks, services, registry keys, processes, payloads or network traffic. Each report is explicitly marked `simulated: true`.
+
+Export a synthetic finding for later review:
+
+```text
+revela-field simulate --scenario auth-failure-burst --finding-out ./data/auth-failure-finding.json
+```
+
+Guardian is fail-closed. It permits explicitly authorised local inventory and lab-only synthetic scenarios. It blocks remote exploitation, VPN bypass, credential dumping, stealth evasion, disabling defences, deleting evidence, arbitrary payload execution and external-network scanning.
+
+### System and network inspection
+
+The native engine reports a minimal host snapshot, local network-interface metadata, possible tunnel-interface name hints and the presence (not values) of proxy environment variables. VPN indicators are observations, not evidence of maliciousness. It does not attempt to bypass VPN protections or identify people behind network endpoints.
+
+The file inventory command hashes bounded regular files, skips symlinks and does not execute or modify source files. It is a metadata/evidence inventory, not a malware verdict or forensic disk image.
+
+## Meta Engineer hand-off
+
+Field Engine findings use `contracts/finding.schema.json`. The Meta Engineer adapter validates the finding contract and the authenticated endpoint `POST /api/meta-engineer/fieldkit/findings` stores an `awaiting_approval` item in the existing Meta Engineer `revelai.ideas` collection. Persistence and audit require the existing configured MongoDB connection. Duplicate finding IDs are idempotently rejected/recognised.
+
+To submit a finding from a connected workstation, use an existing authorised RevelaCode administrator bearer session. Do not save it to the USB, a case file or a log:
+
+PowerShell:
+
+```powershell
+$env:REVELA_ADMIN_BEARER = "<existing administrator bearer session>"
+.\bin\windows-amd64\revela-field.exe sync --finding .\data\auth-failure-finding.json --url https://revelaai.onrender.com
+Remove-Item Env:REVELA_ADMIN_BEARER
+```
+
+For Linux, export the same environment variable for the current shell and run `bin/linux-amd64/revela-field sync --finding ./data/auth-failure-finding.json --url https://revelaai.onrender.com`. Remote sync requires HTTPS; plain HTTP is accepted only for loopback testing. Redirects are rejected. The tool submits the structured finding only, not the inspected files.
+
+A successful hand-off means the finding entered the review queue. It does not mean the vulnerability is confirmed, a repair has been approved, or a host was changed. Meta Engineer currently records schema validation as a hand-off gate; repair-specific tests must still be created before any future repair is approved.
+
+## Python evidence companion
+
+The companion uses only the Python standard library. It supports:
 
 | Tool | Command | Function |
 |---|---|---|
-| Case workspace | python -m revela_fieldkit case create ... | Create case metadata, evidence and report folders, and a custody log. |
-| Evidence inventory | python -m revela_fieldkit inventory ... | Hash regular files with SHA-256 and save an integrity manifest. |
-| Integrity verification | python -m revela_fieldkit verify ... | Re-hash source files and compare them to the saved manifest. |
-| Custody log verification | python -m revela_fieldkit custody verify ... | Verify the event hash chain; tampered logs are not silently appended. |
-| Binary analysis | python -m revela_fieldkit binary inspect FILE | Read PE/ELF/Mach-O/WebAssembly headers and APK package layout without executing or extracting files. |
-| File inspection | python -m revela_fieldkit inspect FILE --hash | Report file metadata, a small magic-byte signature set, sample entropy and optional SHA-256. |
-| Source secret audit | python -m revela_fieldkit secrets scan PATH | Detect selected credential patterns and redact values in output. |
-| Tool discovery | python -m revela_fieldkit doctor | Check whether specialist applications are already installed. |
-| Offline notes | python -m revela_fieldkit knowledge search TERMS | Search bundled reference notes without internet. |
+| Case workspace | python -m revela_fieldkit case create ... | Create case metadata, evidence/report folders and custody log. |
+| Evidence inventory | python -m revela_fieldkit inventory --case CASE --source DIR | Hash regular files and save an integrity manifest. |
+| Integrity verification | python -m revela_fieldkit verify --case CASE | Re-hash source files and compare them to the saved manifest. |
+| Custody log | python -m revela_fieldkit custody verify --case CASE | Verify the event hash chain. |
+| Binary analysis | python -m revela_fieldkit binary inspect FILE | Read PE/ELF/Mach-O/WebAssembly headers and APK layout without executing files. |
+| File inspection | python -m revela_fieldkit inspect FILE --hash | Report metadata, magic-byte signature, sample entropy and optional SHA-256. |
+| Secret-pattern audit | python -m revela_fieldkit secrets scan PATH | Detect selected credential patterns and redact values. |
+| Tool discovery | python -m revela_fieldkit doctor | Check whether selected specialist tools are installed. |
+| Offline notes | python -m revela_fieldkit knowledge search TERMS | Search bundled reference notes. |
 | Case report | python -m revela_fieldkit report --case CASE_DIR | Generate a Markdown report from local case records. |
 
-### Optional offline AI
+## Ollama is not required
 
-Run:
-python -m revela_fieldkit ask --model gemma4:e2b --question "Explain the evidence handling steps"
+The native Field Engine is deterministic and model-free. The older Python `ask` command remains an optional legacy local-model bridge, but no Field Engine inspection, simulation, evidence, core-start or core-status command calls it. Do not install a model just to operate the USB.
 
-This sends a prompt and local reference notes to an Ollama server bound to 127.0.0.1, localhost or ::1 only. Remote hosts are rejected. An Ollama installation and the selected model must already be present on the computer or stored on the USB. The model is not included in this source repository.
+## USB layout and preparation
 
-Ollama's local generate API is documented at https://docs.ollama.com/api/generate. Ollama documents a local Gemma 4 E2B model download of about 7.2 GB and recommends 8 GB available VRAM/unified memory; actual performance depends on hardware and context length. See https://docs.ollama.com/quickstart.
+The bundle contains:
+- `bin/windows-amd64/` — Field Engine, Core-ZERO, Core-ONE and Core-TWO executables.
+- `bin/linux-amd64/` — matching Linux x64 executables.
+- `runtime-source/` — matching core source/modules and Guardian policy files used by the local supervisor.
+- `contracts/finding.schema.json` — versioned hand-off format to Meta Engineer.
+- `native/` source in the repository — Go implementation and tests; release bundles contain the executables.
+- `src/revela_fieldkit/` — Python evidence companion.
+- `runtimes/python-win-x64/` — embedded Python runtime prepared by CI for the Windows USB release.
+- `data/` — local cases, logs, reports and runtime state.
 
-To prepare local AI, install Ollama on a compatible Windows/Linux host, open one terminal on the USB and run Start-LocalAI.ps1 (Windows), then use a second terminal to run prepare-local-model.ps1. After the model is downloaded into the USB model folder, the ask command can use it without an internet connection. The Ollama engine itself must be installed on the host; it is not yet shipped as a fully self-contained executable in this bundle.
+Recommended drive: 32 GB minimum for tools and case work; 64 GB or larger if retaining substantial evidence. Use exFAT or NTFS for Windows/Linux sharing. Keep customer evidence on an encrypted, access-controlled volume. Do not commit evidence, credentials, tokens or private keys to a public repository.
 
-## USB layout
+### Windows
 
-Copy the portable/ directory to the USB drive. The Windows runtime preparation script can place the official Python embeddable distribution under runtimes/python-win-x64/. Linux currently uses a local Python 3.10+ installation; a standalone Linux runtime can be added as a separate platform-specific bundle.
+Run `Start-RevelaAI.cmd` or:
 
-Recommended drive: 32 GB minimum for tools and case work; 64 GB or larger if you plan to store a local model. Format the drive as exFAT or NTFS rather than FAT32 when using multi-gigabyte model files. Keep client evidence on an encrypted, access-controlled volume. Avoid storing sensitive cases on a shared USB drive. The Windows launcher changes its working directory to the USB, so default case folders are created on the drive.
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\Start-RevelaAI.ps1
+```
 
-## Prepare Windows
+The CI-built Windows native executable starts first. The Python case-workspace menu is a fallback/companion.
 
-Open PowerShell from the portable/ directory and run:
+### Linux
 
-    Set-ExecutionPolicy -Scope Process Bypass
-    .\prepare-windows-runtime.ps1
-    .\Start-RevelaAI.ps1
+```sh
+cd /path/to/USB/portable
+chmod +x start-linux.sh
+./start-linux.sh
+```
 
-The preparation script downloads the official Python 3.14.10 Windows x64 embeddable ZIP from python.org and extracts it into the USB runtime directory. It verifies the archive SHA-256 against the checksum published on the official Python release page. The embedded runtime is isolated and does not include pip; the Field Kit has no third-party Python dependencies.
+The native Linux x64 engine starts first. Python 3.10+ is required only for the companion fallback.
 
-Or run Start-RevelaAI.cmd from File Explorer. This starts the local utility menu; it does not launch Ollama automatically.
+## Specialist tools and updates
 
-## Linux
+Ghidra, GNU ddrescue, The Sleuth Kit, Autopsy, TestDisk/PhotoRec, Volatility 3, Wireshark, Zeek, JADX, APKTool, MobSF, Semgrep, Trivy and OSV-Scanner remain separate upstream tools with their own licensing and release processes. The first native release does not silently install them or execute their outputs.
 
-    cd /path/to/USB/portable
-    chmod +x start-linux.sh
-    ./start-linux.sh
+## Limitations — do not overstate capability
 
-Requires Python 3.10 or newer. No pip install is required.
+- The native Field Engine is an inspection and defensive validation foundation, not a complete EDR, SIEM, penetration-testing platform or automatic malware-removal product.
+- Live vulnerability feed import, source authenticity/signature checks and freshness reporting are not implemented yet.
+- General Windows/Linux repair adapters, backup/rollback and post-repair verification are not implemented yet.
+- The synthetic scenarios do not prove that real EDR/SIEM sensors detect real-world attacks.
+- The supervisor checks service health, but package-level cross-core correctness still requires the complete CI test suite and platform smoke tests.
+- File hashing is not a forensic image and does not replace a hardware write blocker.
+- Hash equality verifies byte identity relative to a reference; it does not prove authenticity, ownership or safety.
+- A VPN indicator alone is not malicious activity and must not be used to infer identity.
+- Offline AI, when optionally used by the legacy companion, may hallucinate and is never an authority for forensic or repair decisions.
 
-## First use
+Cloud RevelaAI, hosted providers and any unbundled connectors remain online services. This USB release is a local-first field layer, not a complete offline clone of every RevelaAI cloud service.
 
-    python -m revela_fieldkit case create --root cases --id CASE-001 --title "Training evidence triage"
-    python -m revela_fieldkit inventory --case cases/CASE-001 --source ./sample-data
-    python -m revela_fieldkit verify --case cases/CASE-001
-    python -m revela_fieldkit inspect ./sample-data/example.bin --hash
-    python -m revela_fieldkit binary inspect ./sample-data/program.exe --hash
-    python -m revela_fieldkit custody verify --case cases/CASE-001
-    python -m revela_fieldkit secrets scan ./my-repository
-    python -m revela_fieldkit doctor
-    python -m revela_fieldkit knowledge search "deleted files timeline"
-    python -m revela_fieldkit report --case cases/CASE-001
-
-Inventory reads and hashes source files; it does not modify them. A single-file source and a directory source are both supported. The custody log links each event with SHA-256; this detects accidental or partial record edits but is not a digital signature or protection against an attacker who can rewrite the entire case folder.
-
-## Specialist tools are separate components
-
-Ghidra, GNU ddrescue, The Sleuth Kit, Autopsy, TestDisk/PhotoRec, Volatility 3, Wireshark, Zeek, JADX, APKTool, MobSF, Semgrep, Trivy and OSV-Scanner are not copied into this repository. They are separate upstream projects with their own licensing, platform requirements, update schedules and installation processes. The doctor command checks whether they are available. Verify each upstream download and its hash before placing approved binaries in a tools folder.
-
-## Critical limitations
-
-- Inventory hashing is not a forensic image and does not replace a hardware write blocker or a qualified acquisition.
-- Do not use a failing drive as a practice target. Physical damage needs specialist equipment and handling.
-- Hash equality verifies byte integrity between observations; it does not prove file authenticity or ownership.
-- Entropy and magic bytes are triage hints, not malware detection or file validation.
-- Secret scanning is pattern-based and incomplete; output is redacted to reduce accidental disclosure.
-- Offline AI can hallucinate. Treat it as an assistant, never as a forensic examiner or an authority for legal, medical or safety decisions.
-- Live vulnerability assessment must be separately scoped and authorized. This kit contains no arbitrary-target scanner.
-- Do not put evidence, credentials, tokens, private keys or customer data in a public repository or unapproved AI service.
-
-The cloud RevelaAI services, Core Mesh and connected provider models remain online services. This USB edition provides an offline utility layer and optional local-model interface; it is not yet a complete offline clone of all cloud platform services.
+Remote sync is allowlisted to `revelaai.onrender.com` by default. A deployment using a different approved HTTPS hostname must explicitly configure `REVELA_FIELD_ALLOWED_SYNC_HOSTS` as a comma-separated list in the local launch environment. Only exact hostnames are accepted; custom remote ports and redirects are rejected. The Field Engine applies its Guardian sync gate before transmission.

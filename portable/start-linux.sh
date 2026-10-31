@@ -2,12 +2,19 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 cd "$ROOT"
-export PYTHONPATH="$ROOT/src"
 
+# Prefer the self-contained Go Field Engine. It does not need Ollama or Go installed.
+NATIVE="$ROOT/bin/linux-amd64/revela-field"
+if [ -x "$NATIVE" ]; then
+  exec "$NATIVE" menu
+fi
+
+# Retain the standard-library Python companion as a compatibility fallback.
+export PYTHONPATH="$ROOT/src"
 if command -v python3 >/dev/null 2>&1; then
   PYTHON="$(command -v python3)"
 else
-  echo "Python 3.10+ is required on this Linux host." >&2
+  echo "No native Field Engine and Python 3.10+ is required for the companion tools." >&2
   exit 1
 fi
 

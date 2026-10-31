@@ -5,10 +5,18 @@ on:
     branches: [main]
     paths:
       - "portable/**"
+      - "core-zero/**"
+      - "core-one/**"
+      - "core-two/**"
+      - "lib/worldwide/**"
       - ".github/workflows/portable-fieldkit.yml"
   pull_request:
     paths:
       - "portable/**"
+      - "core-zero/**"
+      - "core-one/**"
+      - "core-two/**"
+      - "lib/worldwide/**"
       - ".github/workflows/portable-fieldkit.yml"
   workflow_dispatch:
 
@@ -16,11 +24,186 @@ permissions:
   contents: read
 
 jobs:
-  test-and-package:
+  native-go-validation:
+    name: Validate native engine and USECT cores; build USB binaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Test and vet the native Field Engine
+        run: |
+          go -C portable/native test ./...
+          go -C portable/native vet ./...
+
+      - name: Test and vet Core-ZERO
+        run: |
+          go -C core-zero test ./...
+          go -C core-zero vet ./...
+
+      - name: Test and vet Core-ONE / Genesis
+        run: |
+          go -C core-one test -race ./...
+          go -C core-one vet ./...
+
+      - name: Test and vet Core-TWO / Infinite Mind
+        run: |
+          go -C core-two test -race ./...
+          go -C core-two vet ./...
+
+      - name: Smoke-test the existing ZERO + Genesis + Mind composition
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$RUNNER_TEMP/revela-core-runtime"
+          mkdir -p "$scratch"
+          cp -a core-zero core-one core-two lib "$scratch/"
+          go -C core-two build -trimpath -o "$RUNNER_TEMP/revela-stack" ./cmd/revela
+          export USECT_ZERO_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export GENESIS_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export MIND_ADMIN_TOKEN="$(openssl rand -hex 32)"
+          export USECT_ZERO_BASE_URL="http://127.0.0.1:8780"
+          export GENESIS_BASE_URL="http://127.0.0.1:8781"
+          export USECT_ZERO_DATA_DIR="$RUNNER_TEMP/revela-zero-data"
+          mkdir -p "$USECT_ZERO_DATA_DIR"
+          "$RUNNER_TEMP/revela-stack" --daemon -repo-root "$scratch" >"$RUNNER_TEMP/revela-stack.log" 2>&1 &
+          pid=$!
+          cleanup() {
+            kill -INT "$pid" 2>/dev/null || true
+            for attempt in $(seq 1 10); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            cat "$RUNNER_TEMP/revela-stack.log"
+          }
+          trap cleanup EXIT
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --silent --show-error --fail http://127.0.0.1:8780/v1/health -o "$RUNNER_TEMP/zero-health.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8781/v1/genesis/health -o "$RUNNER_TEMP/genesis-health.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8782/v1/mind/health -o "$RUNNER_TEMP/mind-health.json"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/revela-stack.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          test -s "$RUNNER_TEMP/zero-health.json"
+          test -s "$RUNNER_TEMP/genesis-health.json"
+          test -s "$RUNNER_TEMP/mind-health.json"
+
+      - name: Cross-compile Field Engine and core services for Windows and Linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in windows-amd64 linux-amd64; do
+            case "$target" in
+              windows-amd64) export GOOS=windows; export GOARCH=amd64; ext=".exe" ;;
+              linux-amd64) export GOOS=linux; export GOARCH=amd64; ext="" ;;
+            esac
+            out="$GITHUB_WORKSPACE/portable/bin/$target"
+            mkdir -p "$out"
+
+            go -C portable/native build -trimpath -ldflags="-s -w" -o "$out/revela-field$ext" ./cmd/revela-field
+            go -C core-zero build -trimpath -ldflags="-s -w" -o "$out/usect-zero$ext" ./cmd/usect-zero
+            go -C core-one build -trimpath -ldflags="-s -w" -o "$out/revela-genesis$ext" ./cmd/genesis
+            go -C core-two build -trimpath -ldflags="-s -w" -o "$out/revela-mind$ext" ./cmd/revela-mind
+          done
+
+      - name: Stage the three core source trees and Guardian policies on the USB
+        run: |
+          mkdir -p portable/runtime-source
+          cp -a core-zero core-one core-two lib portable/runtime-source/
+
+      - name: Smoke-test the bundled Field Engine core supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          engine="portable/bin/linux-amd64/revela-field"
+          chmod +x "$engine"
+          "$engine" doctor
+          "$engine" simulate --scenario vpn-observation --finding-out "$RUNNER_TEMP/field-finding.json"
+          test -s "$RUNNER_TEMP/field-finding.json"
+
+          "$engine" core-start --authorized >"$RUNNER_TEMP/field-core-start.log" 2>&1 &
+          pid=$!
+          cleanup() {
+            kill -INT "$pid" 2>/dev/null || true
+            for attempt in $(seq 1 15); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            cat "$RUNNER_TEMP/field-core-start.log"
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --silent --show-error --fail http://127.0.0.1:8780/v1/health -o "$RUNNER_TEMP/field-zero.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8781/v1/genesis/health -o "$RUNNER_TEMP/field-genesis.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8782/v1/mind/health -o "$RUNNER_TEMP/field-mind.json"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/field-core-start.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          grep -q "Core-ZERO healthy" "$RUNNER_TEMP/field-core-start.log"
+          grep -q "Core-ONE / Genesis healthy" "$RUNNER_TEMP/field-core-start.log"
+          grep -q "Core-TWO / Infinite Mind healthy" "$RUNNER_TEMP/field-core-start.log"
+          kill -INT "$pid"
+          wait "$pid"
+          trap - EXIT
+          rm -rf portable/data
+
+
+      - name: Create native binary checksums
+        run: |
+          find portable/bin -type f -print0 | sort -z | xargs -0 sha256sum > portable/bin/SHA256SUMS.txt
+
+      - name: Assemble USB payload artifact with portable-relative paths
+        run: |
+          mkdir -p dist/native-bundle
+          cp -a portable/bin portable/runtime-source dist/native-bundle/
+
+      - name: Upload native USB binaries and runtime source
+        uses: actions/upload-artifact@v4
+        with:
+          name: revela-field-engine-native-binaries
+          path: dist/native-bundle/
+          if-no-files-found: error
+          retention-days: 14
+
+  test-and-package:
+    name: Package portable source edition
+    runs-on: ubuntu-latest
+    needs: native-go-validation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: revela-field-engine-native-binaries
+          path: portable/
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,22 +220,28 @@ jobs:
         run: |
           mkdir -p dist
           cd portable
-          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.2.0.zip . \
-            -x "tests/*" "__pycache__/*" "*.pyc"
+          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.3.0.zip .             -x "tests/*" "__pycache__/*" "*.pyc"
 
       - name: Upload USB package
         uses: actions/upload-artifact@v4
         with:
           name: RevelaAI-Portable-Field-Kit
-          path: dist/RevelaAI-Portable-Field-Kit-0.2.0.zip
+          path: dist/RevelaAI-Portable-Field-Kit-0.3.0.zip
           if-no-files-found: error
 
-
   windows-usb-bundle:
+    name: Build Windows USB edition with native cores
     runs-on: windows-latest
+    needs: native-go-validation
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: revela-field-engine-native-binaries
+          path: portable/
 
       - name: Prepare verified embedded Python runtime
         shell: pwsh
@@ -65,17 +254,34 @@ jobs:
           & ".\portable\runtimes\python-win-x64\python.exe" -m unittest discover -s portable/tests -v
           if ($LASTEXITCODE -ne 0) { throw "Embedded-runtime test suite failed." }
 
+      - name: Verify bundled native executables
+        shell: pwsh
+        run: |
+          $required = @(
+            "portable\bin\windows-amd64\revela-field.exe",
+            "portable\bin\windows-amd64\usect-zero.exe",
+            "portable\bin\windows-amd64\revela-genesis.exe",
+            "portable\bin\windows-amd64\revela-mind.exe",
+            "portable\bin\linux-amd64\revela-field",
+            "portable\bin\linux-amd64\usect-zero",
+            "portable\bin\linux-amd64\revela-genesis",
+            "portable\bin\linux-amd64\revela-mind"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Required native binary missing: $path" }
+          }
+
       - name: Package Windows USB Edition
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Remove-Item -Path portable\tests -Recurse -Force
           Get-ChildItem -Path portable -Directory -Filter __pycache__ -Recurse | Remove-Item -Recurse -Force
-          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64-v0.2.0.zip -Force
+          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64-v0.3.0.zip -Force
 
       - name: Upload Windows USB Edition
         uses: actions/upload-artifact@v4
         with:
           name: RevelaAI-USB-Edition-Windows-x64
-          path: dist/RevelaAI-USB-Edition-Windows-x64-v0.2.0.zip
+          path: dist/RevelaAI-USB-Edition-Windows-x64-v0.3.0.zip
           if-no-files-found: error
