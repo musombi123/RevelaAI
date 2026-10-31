@@ -15,3 +15,13 @@ func TestKnownScenariosAreExplicitlySynthetic(t *testing.T) {
 func TestUnknownScenarioIsRejected(t *testing.T) {
 	if _, err := Run("arbitrary-shell-command"); err == nil { t.Fatal("unknown scenario should be rejected") }
 }
+
+func TestRepeatedScenarioRunsHaveDistinctFindingIDs(t *testing.T) {
+	first, err := Run("auth-failure-burst")
+	if err != nil { t.Fatal(err) }
+	second, err := Run("auth-failure-burst")
+	if err != nil { t.Fatal(err) }
+	if first.Finding.ID == second.Finding.ID {
+		t.Fatalf("separate scenario executions must receive distinct finding IDs: %s", first.Finding.ID)
+	}
+}
