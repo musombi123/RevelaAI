@@ -216,9 +216,9 @@ The regression tests in `tests/test_usect_contracts.py` cover route registration
 
 ---
 
-## RevelaAI Portable Field Kit (USB / Offline)
+## RevelaAI Portable Field Kit (USB / Offline) — v0.2.0
 
-RevelaAI includes a local-first Field Kit under portable/. It provides standard-library utilities for case creation, evidence inventory and SHA-256 verification, file-signature inspection, redacted source-secret scanning, tool discovery, offline reference search, and Markdown case reports.
+RevelaAI includes a local-first Field Kit under portable/. It provides standard-library utilities for case creation, evidence inventory and SHA-256 verification, hash-chained custody records, PE/ELF/Mach-O/WebAssembly header and APK structure inspection, redacted source-secret scanning, tool discovery, offline reference search, and Markdown case reports.
 
 - USB guide: portable/README.md
 - Launcher: portable/Start-RevelaAI.cmd (Windows) or portable/start-linux.sh (Linux)
