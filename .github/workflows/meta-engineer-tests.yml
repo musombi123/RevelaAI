@@ -19,6 +19,6 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install --upgrade pip -r requirements.txt
       - name: Compile Meta-Engineer modules
-        run: python -m compileall -q meta_engineer fastapi_routes/admin_auth.py fastapi_routes/sci_core.py fastapi_routes/agi.py revelai/sci_core revelai/core/agi_manifest.py revelai/core/brain_os.py tests/test_meta_engineer.py tests/test_meta_engineer_admin_sso.py tests/test_self_building_core.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py tests/test_usect_zero_admin_verification.py
+        run: python -m compileall -q meta_engineer fastapi_routes/admin_auth.py fastapi_routes/sci_core.py fastapi_routes/agi.py revelai/sci_core revelai/core/agi_manifest.py revelai/core/brain_os.py tests/test_meta_engineer.py tests/test_meta_engineer_admin_sso.py tests/test_meta_engineer_fieldkit_adapter.py tests/test_self_building_core.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py tests/test_usect_zero_admin_verification.py
       - name: Run Meta-Engineer tests
-        run: python -m pytest -q tests/test_meta_engineer.py tests/test_meta_engineer_admin_sso.py tests/test_self_building_core.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py tests/test_usect_zero_admin_verification.py
+        run: python -m pytest -q tests/test_meta_engineer.py tests/test_meta_engineer_admin_sso.py tests/test_meta_engineer_fieldkit_adapter.py tests/test_self_building_core.py tests/test_sci_core.py tests/test_agi_manifest.py tests/test_brain_os.py tests/test_usect_zero_admin_verification.py
