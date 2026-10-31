@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -110,4 +111,37 @@ func TestSimulateCanExportFindingJSON(t *testing.T) {
 	if !finding.Simulated || finding.Scope != "lab" || finding.Source != "revela-field-engine" {
 		t.Fatalf("unexpected exported finding: %+v", finding)
 	}
+}
+
+func TestCoreChildEnvironmentDoesNotInheritProviderOrDatabaseCredentials(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "must-not-leak")
+	t.Setenv("MONGO_URI", "mongodb://must-not-leak")
+	t.Setenv("REVELACODE_PROVIDER_KEY", "must-not-leak")
+	t.Setenv("PATH", "/trusted/bin")
+	env := minimalCoreEnvironment(map[string]string{
+		"USECT_ZERO_ADMIN_TOKEN": "temporary-zero-token",
+		"MIND_AUTO_EVOLVE": "0",
+	})
+	joined := strings.Join(env, "\\n")
+	for _, forbidden := range []string{"GEMINI_API_KEY", "MONGO_URI", "REVELACODE_PROVIDER_KEY", "must-not-leak"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("child environment leaked %q", forbidden)
+		}
+	}
+	for _, required := range []string{"PATH=/trusted/bin", "USECT_ZERO_ADMIN_TOKEN=temporary-zero-token", "MIND_AUTO_EVOLVE=0"} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("child environment omitted %q", required)
+		}
+	}
+}
+
+func TestRandomServiceSecretIsHighEntropyHex(t *testing.T) {
+	first, err := randomSecret()
+	if err != nil { t.Fatal(err) }
+	second, err := randomSecret()
+	if err != nil { t.Fatal(err) }
+	if len(first) != 64 || len(second) != 64 || first == second {
+		t.Fatalf("unexpected service secrets: first=%q second=%q", first, second)
+	}
+	if _, err := hex.DecodeString(first); err != nil { t.Fatalf("secret is not hex: %v", err) }
 }
