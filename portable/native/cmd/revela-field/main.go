@@ -339,9 +339,16 @@ func runSync(args []string) error {
 	if err := decoder.Decode(&finding); err != nil {
 		return fmt.Errorf("decode finding contract: %w", err)
 	}
+	idSuffix := strings.TrimPrefix(finding.ID, "field-")
+	validID := len(idSuffix) == 16
+	for _, r := range idSuffix {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			validID = false
+			break
+		}
+	}
 	if finding.SchemaVersion != contract.SchemaVersion || finding.Source != "revela-field-engine" ||
-		!strings.HasPrefix(finding.ID, "field-") || finding.Title == "" ||
-		finding.Target == "" || finding.Recommendation == "" {
+		!validID || finding.Title == "" || finding.Target == "" || finding.Recommendation == "" {
 		return errors.New("finding does not match the supported Field Engine contract")
 	}
 	if (finding.Simulated && finding.Scope != "lab") || (!finding.Simulated && finding.Scope != "local") {
