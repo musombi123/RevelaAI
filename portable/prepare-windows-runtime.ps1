@@ -1,17 +1,21 @@
 $ErrorActionPreference = "Stop"
-$Version = "3.13.17"
+$Version = "3.14.10"
 $ArchiveName = "python-$Version-embed-amd64.zip"
 $Url = "https://www.python.org/ftp/python/$Version/$ArchiveName"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RuntimeRoot = Join-Path $Root "runtimes\python-win-x64"
 $TempArchive = Join-Path $env:TEMP $ArchiveName
+$ExpectedSha256 = "90905e64a840557d8c1bc4f5b74db3d7ee85e3ffb217611cac1c7813acea4159"
 
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 Write-Host "Downloading official Python $Version embeddable package..." -ForegroundColor Cyan
 Invoke-WebRequest -Uri $Url -OutFile $TempArchive
 $Hash = (Get-FileHash -Path $TempArchive -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "Downloaded archive SHA-256: $Hash" -ForegroundColor Yellow
-Write-Host "Compare this digest with the official Python release files before relying on the runtime." -ForegroundColor Yellow
+if ($Hash -ne $ExpectedSha256) {
+    Remove-Item -Path $TempArchive -Force -ErrorAction SilentlyContinue
+    throw "Python embeddable package SHA-256 does not match the official published checksum."
+}
 
 Get-ChildItem -Path $RuntimeRoot -Force | Remove-Item -Recurse -Force
 Expand-Archive -Path $TempArchive -DestinationPath $RuntimeRoot -Force
