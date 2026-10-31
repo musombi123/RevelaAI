@@ -40,3 +40,12 @@ func TestUnknownActionFailsClosed(t *testing.T) {
 		t.Fatalf("unknown action must fail closed: %+v", got)
 	}
 }
+
+func TestLocalCoreStartupRequiresExplicitAuthorization(t *testing.T) {
+	if got := Evaluate(Request{Action: "start_local_core_services", Scope: "local"}); got.Allowed {
+		t.Fatalf("core startup must require operator authorization: %+v", got)
+	}
+	if got := Evaluate(Request{Action: "start_local_core_services", Scope: "local", Authorized: true}); !got.Allowed {
+		t.Fatalf("authorised local core startup should be allowed: %+v", got)
+	}
+}
