@@ -1,7 +1,9 @@
 """Authoritative administrator verification for FastAPI-native routes.
 
-A signed bearer token is not sufficient by itself: current administrator role
-and identity are confirmed through RevelaCode's protected verification API.
+RevelaCode is the identity provider and system of record. RevelaAI forwards the
+existing bearer session to RevelaCode's protected verification endpoint, which
+validates the signature, current account identity, and current administrator
+role. RevelaAI must not require a second copy of the platform JWT secret.
 """
 from __future__ import annotations
 
@@ -10,13 +12,10 @@ import math
 import os
 from typing import Any
 
-import jwt
 import requests
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("revelaai.fastapi.admin_auth")
-JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
-JWT_ALGORITHM = "HS256"
 _DEFAULT_BACKEND_URL = "https://revelacode-backend.onrender.com"
 BACKEND_URL = (
     os.getenv("REVELACODE_BACKEND_URL", _DEFAULT_BACKEND_URL).strip().rstrip("/")
@@ -48,37 +47,23 @@ def _error(code: str, status_code: int, message: str | None = None) -> JSONRespo
 
 
 def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse | None]:
-    """Return the verified canonical operator ID or a fail-closed HTTP error."""
+    """Return the platform-verified operator ID or a fail-closed HTTP error.
+
+    The browser's existing RevelaCode bearer token is forwarded unchanged in
+    meaning (normalized to the standard Bearer scheme). RevelaCode's backend
+    verifies the JWT and resolves the current database role. No local AI-side
+    JWT secret, admin password, or second login is required.
+    """
     header = (authorization or "").strip()
     parts = header.split(None, 1)
     if len(parts) != 2 or parts[0].casefold() != "bearer" or not parts[1].strip():
         return None, _error("authentication_required", 401)
 
-    if not JWT_SECRET:
-        return None, _error(
-            "jwt_verifier_not_configured",
-            503,
-            "JWT verification is not configured on RevelaAI. Configure the shared JWT_SECRET before retrying.",
-        )
-
-    try:
-        claims = jwt.decode(
-            parts[1].strip(),
-            JWT_SECRET,
-            algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
-        )
-    except jwt.InvalidTokenError:
-        return None, _error("invalid_identity", 401)
-
-    user_id = str(claims.get("sub") or claims.get("user_id") or claims.get("id") or "").strip()
-    if not user_id:
-        return None, _error("invalid_identity", 401)
-
+    forwarded_header = "Bearer " + parts[1].strip()
     try:
         response = requests.get(
             BACKEND_URL + "/api/auth/verify-admin",
-            headers={"Authorization": header},
+            headers={"Authorization": forwarded_header},
             timeout=(3.05, ADMIN_TIMEOUT),
             allow_redirects=False,
         )
@@ -169,15 +154,17 @@ def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse
 
     if not canonical_id or not role or not isinstance(authorized, bool):
         logger.warning(
-            "RevelaCode administrator verification returned an incomplete success payload."
+            "RevelaCode administrator-verification returned an incomplete success payload."
         )
         return None, _error(
             "admin_verification_unavailable",
             503,
             "The authoritative administrator-verification service is unavailable. No privileged action was performed.",
         )
-    if canonical_id != user_id:
-        return None, _error("identity_mismatch", 403)
+
+    # Do not trust cached/browser role labels. Only the authoritative response
+    # from RevelaCode can authorize access to Meta-Engineer and its API routes.
     if authorized is not True or role not in PLATFORM_ADMIN_ROLES:
         return None, _error("admin_required", 403)
-    return user_id, None
+
+    return canonical_id, None
