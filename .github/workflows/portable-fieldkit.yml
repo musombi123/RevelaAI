@@ -310,10 +310,8 @@ jobs:
               if (Test-Path $stderr) { Get-Content $stderr }
               throw "Windows USB supervisor did not bring all three cores healthy on loopback."
             }
-            $log = if (Test-Path $stdout) { Get-Content $stdout -Raw } else { "" }
-            if ($log -notmatch "Core-ZERO healthy" -or $log -notmatch "Core-ONE / Genesis healthy" -or $log -notmatch "Core-TWO / Infinite Mind healthy") {
-              throw "Windows supervisor did not report all three cores healthy."
-            }
+            # HTTP 200 from each loopback health endpoint is the runtime assertion.
+            # Do not read the supervisor stdout file until the child process exits.
           } finally {
             if (-not $process.HasExited) {
               & taskkill.exe /PID $process.Id /T /F | Out-Null
