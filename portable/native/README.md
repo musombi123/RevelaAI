@@ -1,8 +1,8 @@
 # Revela Field Engine (native Go)
 
-**Version:** 0.3.0 foundation  
-**Runtime:** Go standard library only  
-**Model dependency:** none  
+**Version:** 0.3.0 foundation
+**Runtime:** Go standard library only
+**Model dependency:** none
 **Ollama dependency:** none
 
 The Field Engine is the local command centre for the USB edition. It is deterministic: system inventory, local network metadata, bounded file hashing, Guardian decisions, synthetic detection exercises and loopback core supervision do not require an LLM.
