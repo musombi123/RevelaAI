@@ -262,9 +262,13 @@ func runSimulate(args []string) error {
 	if strings.TrimSpace(*findingOut) != "" {
 		data, marshalErr := json.MarshalIndent(report.Finding, "", "  ")
 		if marshalErr != nil { return marshalErr }
-		if writeErr := os.WriteFile(*findingOut, append(data, '\n'), 0600); writeErr != nil {
+		file, openErr := os.OpenFile(*findingOut, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if openErr != nil { return fmt.Errorf("create finding export without overwriting an existing path: %w", openErr) }
+		if _, writeErr := file.Write(append(data, '\n')); writeErr != nil {
+			_ = file.Close()
 			return fmt.Errorf("write finding export: %w", writeErr)
 		}
+		if closeErr := file.Close(); closeErr != nil { return closeErr }
 	}
 	return emit(map[string]any{"guardian":decision, "report":report})
 }
@@ -325,8 +329,8 @@ func runSync(args []string) error {
 	if err != nil {
 		return err
 	}
-	info, err := os.Stat(*findingPath)
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 65536 {
+	info, err := os.Lstat(*findingPath)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 65536 {
 		return errors.New("finding must be a regular JSON file no larger than 64 KiB")
 	}
 	data, err := os.ReadFile(*findingPath)
