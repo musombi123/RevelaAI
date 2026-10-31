@@ -241,6 +241,14 @@ func validateAdvisory(item Advisory) error {
 			return errors.New("affected version is invalid")
 		}
 	}
+	if len(item.FixedVersions) > 500 {
+		return errors.New("too many fixed versions")
+	}
+	for _, version := range item.FixedVersions {
+		if strings.TrimSpace(version) == "" || len(version) > 128 {
+			return errors.New("fixed version is invalid")
+		}
+	}
 	switch strings.ToLower(item.Severity) {
 	case "informational", "low", "medium", "high", "critical":
 	default:
@@ -282,7 +290,8 @@ func ParseManifest(data []byte) (Manifest, error) {
 			strings.TrimSpace(item.Version) == "" || !strings.HasPrefix(item.PackageURL, "pkg:") {
 			return Manifest{}, fmt.Errorf("package %d is missing ecosystem, name, version or Package URL", index)
 		}
-		if len(item.PackageURL) > 512 || len(item.Version) > 128 {
+		if len(item.Ecosystem) > 64 || len(item.Name) > 256 ||
+			len(item.PackageURL) > 512 || len(item.Version) > 128 {
 			return Manifest{}, fmt.Errorf("package %d exceeds supported identifier limits", index)
 		}
 	}
