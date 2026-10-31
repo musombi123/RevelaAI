@@ -61,3 +61,5 @@ Findings use `../contracts/finding.schema.json`. Meta Engineer's adapter validat
 ## Security principle
 
 Guardian learns attacker tradecraft to validate defensive telemetry in a controlled lab. It does not learn to bypass Guardian, operating-system controls, authentication, network privacy or evidence integrity.
+
+Remote `sync` destinations are restricted to `revelaai.onrender.com` by default. A custom deployment hostname must be explicitly added to `REVELA_FIELD_ALLOWED_SYNC_HOSTS`; remote custom ports and redirects are rejected. Guardian also screens the sync action before sending.
