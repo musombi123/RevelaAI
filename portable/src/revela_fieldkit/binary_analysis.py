@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 import struct
 import zipfile
 from pathlib import Path
 from typing import Any
 
-from .cli import safe_regular_file, sha256_file
 
 _PE_MACHINES = {
     0x014C: "x86",
@@ -33,6 +34,35 @@ _MACHO_CPUS = {
     18: "PowerPC",
     0x01000012: "PowerPC64",
 }
+
+def _safe_regular_file(path: Path) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"Cannot stat input file: {path}: {exc}") from None
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise ValueError("Binary inspection accepts regular files only; symbolic links and special files are rejected.")
+    return info
+
+def _hash_file(path: Path) -> tuple[str, bool]:
+    before = _safe_regular_file(path)
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(str(path), flags)
+    digest = hashlib.sha256()
+    total = 0
+    with os.fdopen(descriptor, "rb") as stream:
+        opened = os.fstat(stream.fileno())
+        while True:
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+    after = _safe_regular_file(path)
+    stable = before.st_size == opened.st_size == after.st_size == total and before.st_mtime_ns == opened.st_mtime_ns == after.st_mtime_ns and before.st_ino == after.st_ino
+    return digest.hexdigest(), stable
 
 def _read_at(path: Path, offset: int, length: int) -> bytes:
     if offset < 0 or length < 0 or length > 1024 * 1024:
@@ -204,7 +234,7 @@ def _inspect_apk(path: Path, size: int) -> dict[str, Any]:
 
 def inspect_binary(path: Path, full_hash: bool = False) -> dict[str, Any]:
     """Read format headers and archive directory metadata. Never executes or extracts content."""
-    info = safe_regular_file(path)
+    info = _safe_regular_file(path)
     header = _read_at(path, 0, 64)
     if header.startswith(b"\x7fELF"):
         result = _inspect_elf(path, info.st_size)
@@ -222,7 +252,7 @@ def inspect_binary(path: Path, full_hash: bool = False) -> dict[str, Any]:
     result["path"] = str(path.resolve())
     result["file_size_bytes"] = info.st_size
     if full_hash:
-        digest, _size, stable = sha256_file(path)
+        digest, stable = _hash_file(path)
         result["sha256"] = digest
         result["stable_during_hash"] = stable
     result["execution_performed"] = False
