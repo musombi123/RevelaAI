@@ -2,6 +2,7 @@ package vulnfeed
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ func TestParseCycloneDX17AndNormalizePackageURL(t *testing.T) {
 	}`)
 	result, err := ParseCycloneDXJSON(input)
 	if err != nil { t.Fatal(err) }
-	if len(result.Manifest.Packages) != 3 || result.Skipped != 1 {
+	if len(result.Manifest.Packages) != 4 || result.Skipped != 1 {
 		t.Fatalf("unexpected import result: packages=%d skipped=%d",len(result.Manifest.Packages),result.Skipped)
 	}
 	if result.Manifest.Packages[0].PackageURL != "pkg:npm/example-lib" {
@@ -68,5 +69,27 @@ func TestParseSPDX23UsesOnlyExplicitPURLReferences(t *testing.T) {
 func TestNormalizePURLRejectsInvalidCoordinates(t *testing.T) {
 	for _,value:=range []string{"https://example.org/pkg","pkg:","pkg:npm/example\n"} {
 		if _,err:=NormalizePURL(value);err==nil {t.Errorf("expected invalid PURL rejection: %q",value)}
+	}
+}
+
+func TestParseCycloneDX17StructuredToolsObject(t *testing.T) {
+	input := []byte(`{
+		"bomFormat":"CycloneDX",
+		"specVersion":"1.7",
+		"metadata":{
+			"timestamp":"2026-10-31T12:00:00Z",
+			"tools":{"components":[{"type":"application","name":"SBOM Builder","version":"3.0.0"}]}
+		},
+		"components":[
+			{"type":"library","name":"example","version":"1.2.3","purl":"pkg:npm/example@1.2.3"}
+		]
+	}`)
+	result, err := ParseCycloneDXJSON(input)
+	if err != nil { t.Fatal(err) }
+	if len(result.Manifest.Packages) != 1 {
+		t.Fatalf("unexpected structured CycloneDX import: %+v", result)
+	}
+	if !strings.Contains(result.Manifest.Source, "SBOM Builder") {
+		t.Fatalf("tool provenance missing from imported manifest source: %q", result.Manifest.Source)
 	}
 }
