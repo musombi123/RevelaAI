@@ -46,3 +46,35 @@ jobs:
           name: RevelaAI-Portable-Field-Kit
           path: dist/RevelaAI-Portable-Field-Kit-0.1.0.zip
           if-no-files-found: error
+
+
+  windows-usb-bundle:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare verified embedded Python runtime
+        shell: pwsh
+        run: .\portable\prepare-windows-runtime.ps1
+
+      - name: Test with the embedded runtime
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD\portable\src"
+          & ".\portable\runtimes\python-win-x64\python.exe" -m unittest discover -s portable/tests -v
+          if ($LASTEXITCODE -ne 0) { throw "Embedded-runtime test suite failed." }
+
+      - name: Package Windows USB Edition
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Remove-Item -Path portable\tests -Recurse -Force
+          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64.zip -Force
+
+      - name: Upload Windows USB Edition
+        uses: actions/upload-artifact@v4
+        with:
+          name: RevelaAI-USB-Edition-Windows-x64
+          path: dist/RevelaAI-USB-Edition-Windows-x64.zip
+          if-no-files-found: error
