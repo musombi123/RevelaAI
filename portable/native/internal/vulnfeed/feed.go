@@ -6,6 +6,7 @@ package vulnfeed
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -121,6 +122,23 @@ func ReadRegularFile(path string, max int64) ([]byte, error) {
 	return data, nil
 }
 
+
+func decodeStrict(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("multiple JSON values are not permitted")
+		}
+		return err
+	}
+	return nil
+}
+
 func ParsePublicKey(value []byte) (ed25519.PublicKey, error) {
 	text := strings.TrimSpace(string(value))
 	if !hex64.MatchString(text) {
@@ -152,7 +170,7 @@ func VerifyEnvelope(envelopeBytes []byte, key ed25519.PublicKey, expectedFingerp
 	}
 
 	var envelope Envelope
-	if err := json.Unmarshal(envelopeBytes, &envelope); err != nil {
+	if err := decodeStrict(envelopeBytes, &envelope); err != nil {
 		return VerifiedFeed{}, fmt.Errorf("decode feed envelope: %w", err)
 	}
 	if envelope.SchemaVersion != EnvelopeSchema {
@@ -171,7 +189,7 @@ func VerifyEnvelope(envelopeBytes []byte, key ed25519.PublicKey, expectedFingerp
 	}
 
 	var feed Feed
-	if err := json.Unmarshal(payload, &feed); err != nil {
+	if err := decodeStrict(payload, &feed); err != nil {
 		return VerifiedFeed{}, fmt.Errorf("decode signed feed payload: %w", err)
 	}
 	if feed.SchemaVersion != FeedSchema {
@@ -247,7 +265,7 @@ func ParseManifest(data []byte) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("package manifest must be between 1 and %d bytes", MaxManifestBytes)
 	}
 	var manifest Manifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	if err := decodeStrict(data, &manifest); err != nil {
 		return Manifest{}, fmt.Errorf("decode package manifest: %w", err)
 	}
 	if manifest.SchemaVersion != ManifestSchema {
