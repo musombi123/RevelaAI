@@ -126,6 +126,54 @@ jobs:
           mkdir -p portable/runtime-source
           cp -a core-zero core-one core-two lib portable/runtime-source/
 
+      - name: Smoke-test the bundled Field Engine core supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          engine="portable/bin/linux-amd64/revela-field"
+          chmod +x "$engine"
+          "$engine" doctor
+          "$engine" simulate --scenario vpn-observation --finding-out "$RUNNER_TEMP/field-finding.json"
+          test -s "$RUNNER_TEMP/field-finding.json"
+
+          "$engine" core-start --authorized >"$RUNNER_TEMP/field-core-start.log" 2>&1 &
+          pid=$!
+          cleanup() {
+            kill -INT "$pid" 2>/dev/null || true
+            for attempt in $(seq 1 15); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            cat "$RUNNER_TEMP/field-core-start.log"
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 45); do
+            if curl --silent --show-error --fail http://127.0.0.1:8780/v1/health -o "$RUNNER_TEMP/field-zero.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8781/v1/genesis/health -o "$RUNNER_TEMP/field-genesis.json" \
+              && curl --silent --show-error --fail http://127.0.0.1:8782/v1/mind/health -o "$RUNNER_TEMP/field-mind.json"; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/field-core-start.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          grep -q "Core-ZERO healthy" "$RUNNER_TEMP/field-core-start.log"
+          grep -q "Core-ONE / Genesis healthy" "$RUNNER_TEMP/field-core-start.log"
+          grep -q "Core-TWO / Infinite Mind healthy" "$RUNNER_TEMP/field-core-start.log"
+          kill -INT "$pid"
+          wait "$pid"
+          trap - EXIT
+          rm -rf portable/data
+
+
       - name: Create native binary checksums
         run: |
           find portable/bin -type f -print0 | sort -z | xargs -0 sha256sum > portable/bin/SHA256SUMS.txt
