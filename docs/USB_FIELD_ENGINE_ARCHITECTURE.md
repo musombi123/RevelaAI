@@ -1,8 +1,8 @@
 # RevelaAI USB Field Engine — architecture and integration contract
 
-**Target:** USB Edition 0.3  
-**Native runtime:** Go 1.23+ source, standard-library-only Field Engine  
-**Decision model:** Guardian-first, read-only by default, proposal-first repairs  
+**Target:** USB Edition 0.3
+**Native runtime:** Go 1.23+ source, standard-library-only Field Engine
+**Decision model:** Guardian-first, read-only by default, proposal-first repairs
 **Offline requirement:** Core inspection and synthetic detection validation must work without Ollama or an internet connection.
 
 ## 1. Why this direction is industry-relevant
