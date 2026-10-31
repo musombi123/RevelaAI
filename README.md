@@ -212,3 +212,18 @@ Those values still must be correctly supplied in Render: `MONGO_URI` must point 
 - The Elimu hub's school, profile, progress, and certificate records remain in RevelaCode-Backend; the RevelaAI bridge forwards authenticated requests instead of creating duplicate stores. The companion backend fix merged from PR #37 routes `RC-EL-...` IDs through the canonical Elimu verifier on the shared public QR endpoint.
 
 The regression tests in `tests/test_usect_contracts.py` cover route registration, path precedence, demand-only orchestration, marketplace/seed compatibility, Render environment declarations, and request-scoped Elimu personalization. A deployed health endpoint alone does not validate credentials, persistence, upstream core reachability, or a complete paid flow; those need authenticated staging checks against the live services.
+
+
+---
+
+## RevelaAI Portable Field Kit (USB / Offline)
+
+RevelaAI includes a local-first Field Kit under portable/. It provides standard-library utilities for case creation, evidence inventory and SHA-256 verification, file-signature inspection, redacted source-secret scanning, tool discovery, offline reference search, and Markdown case reports.
+
+- USB guide: portable/README.md
+- Launcher: portable/Start-RevelaAI.cmd (Windows) or portable/start-linux.sh (Linux)
+- Python runtime preparation: portable/prepare-windows-runtime.ps1
+- Offline AI: optional localhost-only Ollama bridge; the Ollama runtime and selected model are separate downloads and are not included in this repository.
+- Automated tests/package: .github/workflows/portable-fieldkit.yml
+
+The Field Kit does not change source evidence, execute inspected files, perform arbitrary network scans, or upload local data. Inventory hashing is not a forensic disk image. Specialist applications such as Ghidra, ddrescue, Autopsy, Volatility, Wireshark, JADX, Semgrep and Trivy remain separate upstream tools and must be independently installed/verified. This USB edition is an offline utility layer, not a full offline clone of cloud RevelaAI, Genesis, Infinite Mind or paid model providers.

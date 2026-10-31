@@ -1,0 +1,48 @@
+name: RevelaAI Portable Field Kit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "portable/**"
+      - ".github/workflows/portable-fieldkit.yml"
+  pull_request:
+    paths:
+      - "portable/**"
+      - ".github/workflows/portable-fieldkit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run Field Kit tests
+        run: python -m unittest discover -s portable/tests -v
+
+      - name: Compile Python modules
+        run: python -m compileall -q portable/src/revela_fieldkit
+
+      - name: Package USB Field Kit
+        run: |
+          mkdir -p dist
+          cd portable
+          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.1.0.zip . \
+            -x "tests/*" "__pycache__/*" "*.pyc"
+
+      - name: Upload USB package
+        uses: actions/upload-artifact@v4
+        with:
+          name: RevelaAI-Portable-Field-Kit
+          path: dist/RevelaAI-Portable-Field-Kit-0.1.0.zip
+          if-no-files-found: error
