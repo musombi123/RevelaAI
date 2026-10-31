@@ -262,7 +262,7 @@ func runSimulate(args []string) error {
 	if strings.TrimSpace(*findingOut) != "" {
 		data, marshalErr := json.MarshalIndent(report.Finding, "", "  ")
 		if marshalErr != nil { return marshalErr }
-		if writeErr := os.WriteFile(*findingOut, append(data, '\\n'), 0600); writeErr != nil {
+		if writeErr := os.WriteFile(*findingOut, append(data, '\n'), 0600); writeErr != nil {
 			return fmt.Errorf("write finding export: %w", writeErr)
 		}
 	}
@@ -318,7 +318,7 @@ func runSync(args []string) error {
 		return errors.New("--url is required")
 	}
 	token := strings.TrimSpace(os.Getenv("REVELA_ADMIN_BEARER"))
-	if token == "" || strings.ContainsAny(token, "\\r\\n") {
+	if token == "" || strings.ContainsAny(token, "\r\n") {
 		return errors.New("set REVELA_ADMIN_BEARER to an existing authorised RevelaCode administrator bearer session")
 	}
 	base, err := validateSyncOrigin(*origin)
