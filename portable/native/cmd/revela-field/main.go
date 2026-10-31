@@ -699,6 +699,12 @@ func runCoreStart(args []string) error {
 }
 
 func runCoreStatus() error {
+	decision := guardian.Evaluate(guardian.Request{
+		Action: "core_health_probe", Scope: "local", Authorized: true,
+	})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
 	type target struct{name, address, path string}
 	targets := []target{
 		{"Core-ZERO", "127.0.0.1:8780", "/v1/health"},
