@@ -76,3 +76,11 @@ The Go engine supports:
 The envelope carries exact signed payload bytes, a Base64 payload and an Ed25519 signature. Trust is anchored by a separately pinned SHA-256 fingerprint; do not trust a key merely because it shipped beside a feed. Feed issue/expiry timestamps are checked.
 
 The initial manifest contract is `revela-package-manifest/1`. Matching is exact Package URL plus exact version text; no semver ranges, distro backports, aliases, or transitive-dependency resolution are claimed. An empty result is not a clean bill of health. Findings are local-scope review records only; packages are never changed.
+## Import CycloneDX and SPDX manifests
+
+```sh
+./revela-field manifest import --format cyclonedx --file ./data/bom.json --out ./data/packages.json --authorized
+./revela-field manifest import --format spdx-json --file ./data/software.spdx.json --out ./data/packages.json --authorized
+```
+
+CycloneDX JSON 1.4-1.7 and SPDX JSON 2.3 are supported. The importer carries the BOM creation timestamp and tool provenance, traverses nested CycloneDX components, normalizes purls to separate exact version strings, and counts components omitted for missing purl/version. The output is a new file, created without overwriting. It never modifies source SBOMs.
