@@ -39,14 +39,15 @@ func runPackageQuery(binary string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binary, args...)
-	output, err := cmd.Output()
-	if err != nil {
+	var stdout, stderr boundedBuffer
+	stdout.max = MaxPackageInventoryBytes
+	stderr.max = 1 << 20
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("%s failed: %w", filepath.Base(binary), err)
 	}
-	if len(output) > MaxPackageInventoryBytes {
-		return nil, errors.New("package query output exceeds the 16 MiB limit")
-	}
-	return output, nil
+	return stdout.data, nil
 }
 
 // CollectInstalledPackages reads a local dpkg or RPM database. It does not
