@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -82,11 +83,14 @@ type Match struct {
 }
 
 func ReadRegularFile(path string, max int64) ([]byte, error) {
-	info, err := os.Lstat(path)
+	if max < 1 {
+		return nil, errors.New("maximum file size must be positive")
+	}
+	before, err := os.Lstat(path)
 	if err != nil {
 		return nil, fmt.Errorf("inspect %s: %w", path, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > max {
+	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() || before.Size() > max {
 		return nil, fmt.Errorf("%s must be a regular non-symlink file no larger than %d bytes", path, max)
 	}
 	file, err := os.Open(path)
@@ -95,16 +99,24 @@ func ReadRegularFile(path string, max int64) ([]byte, error) {
 	}
 	defer file.Close()
 	opened, err := file.Stat()
-	if err != nil || !opened.Mode().IsRegular() || opened.Size() > max {
+	if err != nil || !opened.Mode().IsRegular() || opened.Size() > max || !os.SameFile(before, opened) {
 		return nil, fmt.Errorf("%s changed or is not a bounded regular file", path)
 	}
-	data := make([]byte, opened.Size())
-	n, err := file.Read(data)
-	if err != nil && n != len(data) {
+	data, err := io.ReadAll(io.LimitReader(file, max+1))
+	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	if n != len(data) {
+	after, err := file.Stat()
+	if err != nil || !after.Mode().IsRegular() || !os.SameFile(opened, after) ||
+		int64(len(data)) != opened.Size() || after.Size() != opened.Size() {
 		return nil, fmt.Errorf("%s changed during read", path)
+	}
+	afterPath, err := os.Lstat(path)
+	if err != nil || afterPath.Mode()&os.ModeSymlink != 0 || !os.SameFile(after, afterPath) {
+		return nil, fmt.Errorf("%s path changed during read", path)
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%s exceeded the %d byte read limit", path, max)
 	}
 	return data, nil
 }
