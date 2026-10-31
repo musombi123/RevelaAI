@@ -63,3 +63,16 @@ Findings use `../contracts/finding.schema.json`. Meta Engineer's adapter validat
 Guardian learns attacker tradecraft to validate defensive telemetry in a controlled lab. It does not learn to bypass Guardian, operating-system controls, authentication, network privacy or evidence integrity.
 
 Remote `sync` destinations are restricted to `revelaai.onrender.com` by default. A custom deployment hostname must be explicitly added to `REVELA_FIELD_ALLOWED_SYNC_HOSTS`; remote custom ports and redirects are rejected. Guardian also screens the sync action before sending.
+
+## Offline signed vulnerability feed
+
+The Go engine supports:
+
+```sh
+./revela-field feed verify --file ./data/vuln-feed.json --public-key ./data/trusted-publisher.pub --fingerprint YOUR_PINNED_SHA256 --authorized
+./revela-field vuln scan --manifest ./data/package-manifest.json --feed ./data/vuln-feed.json --public-key ./data/trusted-publisher.pub --fingerprint YOUR_PINNED_SHA256 --authorized --out-dir ./data/findings
+```
+
+The envelope carries exact signed payload bytes, a Base64 payload and an Ed25519 signature. Trust is anchored by a separately pinned SHA-256 fingerprint; do not trust a key merely because it shipped beside a feed. Feed issue/expiry timestamps are checked.
+
+The initial manifest contract is `revela-package-manifest/1`. Matching is exact Package URL plus exact version text; no semver ranges, distro backports, aliases, or transitive-dependency resolution are claimed. An empty result is not a clean bill of health. Findings are local-scope review records only; packages are never changed.
