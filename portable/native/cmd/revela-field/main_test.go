@@ -355,3 +355,13 @@ func TestManifestImportRequiresGuardianAuthorization(t *testing.T) {
 		t.Fatal("denied import must not create an output manifest")
 	}
 }
+
+func TestManifestCollectRequiresExplicitGuardianAuthorization(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "manifest.json")
+	if err := runManifestCollect([]string{"--out", output}); err == nil {
+		t.Fatal("host package collection must require explicit authorisation")
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatal("denied collection must not create a manifest")
+	}
+}
