@@ -5,10 +5,18 @@ on:
     branches: [main]
     paths:
       - "portable/**"
+      - "core-zero/**"
+      - "core-one/**"
+      - "core-two/**"
+      - "lib/worldwide/**"
       - ".github/workflows/portable-fieldkit.yml"
   pull_request:
     paths:
       - "portable/**"
+      - "core-zero/**"
+      - "core-one/**"
+      - "core-two/**"
+      - "lib/worldwide/**"
       - ".github/workflows/portable-fieldkit.yml"
   workflow_dispatch:
 
@@ -16,11 +24,81 @@ permissions:
   contents: read
 
 jobs:
-  test-and-package:
+  native-go-validation:
+    name: Validate native engine and USECT cores; build USB binaries
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+
+      - name: Test and vet the native Field Engine
+        run: |
+          go -C portable/native test ./...
+          go -C portable/native vet ./...
+
+      - name: Test and vet Core-ZERO
+        run: |
+          go -C core-zero test ./...
+          go -C core-zero vet ./...
+
+      - name: Test and vet Core-ONE / Genesis
+        run: |
+          go -C core-one test -race ./...
+          go -C core-one vet ./...
+
+      - name: Test and vet Core-TWO / Infinite Mind
+        run: |
+          go -C core-two test -race ./...
+          go -C core-two vet ./...
+
+      - name: Cross-compile Field Engine and core services for Windows and Linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in windows-amd64 linux-amd64; do
+            case "$target" in
+              windows-amd64) export GOOS=windows; export GOARCH=amd64; ext=".exe" ;;
+              linux-amd64) export GOOS=linux; export GOARCH=amd64; ext="" ;;
+            esac
+            out="portable/bin/$target"
+            mkdir -p "$out"
+
+            go -C portable/native build -trimpath -ldflags="-s -w" -o "$out/revela-field$ext" ./cmd/revela-field
+            go -C core-zero build -trimpath -ldflags="-s -w" -o "$out/usect-zero$ext" ./cmd/usect-zero
+            go -C core-one build -trimpath -ldflags="-s -w" -o "$out/revela-genesis$ext" ./cmd/genesis
+            go -C core-two build -trimpath -ldflags="-s -w" -o "$out/revela-mind$ext" ./cmd/revela-mind
+          done
+
+      - name: Create native binary checksums
+        run: |
+          find portable/bin -type f -print0 | sort -z | xargs -0 sha256sum > portable/bin/SHA256SUMS.txt
+
+      - name: Upload native USB binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: revela-field-engine-native-binaries
+          path: portable/bin/
+          if-no-files-found: error
+          retention-days: 14
+
+  test-and-package:
+    name: Package portable source edition
+    runs-on: ubuntu-latest
+    needs: native-go-validation
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: revela-field-engine-native-binaries
+          path: portable/bin/
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,22 +115,28 @@ jobs:
         run: |
           mkdir -p dist
           cd portable
-          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.2.0.zip . \
-            -x "tests/*" "__pycache__/*" "*.pyc"
+          zip -r ../dist/RevelaAI-Portable-Field-Kit-0.3.0.zip .             -x "tests/*" "__pycache__/*" "*.pyc"
 
       - name: Upload USB package
         uses: actions/upload-artifact@v4
         with:
           name: RevelaAI-Portable-Field-Kit
-          path: dist/RevelaAI-Portable-Field-Kit-0.2.0.zip
+          path: dist/RevelaAI-Portable-Field-Kit-0.3.0.zip
           if-no-files-found: error
 
-
   windows-usb-bundle:
+    name: Build Windows USB edition with native cores
     runs-on: windows-latest
+    needs: native-go-validation
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download native binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: revela-field-engine-native-binaries
+          path: portable/bin/
 
       - name: Prepare verified embedded Python runtime
         shell: pwsh
@@ -65,17 +149,34 @@ jobs:
           & ".\portable\runtimes\python-win-x64\python.exe" -m unittest discover -s portable/tests -v
           if ($LASTEXITCODE -ne 0) { throw "Embedded-runtime test suite failed." }
 
+      - name: Verify bundled native executables
+        shell: pwsh
+        run: |
+          $required = @(
+            "portable\bin\windows-amd64\revela-field.exe",
+            "portable\bin\windows-amd64\usect-zero.exe",
+            "portable\bin\windows-amd64\revela-genesis.exe",
+            "portable\bin\windows-amd64\revela-mind.exe",
+            "portable\bin\linux-amd64\revela-field",
+            "portable\bin\linux-amd64\usect-zero",
+            "portable\bin\linux-amd64\revela-genesis",
+            "portable\bin\linux-amd64\revela-mind"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Required native binary missing: $path" }
+          }
+
       - name: Package Windows USB Edition
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Remove-Item -Path portable\tests -Recurse -Force
           Get-ChildItem -Path portable -Directory -Filter __pycache__ -Recurse | Remove-Item -Recurse -Force
-          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64-v0.2.0.zip -Force
+          Compress-Archive -Path portable\* -DestinationPath dist\RevelaAI-USB-Edition-Windows-x64-v0.3.0.zip -Force
 
       - name: Upload Windows USB Edition
         uses: actions/upload-artifact@v4
         with:
           name: RevelaAI-USB-Edition-Windows-x64
-          path: dist/RevelaAI-USB-Edition-Windows-x64-v0.2.0.zip
+          path: dist/RevelaAI-USB-Edition-Windows-x64-v0.3.0.zip
           if-no-files-found: error
