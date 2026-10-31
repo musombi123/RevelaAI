@@ -15,18 +15,6 @@ import (
 
 const maxRegistryOutput = MaxPackageInventoryBytes
 
-type boundedBuffer struct {
-	data []byte
-	max int
-}
-
-func (b *boundedBuffer) Write(p []byte) (int, error) {
-	if len(b.data)+len(p) > b.max {
-		return 0, errors.New("registry output exceeded the configured size limit")
-	}
-	b.data = append(b.data, p...)
-	return len(p), nil
-}
 
 func queryRegistry(regExe, key string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
