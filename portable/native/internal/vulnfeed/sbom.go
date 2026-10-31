@@ -59,12 +59,12 @@ type spdxPackage struct {
 // coordinate while preserving qualifiers and subpath. It does not attempt to
 // reinterpret or canonicalize package namespaces.
 func NormalizePURL(raw string) (string, error) {
+	if strings.ContainsAny(raw, "\r\n\x00") {
+		return "", errors.New("Package URL contains control characters")
+	}
 	value := strings.TrimSpace(raw)
 	if !strings.HasPrefix(value, "pkg:") || len(value) > 1024 {
 		return "", errors.New("a valid-looking Package URL is required")
-	}
-	if strings.ContainsAny(value, "\r\n\x00") {
-		return "", errors.New("Package URL contains control characters")
 	}
 	base := value
 	fragment := ""
