@@ -161,6 +161,20 @@ The importer preserves the SBOM creation timestamp and tool provenance, normaliz
 After import, run the signed-feed `vuln scan` command described below. CycloneDX XML, SPDX 3.x, direct OS package-database acquisition and dependency-range resolution are not included yet. An SBOM is only as complete and current as its producer; an empty scan is not proof of a clean system.
 
 ## Signed offline vulnerability assessment
+### Collect installed software directly from the host
+
+The Field Engine can generate an initial package manifest from the local operating-system package database:
+
+```text
+revela-field manifest collect --out ./data/package-manifest.json --authorized
+```
+
+On Windows it reads the conventional uninstall registry entries from HKLM, WOW6432Node and HKCU and records only display name, version and publisher. On Linux it reads dpkg or RPM package metadata. The collector is read-only, does not contact repositories, does not install or remove packages, and creates a new manifest rather than overwriting an existing one.
+
+Coverage is intentionally limited. Windows portable applications, software not registered in the uninstall keys, drivers and per-user package-manager environments may be absent. Linux language-specific environments and software installed outside dpkg/RPM may be absent. The report includes provenance, skipped-entry counts and coverage warnings. For a richer inventory, import a CycloneDX or SPDX SBOM instead.
+
+The native collector uses bounded output buffers for package-manager/registry subprocesses and caps the collected listing at 16 MiB. It never collects install paths, documents, browser profiles, credentials or tokens.
+
 
 The native engine includes two additional commands:
 
