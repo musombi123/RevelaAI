@@ -95,6 +95,8 @@ func main() {
 		err = runFeed(os.Args[2:])
 	case "vuln":
 		err = runVulnerabilityScan(os.Args[2:])
+	case "manifest":
+		err = runManifestImport(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -127,6 +129,8 @@ Commands:
                                Send one finding to Meta Engineer (REVELA_ADMIN_BEARER required)
   feed verify --file FEED --public-key KEY --fingerprint SHA256
                                Verify an offline Ed25519-signed advisory feed
+  manifest import --format cyclonedx|spdx-json --file SBOM --out MANIFEST --authorized
+                               Import a CycloneDX or SPDX JSON SBOM without modifying it
   vuln scan --manifest FILE --feed FILE --public-key KEY --fingerprint SHA256 --authorized
                                Match a local package manifest against the verified offline feed
   version                      Print version
@@ -318,6 +322,83 @@ func syncHostAllowed(host string) bool {
 	return false
 }
 
+
+
+func writeManifest(path string, manifest vulnfeed.Manifest) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("--out is required")
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create manifest output directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("create manifest without overwriting existing file: %w", err)
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func runManifestImport(args []string) error {
+	if len(args) == 0 || args[0] != "import" {
+		return errors.New("usage: manifest import --format cyclonedx|spdx-json --file SBOM --out MANIFEST --authorized")
+	}
+	fs := flag.NewFlagSet("manifest import", flag.ContinueOnError)
+	format := fs.String("format", "", "CycloneDX JSON or SPDX-2.3 JSON")
+	inputPath := fs.String("file", "", "source SBOM JSON file")
+	outputPath := fs.String("out", "", "new local package-manifest JSON path (must not already exist)")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to inspect this SBOM")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if strings.TrimSpace(*inputPath) == "" || strings.TrimSpace(*outputPath) == "" {
+		return errors.New("--file and --out are required")
+	}
+	data, err := vulnfeed.ReadRegularFile(*inputPath, vulnfeed.MaxManifestBytes)
+	if err != nil {
+		return err
+	}
+	var imported vulnfeed.SBOMImportResult
+	switch strings.ToLower(strings.TrimSpace(*format)) {
+	case "cyclonedx", "cyclonedx-json":
+		imported, err = vulnfeed.ParseCycloneDXJSON(data)
+	case "spdx", "spdx-json":
+		imported, err = vulnfeed.ParseSPDXJSON(data)
+	default:
+		return errors.New("--format must be cyclonedx or spdx-json")
+	}
+	if err != nil {
+		return err
+	}
+	if err := writeManifest(*outputPath, imported.Manifest); err != nil {
+		return err
+	}
+	return emit(map[string]any{
+		"status": "manifest_imported",
+		"source_format": strings.ToLower(strings.TrimSpace(*format)),
+		"source_file": *inputPath,
+		"source_sha256": fmt.Sprintf("%x", sha256.Sum256(data)),
+		"manifest_file": *outputPath,
+		"manifest_source": imported.Manifest.Source,
+		"manifest_generated_at": imported.Manifest.GeneratedAt,
+		"packages_imported": len(imported.Manifest.Packages),
+		"packages_skipped": imported.Skipped,
+		"warnings": imported.Warnings,
+		"source_modified": false,
+		"guardian": decision,
+	})
+}
 
 func loadVerifiedFeed(feedPath, publicKeyPath, fingerprint string) (vulnfeed.VerifiedFeed, error) {
 	feedBytes, err := vulnfeed.ReadRegularFile(feedPath, vulnfeed.MaxFeedBytes)
@@ -983,6 +1064,7 @@ func runMenu() error {
 		fmt.Println("6) Start bundled ZERO/ONE/TWO locally")
 		fmt.Println("7) Verify a signed offline vulnerability feed")
 		fmt.Println("8) Scan a package manifest against the trusted offline feed")
+		fmt.Println("9) Import a CycloneDX or SPDX software bill of materials")
 		fmt.Println("0) Exit")
 		fmt.Print("Select: ")
 		value, err := reader.ReadString('\n')
@@ -1050,6 +1132,23 @@ func runMenu() error {
 			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
 			outDir := filepath.Join("data", "findings")
 			err := runVulnerabilityScan([]string{"scan", "--manifest", strings.TrimSpace(manifestPath), "--feed", strings.TrimSpace(feedPath), "--public-key", strings.TrimSpace(keyPath), "--fingerprint", strings.TrimSpace(fingerprint), "--authorized", "--out-dir", outDir})
+			if err != nil { fmt.Println(err) }
+		case "9":
+			fmt.Println("Formats: cyclonedx | spdx-json")
+			fmt.Print("SBOM format: ")
+			format, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("SBOM JSON path: ")
+			sbomPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("New manifest output path (must not exist): ")
+			manifestPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to confirm you may inspect this SBOM: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			err := runManifestImport([]string{"import", "--format", strings.TrimSpace(format), "--file", strings.TrimSpace(sbomPath), "--out", strings.TrimSpace(manifestPath), "--authorized"})
 			if err != nil { fmt.Println(err) }
 		case "0":
 			return nil
