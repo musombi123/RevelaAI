@@ -962,6 +962,8 @@ func runMenu() error {
 		fmt.Println("4) Inventory an authorised local directory")
 		fmt.Println("5) Core health status (loopback only)")
 		fmt.Println("6) Start bundled ZERO/ONE/TWO locally")
+		fmt.Println("7) Verify a signed offline vulnerability feed")
+		fmt.Println("8) Scan a package manifest against the trusted offline feed")
 		fmt.Println("0) Exit")
 		fmt.Print("Select: ")
 		value, err := reader.ReadString('\n')
@@ -994,6 +996,42 @@ func runMenu() error {
 			if readErr != nil { return readErr }
 			if strings.TrimSpace(confirmation) != "START" { fmt.Println("Cancelled."); continue }
 			if err := runCoreStart([]string{"--authorized"}); err != nil { fmt.Println(err) }
+		case "7":
+			fmt.Print("Signed feed envelope path: ")
+			feedPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Trusted Ed25519 public-key file path: ")
+			keyPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Pinned SHA-256 fingerprint (verify separately with your publisher): ")
+			fingerprint, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to confirm this assessment: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			err := runFeed([]string{"verify", "--file", strings.TrimSpace(feedPath), "--public-key", strings.TrimSpace(keyPath), "--fingerprint", strings.TrimSpace(fingerprint), "--authorized"})
+			if err != nil { fmt.Println(err) }
+		case "8":
+			fmt.Print("Local package manifest JSON path: ")
+			manifestPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Signed vulnerability feed envelope path: ")
+			feedPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Trusted Ed25519 public-key file path: ")
+			keyPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Pinned SHA-256 fingerprint (verify separately with your publisher): ")
+			fingerprint, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to confirm this assessment: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			outDir := filepath.Join("data", "findings")
+			err := runVulnerabilityScan([]string{"scan", "--manifest", strings.TrimSpace(manifestPath), "--feed", strings.TrimSpace(feedPath), "--public-key", strings.TrimSpace(keyPath), "--fingerprint", strings.TrimSpace(fingerprint), "--authorized", "--out-dir", outDir})
+			if err != nil { fmt.Println(err) }
 		case "0":
 			return nil
 		default:
