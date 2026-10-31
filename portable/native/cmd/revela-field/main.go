@@ -342,9 +342,21 @@ func runSync(args []string) error {
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Size() > 65536 {
 		return errors.New("finding must be a regular JSON file no larger than 64 KiB")
 	}
-	data, err := os.ReadFile(*findingPath)
+	input, err := os.Open(*findingPath)
+	if err != nil {
+		return fmt.Errorf("open finding: %w", err)
+	}
+	defer input.Close()
+	openedInfo, err := input.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || openedInfo.Size() > 65536 {
+		return errors.New("opened finding must be a regular file no larger than 64 KiB")
+	}
+	data, err := io.ReadAll(io.LimitReader(input, 65537))
 	if err != nil {
 		return fmt.Errorf("read finding: %w", err)
+	}
+	if len(data) > 65536 {
+		return errors.New("finding exceeded the 64 KiB read limit")
 	}
 	var finding contract.Finding
 	decoder := json.NewDecoder(bytes.NewReader(data))
