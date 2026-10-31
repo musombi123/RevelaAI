@@ -40,3 +40,9 @@ Thumbs.db
 /recipe/signature.key
 /recipe/*.pem
 /recipe/*.rvx
+
+# USB Field Kit runtime, local models and customer case data
+/portable/runtimes/
+/portable/models/
+/portable/cases/
+/portable/*.log
