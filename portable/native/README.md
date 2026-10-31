@@ -77,6 +77,14 @@ The envelope carries exact signed payload bytes, a Base64 payload and an Ed25519
 
 The initial manifest contract is `revela-package-manifest/1`. Matching is exact Package URL plus exact version text; no semver ranges, distro backports, aliases, or transitive-dependency resolution are claimed. An empty result is not a clean bill of health. Findings are local-scope review records only; packages are never changed.
 ## Import CycloneDX and SPDX manifests
+### Collect installed software on the local host
+
+```sh
+./revela-field manifest collect --out ./data/package-manifest.json --authorized
+```
+
+Windows reads conventional uninstall registry entries (HKLM, WOW6432Node and HKCU); Linux reads dpkg or RPM package metadata. Only product/package name, version, publisher/architecture and source provenance are retained. The command is read-only, has bounded subprocess output, performs no network requests, and refuses to overwrite an existing manifest. This is not a complete inventory of portable apps, driver packages, language-specific virtual environments or software outside the selected system package database.
+
 
 ```sh
 ./revela-field manifest import --format cyclonedx --file ./data/bom.json --out ./data/packages.json --authorized
