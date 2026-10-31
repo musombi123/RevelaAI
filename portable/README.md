@@ -143,3 +143,5 @@ Ghidra, GNU ddrescue, The Sleuth Kit, Autopsy, TestDisk/PhotoRec, Volatility 3, 
 - Offline AI, when optionally used by the legacy companion, may hallucinate and is never an authority for forensic or repair decisions.
 
 Cloud RevelaAI, hosted providers and any unbundled connectors remain online services. This USB release is a local-first field layer, not a complete offline clone of every RevelaAI cloud service.
+
+Remote sync is allowlisted to `revelaai.onrender.com` by default. A deployment using a different approved HTTPS hostname must explicitly configure `REVELA_FIELD_ALLOWED_SYNC_HOSTS` as a comma-separated list in the local launch environment. Only exact hostnames are accepted; custom remote ports and redirects are rejected. The Field Engine applies its Guardian sync gate before transmission.
