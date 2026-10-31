@@ -213,12 +213,13 @@ def inventory_source(case_dir: Path, source: Path, operator: str, include_hidden
         raise ValueError(f"Source path does not exist: {source}")
     if source.is_symlink():
         raise ValueError("Source path is a symbolic link. Select the underlying path explicitly.")
-    source_root = source.resolve(strict=True)
     if source.is_file():
         safe_regular_file(source)
         candidates = [source]
-        relative_base = source.parent.resolve()
+        source_root = source.parent.resolve()
+        relative_base = source_root
     elif source.is_dir():
+        source_root = source.resolve(strict=True)
         candidates = list(iter_regular_files(source, include_hidden=include_hidden))
         relative_base = source_root
     else:
@@ -352,7 +353,7 @@ def scan_secrets(root: Path, include_hidden: bool) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     skipped_large = 0
     scanned = 0
-    for path in iter_regular_files(root, include_hidden=include_hidden):
+    for path in iter_regular_files(root, include_hidden=True):
         try:
             info = safe_regular_file(path)
             if info.st_size > MAX_SECRET_FILE_BYTES:
