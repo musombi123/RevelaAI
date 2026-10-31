@@ -430,11 +430,16 @@ async def ingest_fieldkit_finding(request: Request):
         return error
 
     try:
-        raw = await request.body()
+        chunks = []
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > 65536:
+                return JSONResponse({"status": "error", "code": "payload_too_large"}, status_code=413)
+            chunks.append(chunk)
+        raw = b"".join(chunks)
     except Exception:
         return JSONResponse({"status": "error", "code": "invalid_body"}, status_code=400)
-    if len(raw) > 65536:
-        return JSONResponse({"status": "error", "code": "payload_too_large"}, status_code=413)
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -460,6 +465,28 @@ async def ingest_fieldkit_finding(request: Request):
             "A repair-specific candidate test is still required before any repair can be approved."
         ),
     }
+    if db is not None:
+        try:
+            existing = db["ideas"].find_one({"fieldkit_review.finding_id": finding_id})
+            if existing:
+                return JSONResponse(
+                    {
+                        "status": "already_received",
+                        "ideaId": str(existing.get("_id", "")),
+                        "findingId": finding_id,
+                        "approval_required": True,
+                        "auto_execution": False,
+                        "message": "This finding is already present in the Meta-Engineer review queue.",
+                    },
+                    status_code=200,
+                )
+        except Exception:
+            logger.exception("Field Engine finding idempotency check failed")
+            return JSONResponse(
+                {"status": "error", "code": "fieldkit_idempotency_check_failed"},
+                status_code=503,
+            )
+
     doc = {
         "spec": record["spec"],
         "code_path": code_path,
