@@ -32,8 +32,8 @@ func validFinding() contract.Finding {
 
 func TestValidateSyncOrigin(t *testing.T) {
 	accepted := []string{
-		"https://revelaai.example",
-		"https://revelaai.example/",
+		"https://revelaai.onrender.com",
+		"https://revelaai.onrender.com/",
 		"http://127.0.0.1:8789",
 		"http://localhost:8789",
 		"http://[::1]:8789",
@@ -47,8 +47,9 @@ func TestValidateSyncOrigin(t *testing.T) {
 		"http://revelaai.example",
 		"ftp://revelaai.example",
 		"https://user:pass@revelaai.example",
-		"https://revelaai.example/api/meta-engineer",
-		"https://revelaai.example?token=secret",
+		"https://revelaai.onrender.com:8443",
+		"https://unapproved.example",
+		"https://revelaai.onrender.com?token=secret",
 	}
 	for _, value := range rejected {
 		if _, err := validateSyncOrigin(value); err == nil {
@@ -144,4 +145,14 @@ func TestRandomServiceSecretIsHighEntropyHex(t *testing.T) {
 		t.Fatalf("unexpected service secrets: first=%q second=%q", first, second)
 	}
 	if _, err := hex.DecodeString(first); err != nil { t.Fatalf("secret is not hex: %v", err) }
+}
+
+func TestSyncDestinationAllowlistSupportsExplicitAdditionalHosts(t *testing.T) {
+	t.Setenv("REVELA_FIELD_ALLOWED_SYNC_HOSTS", "security.example, staging.revela.local")
+	if !syncHostAllowed("security.example") {
+		t.Fatal("explicitly allowlisted host should be accepted")
+	}
+	if syncHostAllowed("evil.example") {
+		t.Fatal("unlisted host must be denied")
+	}
 }
