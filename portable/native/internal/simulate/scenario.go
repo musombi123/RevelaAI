@@ -80,7 +80,7 @@ func Run(name string) (Report, error) {
 		return Report{}, fmt.Errorf("unknown scenario %q (choose auth-failure-burst, startup-entry, or vpn-observation)", name)
 	}
 
-	sum := sha256.Sum256([]byte(name + "|" + raw))
+	sum := sha256.Sum256([]byte(name + "|" + raw + "|" + now.Format(time.RFC3339Nano)))
 	report.Finding = contract.Finding{
 		SchemaVersion: contract.SchemaVersion,
 		ID: "field-" + hex.EncodeToString(sum[:8]),
