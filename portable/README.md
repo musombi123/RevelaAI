@@ -145,3 +145,27 @@ Ghidra, GNU ddrescue, The Sleuth Kit, Autopsy, TestDisk/PhotoRec, Volatility 3, 
 Cloud RevelaAI, hosted providers and any unbundled connectors remain online services. This USB release is a local-first field layer, not a complete offline clone of every RevelaAI cloud service.
 
 Remote sync is allowlisted to `revelaai.onrender.com` by default. A deployment using a different approved HTTPS hostname must explicitly configure `REVELA_FIELD_ALLOWED_SYNC_HOSTS` as a comma-separated list in the local launch environment. Only exact hostnames are accepted; custom remote ports and redirects are rejected. The Field Engine applies its Guardian sync gate before transmission.
+
+## Signed offline vulnerability assessment
+
+The native engine includes two additional commands:
+
+```text
+revela-field feed verify --file ./data/vuln-feed.json --public-key ./data/trusted-publisher.pub --fingerprint YOUR_PINNED_SHA256 --authorized
+
+revela-field vuln scan --manifest ./data/package-manifest.json --feed ./data/vuln-feed.json --public-key ./data/trusted-publisher.pub --fingerprint YOUR_PINNED_SHA256 --authorized --out-dir ./data/findings
+```
+
+The feed envelope contains a Base64 JSON payload and an Ed25519 signature. The operator supplies the publisher public key and its SHA-256 fingerprint obtained separately from a trusted channel. A public key copied from the same untrusted USB as the feed is not sufficient. The engine rejects invalid signatures, wrong key fingerprints, malformed schemas, and expired feeds.
+
+The manifest currently uses the versioned `revela-package-manifest/1` JSON format: `schema_version`, `generated_at`, `source`, and `packages[]` with `ecosystem`, `name`, `version`, and Package URL. A sample format is documented in `docs/VULNERABILITY_FEED_FORMAT.md`.
+
+Matching is deliberately exact: Package URL and version string must both match an advisory. It does not interpret version ranges, distro backports, aliases, OS vendor patch levels, or transitive dependency resolution. A zero-match result means only that this exact matcher found no entries in this particular signed snapshot; it is not proof that the device is vulnerability-free.
+
+Each match becomes a normal Field Engine finding with:
+- package-manifest and signed-feed evidence references;
+- feed ID, publisher, expiry and payload digest in the assessment report;
+- severity, advisory ID and reported fixed versions;
+- `scope=local`, `simulated=false`, and a review-only remediation recommendation.
+
+The scanner never downloads updates, installs packages, removes software, disables services or modifies the supplied manifest. Exported findings can be submitted to Meta Engineer using the normal authenticated `sync` command.
