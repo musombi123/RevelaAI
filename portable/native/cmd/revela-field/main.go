@@ -30,6 +30,7 @@ import (
 	"github.com/musombi123/revela-field-engine/internal/guardian"
 	"github.com/musombi123/revela-field-engine/internal/inventory"
 	"github.com/musombi123/revela-field-engine/internal/simulate"
+	"github.com/musombi123/revela-field-engine/internal/vulnfeed"
 )
 
 const version = "0.3.0"
@@ -89,6 +90,10 @@ func main() {
 		err = runCoreStart(os.Args[2:])
 	case "sync":
 		err = runSync(os.Args[2:])
+	case "feed":
+		err = runFeed(os.Args[2:])
+	case "vuln":
+		err = runVulnerabilityScan(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -119,6 +124,10 @@ Commands:
   core-start --authorized      Start bundled ZERO/ONE/TWO services on loopback
   sync --finding FILE --url ORIGIN
                                Send one finding to Meta Engineer (REVELA_ADMIN_BEARER required)
+  feed verify --file FEED --public-key KEY --fingerprint SHA256
+                               Verify an offline Ed25519-signed advisory feed
+  vuln scan --manifest FILE --feed FILE --public-key KEY --fingerprint SHA256 --authorized
+                               Match a local package manifest against the verified offline feed
   version                      Print version
 
 Safe simulation scenarios:
@@ -306,6 +315,208 @@ func syncHostAllowed(host string) bool {
 		}
 	}
 	return false
+}
+
+
+func loadVerifiedFeed(feedPath, publicKeyPath, fingerprint string) (vulnfeed.VerifiedFeed, error) {
+	feedBytes, err := vulnfeed.ReadRegularFile(feedPath, vulnfeed.MaxFeedBytes)
+	if err != nil {
+		return vulnfeed.VerifiedFeed{}, err
+	}
+	keyBytes, err := vulnfeed.ReadRegularFile(publicKeyPath, 4096)
+	if err != nil {
+		return vulnfeed.VerifiedFeed{}, err
+	}
+	publicKey, err := vulnfeed.ParsePublicKey(keyBytes)
+	if err != nil {
+		return vulnfeed.VerifiedFeed{}, err
+	}
+	return vulnfeed.VerifyEnvelope(feedBytes, publicKey, fingerprint, time.Now().UTC())
+}
+
+func runFeed(args []string) error {
+	if len(args) == 0 || args[0] != "verify" {
+		return errors.New("usage: feed verify --file FEED --public-key KEY --fingerprint SHA256 --authorized")
+	}
+	fs := flag.NewFlagSet("feed verify", flag.ContinueOnError)
+	feedPath := fs.String("file", "", "signed offline advisory feed envelope")
+	keyPath := fs.String("public-key", "", "trusted Ed25519 public key file (hex)")
+	fingerprint := fs.String("fingerprint", "", "trusted SHA-256 public-key fingerprint from a separate channel")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to assess this local data")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if *feedPath == "" || *keyPath == "" || *fingerprint == "" {
+		return errors.New("--file, --public-key and --fingerprint are required")
+	}
+	verified, err := loadVerifiedFeed(*feedPath, *keyPath, *fingerprint)
+	if err != nil {
+		return err
+	}
+	return emit(map[string]any{
+		"status": "verified",
+		"feed_id": verified.Feed.FeedID,
+		"provider": verified.Feed.Provider,
+		"issued_at": verified.Feed.IssuedAt,
+		"expires_at": verified.Feed.ExpiresAt,
+		"advisory_count": verified.AdvisoryCount,
+		"payload_sha256": verified.PayloadSHA256,
+		"public_key_sha256": verified.PublicKeySHA256,
+		"verified_at": verified.VerifiedAt,
+		"guardian": decision,
+	})
+}
+
+func findingSeverity(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "critical":
+		return "critical"
+	case "high":
+		return "high"
+	case "medium":
+		return "medium"
+	case "low":
+		return "low"
+	default:
+		return "informational"
+	}
+}
+
+func buildVulnerabilityFinding(match vulnfeed.Match, feed vulnfeed.VerifiedFeed, manifestPath, manifestHash string, manifestBytes int64, now time.Time) contract.Finding {
+	identity := feed.Feed.FeedID + "|" + match.Advisory.ID + "|" + match.Package.PackageURL + "|" + match.Package.Version
+	sum := sha256.Sum256([]byte(identity))
+	recommendation := "Review the vendor advisory and update this package to a supported, remediated release after change approval."
+	if len(match.Advisory.FixedVersions) > 0 {
+		recommendation = "Review the vendor advisory and plan an update to one of these reported fixed versions: " +
+			strings.Join(match.Advisory.FixedVersions, ", ") + ". Validate application compatibility and approve the change before installation."
+	}
+	summary := match.Advisory.Summary
+	if len(match.Advisory.References) > 0 {
+		summary += " References: " + strings.Join(match.Advisory.References, " ")
+	}
+	return contract.Finding{
+		SchemaVersion: contract.SchemaVersion,
+		ID: "field-" + hex.EncodeToString(sum[:8]),
+		Source: "revela-field-engine",
+		ObservedAt: now.UTC(),
+		Target: match.Package.PackageURL,
+		Category: "software_vulnerability",
+		Severity: findingSeverity(match.Advisory.Severity),
+		Title: match.Advisory.ID + " affects " + match.Package.Name + " " + match.Package.Version,
+		Summary: summary,
+		Evidence: []contract.Evidence{
+			{Kind: "local_package_manifest", Ref: manifestPath + "#" + match.Package.PackageURL, SHA256: manifestHash, Bytes: manifestBytes, Note: "Exact package URL and version found in the supplied local manifest."},
+			{Kind: "signed_vulnerability_feed", Ref: "feed://" + feed.Feed.FeedID, SHA256: feed.PayloadSHA256, Note: "Ed25519 signature and pinned public-key fingerprint verified; feed is within its validity period."},
+		},
+		Recommendation: recommendation,
+		Scope: "local",
+		Simulated: false,
+	}
+}
+
+func writeFindings(outDir string, findings []contract.Finding) ([]string, error) {
+	if strings.TrimSpace(outDir) == "" {
+		return nil, errors.New("output directory is required for file export")
+	}
+	if err := os.MkdirAll(outDir, 0700); err != nil {
+		return nil, fmt.Errorf("create finding output directory: %w", err)
+	}
+	info, err := os.Lstat(outDir)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, errors.New("finding output directory must be a real directory, not a symlink")
+	}
+	written := []string{}
+	for _, finding := range findings {
+		path := filepath.Join(outDir, finding.ID+".json")
+		data, err := json.MarshalIndent(finding, "", "  ")
+		if err != nil {
+			return written, err
+		}
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return written, fmt.Errorf("create finding without overwriting an existing file: %w", err)
+		}
+		if _, err := file.Write(append(data, '\n')); err != nil {
+			_ = file.Close()
+			return written, err
+		}
+		if err := file.Close(); err != nil {
+			return written, err
+		}
+		written = append(written, path)
+	}
+	return written, nil
+}
+
+func runVulnerabilityScan(args []string) error {
+	if len(args) == 0 || args[0] != "scan" {
+		return errors.New("usage: vuln scan --manifest FILE --feed FILE --public-key KEY --fingerprint SHA256 --authorized")
+	}
+	fs := flag.NewFlagSet("vuln scan", flag.ContinueOnError)
+	manifestPath := fs.String("manifest", "", "explicit local package manifest JSON")
+	feedPath := fs.String("feed", "", "signed local vulnerability feed")
+	keyPath := fs.String("public-key", "", "trusted Ed25519 public key file (hex)")
+	fingerprint := fs.String("fingerprint", "", "trusted SHA-256 public-key fingerprint from a separate channel")
+	outDir := fs.String("out-dir", "", "optional directory to write one JSON finding per exact match")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to assess this local manifest")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if *manifestPath == "" || *feedPath == "" || *keyPath == "" || *fingerprint == "" {
+		return errors.New("--manifest, --feed, --public-key and --fingerprint are required")
+	}
+	manifestBytes, err := vulnfeed.ReadRegularFile(*manifestPath, vulnfeed.MaxManifestBytes)
+	if err != nil {
+		return err
+	}
+	manifest, err := vulnfeed.ParseManifest(manifestBytes)
+	if err != nil {
+		return err
+	}
+	verified, err := loadVerifiedFeed(*feedPath, *keyPath, *fingerprint)
+	if err != nil {
+		return err
+	}
+	matches := vulnfeed.MatchExact(manifest, verified.Feed)
+	manifestSum := sha256.Sum256(manifestBytes)
+	now := time.Now().UTC()
+	findings := make([]contract.Finding, 0, len(matches))
+	for _, match := range matches {
+		findings = append(findings, buildVulnerabilityFinding(match, verified, *manifestPath, hex.EncodeToString(manifestSum[:]), int64(len(manifestBytes)), now))
+	}
+	response := map[string]any{
+		"status": "assessment_complete",
+		"guardian": decision,
+		"feed_id": verified.Feed.FeedID,
+		"feed_provider": verified.Feed.Provider,
+		"feed_expires_at": verified.Feed.ExpiresAt,
+		"feed_payload_sha256": verified.PayloadSHA256,
+		"manifest_sha256": hex.EncodeToString(manifestSum[:]),
+		"packages_assessed": len(manifest.Packages),
+		"advisories_in_feed": verified.AdvisoryCount,
+		"exact_matches": len(findings),
+		"matching_mode": "exact Package URL and exact version string only",
+		"finding_records": findings,
+		"software_modified": false,
+		"assessment_boundary": "No package ranges, distro backports, aliases or transitive dependency resolution were interpreted. No software was installed, updated, removed or disabled. No network requests were made.",
+	}
+	if strings.TrimSpace(*outDir) != "" {
+		written, err := writeFindings(*outDir, findings)
+		if err != nil {
+			return err
+		}
+		response["finding_files"] = written
+		delete(response, "finding_records")
+	}
+	return emit(response)
 }
 
 func validateSyncOrigin(raw string) (string, error) {
