@@ -271,6 +271,54 @@ jobs:
             if (-not (Test-Path $path)) { throw "Required native binary missing: $path" }
           }
 
+      - name: Smoke-test the Windows USB supervisor on loopback
+        shell: pwsh
+        run: |
+          $engine = (Resolve-Path "portable\bin\windows-amd64\revela-field.exe").Path
+          & $engine doctor
+          & $engine simulate --scenario vpn-observation --finding-out "$env:RUNNER_TEMP\field-vpn-finding.json"
+          if ($LASTEXITCODE -ne 0) { throw "Windows synthetic scenario failed." }
+
+          $stdout = Join-Path $env:RUNNER_TEMP "field-engine-windows.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "field-engine-windows.stderr.log"
+          $process = Start-Process -FilePath $engine -ArgumentList @("core-start", "--authorized") -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 45; $attempt++) {
+              if ($process.HasExited) {
+                throw "Windows Field Engine supervisor exited before all three core services became healthy."
+              }
+              try {
+                $zero = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:8780/v1/health"
+                $one = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:8781/v1/genesis/health"
+                $two = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:8782/v1/mind/health"
+                if ($zero.StatusCode -eq 200 -and $one.StatusCode -eq 200 -and $two.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if (-not $ready) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Windows USB supervisor did not bring all three cores healthy on loopback."
+            }
+            $log = if (Test-Path $stdout) { Get-Content $stdout -Raw } else { "" }
+            if ($log -notmatch "Core-ZERO healthy" -or $log -notmatch "Core-ONE / Genesis healthy" -or $log -notmatch "Core-TWO / Infinite Mind healthy") {
+              throw "Windows supervisor did not report all three cores healthy."
+            }
+          } finally {
+            if (-not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+              $process.WaitForExit()
+            }
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+            Remove-Item -Recurse -Force "portable\data" -ErrorAction SilentlyContinue
+          }
+
       - name: Package Windows USB Edition
         shell: pwsh
         run: |
