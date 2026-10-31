@@ -41,7 +41,7 @@ Open PowerShell from the portable/ directory and run:
     .\prepare-windows-runtime.ps1
     .\Start-RevelaAI.ps1
 
-The preparation script downloads the official Python 3.13.17 Windows x64 embeddable ZIP from python.org and extracts it into the USB runtime directory. It prints the archive SHA-256 so you can compare it with the release information. The embedded runtime is isolated and does not include pip; the Field Kit has no third-party Python dependencies.
+The preparation script downloads the official Python 3.14.10 Windows x64 embeddable ZIP from python.org and extracts it into the USB runtime directory. It verifies the archive SHA-256 against the checksum published on the official Python release page. The embedded runtime is isolated and does not include pip; the Field Kit has no third-party Python dependencies.
 
 Or run Start-RevelaAI.cmd from File Explorer.
 
