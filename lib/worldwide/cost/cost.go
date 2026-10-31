@@ -8,7 +8,7 @@ type Quote struct {
 	Currency string `json:"currency"`
 	Amount float64 `json:"amount"`
 	Verified bool `json:"verified"`
-	RateToBase float64 `json:"rate_to_base,omitempty"`
+	RateToBase float64 `json:"rate_to_base,omitempty"` // base-currency units per one unit of Currency
 }
 type Choice struct { Quote Quote `json:"quote"`; Comparable bool `json:"comparable"`; Reason string `json:"reason"` }
 func BestQuote(quotes []Quote) (Choice,error) {
