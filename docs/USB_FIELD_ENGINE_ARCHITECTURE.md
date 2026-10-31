@@ -126,3 +126,11 @@ Core-TWO uses local module replacements for Core-ONE, Core-ZERO and the worldwid
 ## 9. Acceptance rule
 
 A release is not "fully working" until source tests, race tests where applicable, static analysis, cross-platform builds, USB package smoke tests, core health checks, Guardian-negative tests and Meta Engineer hand-off tests all pass. Each result must be tied to a commit SHA and platform.
+
+## 9. Signed offline vulnerability intelligence
+
+The native `vulnfeed` package accepts a bounded JSON envelope whose payload is signed with Ed25519. The operator supplies the public key and a separately obtained SHA-256 fingerprint. The engine validates the fingerprint, signature, feed schema and expiry before reading advisories. It stores/returns the payload digest, publisher, feed ID, issue time and expiry in assessment output.
+
+The initial package manifest schema is `revela-package-manifest/1`, with Package URL coordinates and exact version strings. The matcher intentionally avoids guessing semver ranges, distro backports, aliases and transitive dependency versions. It emits one local-scope finding per exact match; no package is changed. The feed verification and exact matching code have offline unit tests for valid signatures, bad signatures, expired feeds, wrong fingerprints, tampering, malformed contracts, symlink/size handling and exact package matching.
+
+This is a signed-snapshot foundation, not yet a full OSV/CVE mirror, CycloneDX/SPDX parser, dependency resolver, live update service or comprehensive vulnerability scanner. The trusted publisher and key rotation process must be operated and independently verified by the product owner before customer use.
