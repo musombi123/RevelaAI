@@ -304,3 +304,54 @@ func TestVulnerabilityScanRequiresAuthorizationAndTrustedFingerprint(t *testing.
 		t.Fatal("scan must reject an untrusted feed fingerprint")
 	}
 }
+
+func TestManifestImportCreatesLocalManifestWithoutChangingSource(t *testing.T) {
+	root := t.TempDir()
+	input := filepath.Join(root, "source-bom.json")
+	output := filepath.Join(root, "package-manifest.json")
+	sbom := []byte(`{
+		"bomFormat":"CycloneDX",
+		"specVersion":"1.7",
+		"metadata":{
+			"timestamp":"2026-10-31T12:00:00Z",
+			"tools":{"components":[{"name":"fixture-sbom","version":"1.0"}]}
+		},
+		"components":[
+			{"type":"library","name":"example-lib","version":"1.2.3","purl":"pkg:npm/example-lib@1.2.3"},
+			{"type":"library","name":"missing-purl","version":"1.0.0"}
+		]
+	}`)
+	if err := os.WriteFile(input, sbom, 0600); err != nil { t.Fatal(err) }
+	before, err := os.ReadFile(input)
+	if err != nil { t.Fatal(err) }
+	if err := runManifestImport([]string{"import","--format","cyclonedx","--file",input,"--out",output,"--authorized"}); err != nil {
+		t.Fatalf("manifest import failed: %v", err)
+	}
+	after, err := os.ReadFile(input)
+	if err != nil { t.Fatal(err) }
+	if string(before) != string(after) { t.Fatal("source SBOM was modified") }
+	data, err := os.ReadFile(output)
+	if err != nil { t.Fatal(err) }
+	manifest, err := vulnfeed.ParseManifest(data)
+	if err != nil { t.Fatalf("generated manifest is invalid: %v", err) }
+	if len(manifest.Packages) != 1 || manifest.Packages[0].PackageURL != "pkg:npm/example-lib" {
+		t.Fatalf("unexpected package manifest: %+v", manifest)
+	}
+	if err := runManifestImport([]string{"import","--format","cyclonedx","--file",input,"--out",output,"--authorized"}); err == nil {
+		t.Fatal("manifest import must not overwrite an existing output")
+	}
+}
+
+func TestManifestImportRequiresGuardianAuthorization(t *testing.T) {
+	input := filepath.Join(t.TempDir(), "sbom.json")
+	if err := os.WriteFile(input, []byte(`{"bomFormat":"CycloneDX","specVersion":"1.7","metadata":{"timestamp":"2026-10-31T12:00:00Z"},"components":[{"name":"pkg","version":"1.0","purl":"pkg:npm/pkg@1.0"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "manifest.json")
+	if err := runManifestImport([]string{"import","--format","cyclonedx","--file",input,"--out",output}); err == nil {
+		t.Fatal("manifest import must require explicit authorisation")
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatal("denied import must not create an output manifest")
+	}
+}
