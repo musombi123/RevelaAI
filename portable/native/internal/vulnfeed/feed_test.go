@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -95,4 +97,35 @@ func TestMatchIsExactAndDoesNotGuessVersionRanges(t *testing.T) {
 
 func TestParsePublicKeyRejectsInvalidKey(t *testing.T) {
 	if _, err := ParsePublicKey([]byte("not a public key")); err == nil { t.Fatal("invalid public key must be rejected") }
+}
+
+func TestStrictJSONRejectsUnknownFieldsAndTrailingValues(t *testing.T) {
+	var envelope Envelope
+	if err := decodeStrict([]byte(`{"schema_version":"x","extra":true}`), &envelope); err == nil {
+		t.Fatal("unknown fields must be rejected")
+	}
+	if err := decodeStrict([]byte(`{"schema_version":"x"} {}`), &envelope); err == nil {
+		t.Fatal("trailing JSON values must be rejected")
+	}
+}
+
+func TestReadRegularFileRejectsSymlinksAndOversizedFiles(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "target.json")
+	if err := os.WriteFile(target, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadRegularFile(target, 20); err != nil {
+		t.Fatalf("regular bounded file should be readable: %v", err)
+	}
+	if _, err := ReadRegularFile(target, 3); err == nil {
+		t.Fatal("oversized file must be rejected")
+	}
+	link := filepath.Join(root, "link.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink is unavailable on this platform: %v", err)
+	}
+	if _, err := ReadRegularFile(link, 20); err == nil {
+		t.Fatal("symlink input must be rejected")
+	}
 }
