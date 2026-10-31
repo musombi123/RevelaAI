@@ -178,13 +178,16 @@ jobs:
         run: |
           find portable/bin -type f -print0 | sort -z | xargs -0 sha256sum > portable/bin/SHA256SUMS.txt
 
-      - name: Upload native USB binaries
+      - name: Assemble USB payload artifact with portable-relative paths
+        run: |
+          mkdir -p dist/native-bundle
+          cp -a portable/bin portable/runtime-source dist/native-bundle/
+
+      - name: Upload native USB binaries and runtime source
         uses: actions/upload-artifact@v4
         with:
           name: revela-field-engine-native-binaries
-          path: |
-            portable/bin/
-            portable/runtime-source/
+          path: dist/native-bundle/
           if-no-files-found: error
           retention-days: 14
 
