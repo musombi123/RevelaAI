@@ -96,7 +96,11 @@ func main() {
 	case "vuln":
 		err = runVulnerabilityScan(os.Args[2:])
 	case "manifest":
-		err = runManifestImport(os.Args[2:])
+		if len(os.Args) > 2 && os.Args[2] == "collect" {
+			err = runManifestCollect(os.Args[3:])
+		} else {
+			err = runManifestImport(os.Args[2:])
+		}
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -129,6 +133,8 @@ Commands:
                                Send one finding to Meta Engineer (REVELA_ADMIN_BEARER required)
   feed verify --file FEED --public-key KEY --fingerprint SHA256
                                Verify an offline Ed25519-signed advisory feed
+  manifest collect --out MANIFEST --authorized
+                               Read installed packages from the local Windows/Linux package database
   manifest import --format cyclonedx|spdx-json --file SBOM --out MANIFEST --authorized
                                Import a CycloneDX or SPDX JSON SBOM without modifying it
   vuln scan --manifest FILE --feed FILE --public-key KEY --fingerprint SHA256 --authorized
@@ -344,6 +350,56 @@ func writeManifest(path string, manifest vulnfeed.Manifest) error {
 		return err
 	}
 	return file.Close()
+}
+
+
+func runManifestCollect(args []string) error {
+	fs := flag.NewFlagSet("manifest collect", flag.ContinueOnError)
+	outputPath := fs.String("out", "", "new package-manifest JSON output path (must not already exist)")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to inspect this computer's installed-software metadata")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if strings.TrimSpace(*outputPath) == "" {
+		return errors.New("--out is required")
+	}
+	snapshot, err := inventory.CollectInstalledPackages()
+	if err != nil {
+		return err
+	}
+	manifest := vulnfeed.Manifest{
+		SchemaVersion: vulnfeed.ManifestSchema,
+		GeneratedAt: snapshot.GeneratedAt,
+		Source: snapshot.Source,
+		Packages: make([]vulnfeed.Package, 0, len(snapshot.Packages)),
+	}
+	for _, item := range snapshot.Packages {
+		manifest.Packages = append(manifest.Packages, vulnfeed.Package{
+			Ecosystem: item.Ecosystem,
+			Name: item.Name,
+			Version: item.Version,
+			PackageURL: item.PackageURL,
+		})
+	}
+	if err := writeManifest(*outputPath, manifest); err != nil {
+		return err
+	}
+	return emit(map[string]any{
+		"status": "local_package_inventory_complete",
+		"manifest_file": *outputPath,
+		"source": snapshot.Source,
+		"generated_at": snapshot.GeneratedAt,
+		"packages_collected": len(snapshot.Packages),
+		"packages_skipped": snapshot.Skipped,
+		"warnings": snapshot.Warnings,
+		"host_changes": false,
+		"network_requests": false,
+		"guardian": decision,
+	})
 }
 
 func runManifestImport(args []string) error {
@@ -1065,6 +1121,7 @@ func runMenu() error {
 		fmt.Println("7) Verify a signed offline vulnerability feed")
 		fmt.Println("8) Scan a package manifest against the trusted offline feed")
 		fmt.Println("9) Import a CycloneDX or SPDX software bill of materials")
+		fmt.Println("10) Collect installed-software inventory from this host")
 		fmt.Println("0) Exit")
 		fmt.Print("Select: ")
 		value, err := reader.ReadString('\n')
@@ -1149,6 +1206,16 @@ func runMenu() error {
 			if readErr != nil { return readErr }
 			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
 			err := runManifestImport([]string{"import", "--format", strings.TrimSpace(format), "--file", strings.TrimSpace(sbomPath), "--out", strings.TrimSpace(manifestPath), "--authorized"})
+			if err != nil { fmt.Println(err) }
+		case "10":
+			fmt.Print("New manifest output path (must not exist): ")
+			output, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to read installed-software metadata from this computer: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			err := runManifestCollect([]string{"--out", strings.TrimSpace(output), "--authorized"})
 			if err != nil { fmt.Println(err) }
 		case "0":
 			return nil
