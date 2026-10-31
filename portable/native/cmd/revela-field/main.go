@@ -3,13 +3,16 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -17,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/musombi123/revela-field-engine/internal/contract"
 	"github.com/musombi123/revela-field-engine/internal/guardian"
 	"github.com/musombi123/revela-field-engine/internal/inventory"
 	"github.com/musombi123/revela-field-engine/internal/simulate"
@@ -75,6 +79,8 @@ func main() {
 		err = runGuardian(os.Args[2:])
 	case "core-status":
 		err = runCoreStatus()
+	case "sync":
+		err = runSync(os.Args[2:])
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -102,6 +108,8 @@ Commands:
   guardian --action ACTION --scope local|lab --authorized
                                Evaluate a request using the fail-closed policy
   core-status                  Probe only the local ZERO/ONE/TWO health endpoints
+  sync --finding FILE --url ORIGIN
+                               Send one finding to Meta Engineer (REVELA_ADMIN_BEARER required)
   version                      Print version
 
 Safe simulation scenarios:
@@ -245,11 +253,19 @@ func runAudit(args []string) error {
 func runSimulate(args []string) error {
 	fs := flag.NewFlagSet("simulate", flag.ContinueOnError)
 	name := fs.String("scenario", "", "one of the documented synthetic scenarios")
+	findingOut := fs.String("finding-out", "", "optional path to save only the versioned finding JSON for later Meta Engineer sync")
 	if err := fs.Parse(args); err != nil { return err }
 	decision := guardian.Evaluate(guardian.Request{Action:"adversary_emulation", Scope:"lab", Authorized:true})
 	if !decision.Allowed { return errors.New(decision.Reason) }
 	report, err := simulate.Run(*name)
 	if err != nil { return err }
+	if strings.TrimSpace(*findingOut) != "" {
+		data, marshalErr := json.MarshalIndent(report.Finding, "", "  ")
+		if marshalErr != nil { return marshalErr }
+		if writeErr := os.WriteFile(*findingOut, append(data, '\\n'), 0600); writeErr != nil {
+			return fmt.Errorf("write finding export: %w", writeErr)
+		}
+	}
 	return emit(map[string]any{"guardian":decision, "report":report})
 }
 
@@ -263,6 +279,115 @@ func runGuardian(args []string) error {
 	if err := emit(result); err != nil { return err }
 	if !result.Allowed { return errors.New("Guardian denied the requested action") }
 	return nil
+}
+
+
+func validateSyncOrigin(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("URL must be a clean HTTPS origin or a loopback HTTP origin")
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return "", errors.New("provide the API origin only; the Field Engine appends the Meta Engineer route")
+	}
+	host := strings.Trim(parsed.Hostname(), "[]")
+	loopback := strings.EqualFold(host, "localhost")
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		loopback = true
+	}
+	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && loopback) {
+		return "", errors.New("remote Meta Engineer connections require HTTPS; plain HTTP is allowed only for loopback testing")
+	}
+	if parsed.Scheme != "https" && !loopback {
+		return "", errors.New("non-loopback Meta Engineer host must use HTTPS")
+	}
+	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func runSync(args []string) error {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	findingPath := fs.String("finding", "", "path to a single Field Engine finding JSON file")
+	origin := fs.String("url", "", "RevelaAI API origin, e.g. https://revelaai.example")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*findingPath) == "" {
+		return errors.New("--finding is required")
+	}
+	if strings.TrimSpace(*origin) == "" {
+		return errors.New("--url is required")
+	}
+	token := strings.TrimSpace(os.Getenv("REVELA_ADMIN_BEARER"))
+	if token == "" || strings.ContainsAny(token, "\\r\\n") {
+		return errors.New("set REVELA_ADMIN_BEARER to an existing authorised RevelaCode administrator bearer session")
+	}
+	base, err := validateSyncOrigin(*origin)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(*findingPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 65536 {
+		return errors.New("finding must be a regular JSON file no larger than 64 KiB")
+	}
+	data, err := os.ReadFile(*findingPath)
+	if err != nil {
+		return fmt.Errorf("read finding: %w", err)
+	}
+	var finding contract.Finding
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&finding); err != nil {
+		return fmt.Errorf("decode finding contract: %w", err)
+	}
+	if finding.SchemaVersion != contract.SchemaVersion || finding.Source != "revela-field-engine" ||
+		!strings.HasPrefix(finding.ID, "field-") || finding.Title == "" ||
+		finding.Target == "" || finding.Recommendation == "" {
+		return errors.New("finding does not match the supported Field Engine contract")
+	}
+	if (finding.Simulated && finding.Scope != "lab") || (!finding.Simulated && finding.Scope != "local") {
+		return errors.New("finding scope does not match its simulated/observed state")
+	}
+	if len(finding.Evidence) > 50 || len(finding.Title) > 240 || len(finding.Summary) > 4000 {
+		return errors.New("finding exceeds the supported evidence or text limits")
+	}
+
+	endpoint := base + "/api/meta-engineer/fieldkit/findings"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create Meta Engineer request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{
+		Timeout: 12 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Meta Engineer sync failed: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 16385))
+	if readErr != nil {
+		return fmt.Errorf("read Meta Engineer response: %w", readErr)
+	}
+	if len(responseBody) > 16384 {
+		return errors.New("Meta Engineer response exceeded the 16 KiB limit")
+	}
+	if resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("Meta Engineer rejected the finding (HTTP %d); verify administrator access and the API deployment", resp.StatusCode)
+	}
+	return emit(map[string]any{
+		"status": "submitted_for_review",
+		"http_status": resp.StatusCode,
+		"finding_id": finding.ID,
+		"simulated": finding.Simulated,
+		"repair_executed": false,
+		"response": strings.TrimSpace(string(responseBody)),
+	})
 }
 
 func runCoreStatus() error {
