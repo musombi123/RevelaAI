@@ -1,6 +1,6 @@
 # RevelaAI USB Field Engine
 
-**Version:** 0.3.0 foundation  
+**Version:** 0.3.0 foundation
 **Purpose:** Portable, model-free system inspection, evidence triage and controlled defensive validation.
 
 The primary field runtime is a precompiled Go application. The native commands do not require Ollama, a cloud model, a Go compiler or third-party Go modules on the target computer. The existing Python Field Kit remains as a companion for case work, binary inspection, custody records, secret-pattern review and offline notes.
