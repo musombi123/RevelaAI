@@ -156,7 +156,7 @@ services:
       - key: GENESIS_TRUST_PROXY_TLS
         value: "true"
       - key: GENESIS_SIGNING_KEY
-        sync: false
+        generateValue: true
       - key: GENESIS_OWNER_APPROVAL_TOKEN
         sync: false
       - key: GENESIS_ACTION_APPROVAL_TOKEN
