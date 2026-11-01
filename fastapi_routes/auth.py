@@ -154,13 +154,13 @@ def resolve_revelacode_user(
     return user_id, None
 
 
-def authenticate_identity(
+def authenticate_platform_identity(
     authorization: str,
     headers: Mapping[str, str],
     payload: Mapping[str, Any] | None = None,
     path_user_id: str = "",
 ) -> tuple[ObjectId | None, str | None, JSONResponse | None]:
-    """Return the authenticated Mongo user ID and safe error response."""
+    """Return the authoritative RevelaCode identity for Academy progress."""
     header = authorization or _header_value(headers, "authorization")
     user_id, error = resolve_revelacode_user(header)
     if error:
