@@ -19,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from ai.ai_client import get_image_provider_status
 from ai.global_brain_adapter import build_global_context
 from ai.hub_prompts import HUB_LABELS, get_identity_answer
 from ai.intent_router import classify_intent
@@ -38,7 +39,7 @@ from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 from services.runtime_config import (
     MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
-    configured_image_model, get_active_text_provider,
+    get_active_text_provider,
 )
 
 router = APIRouter(tags=["AI"])
@@ -180,8 +181,8 @@ def _image_response(
         },
         sources=[],
         meta={
-            "provider": "huggingface" if asset["asset_type"] == "png" else "huggingface-svg",
-            "model": configured_image_model() if asset["asset_type"] == "png" else None,
+            "provider": "pollinations" if asset["asset_type"] == "png" else "revelaai-svg",
+            "model": get_image_provider_status().get("model") if asset["asset_type"] == "png" else None,
             "build_id": REVELAAI_BUILD_ID,
             "image_engine": asset["image_plan"].get("engine"),
             "engine_version": REVELAAI_IMAGE_ENGINE_VERSION,
