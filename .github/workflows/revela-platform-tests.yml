@@ -18,7 +18,9 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt "pytest>=8,<10"
       - name: Compile all new Python modules
-        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor core_inspector ai/core_mesh.py ai/tool_registry.py ai/operator_tool_dispatch.py services/ai_service.py fastapi_routes/ai.py fastapi_routes/chat.py fastapi_routes/core_mesh.py
+        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor core_inspector ai/core_mesh.py ai/tool_registry.py ai/operator_tool_dispatch.py services/ai_service.py services/security_academy_catalog.py services/security_academy.py fastapi_routes/ai.py fastapi_routes/chat.py fastapi_routes/core_mesh.py fastapi_routes/security_academy.py
+      - name: Test reverse-engineering Security Academy catalog, grading and guardrails
+        run: python -m pytest -q tests/test_security_academy.py
       - name: Test direct operator tool dispatch and Guardian safety gates
         run: python -m pytest -q tests/test_operator_tool_dispatch.py
       - name: Import FastAPI and verify route registration
