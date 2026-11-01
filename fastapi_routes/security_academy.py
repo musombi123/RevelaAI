@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from fastapi_routes.auth import authenticate_identity
+from fastapi_routes.auth import authenticate_platform_identity
 from services.security_academy import (
     complete_lesson,
     get_course_detail,
@@ -23,7 +23,7 @@ logger = logging.getLogger("revelaai.security_academy")
 
 
 def _authenticate(request: Request, payload: dict[str, Any] | None = None):
-    identity, user_id, error = authenticate_identity(
+    identity, user_id, error = authenticate_platform_identity(
         request.headers.get("authorization", ""),
         request.headers,
         payload or {},
@@ -57,7 +57,7 @@ def _storage_error() -> JSONResponse:
 
 @router.get("/courses")
 async def academy_courses(request: Request):
-    identity, _, error = _authenticate(request)
+    identity, _, error = await run_in_threadpool(_authenticate, request)
     if error:
         return error
     try:
@@ -73,7 +73,7 @@ async def academy_courses(request: Request):
 
 @router.get("/progress")
 async def academy_progress(request: Request):
-    identity, _, error = _authenticate(request)
+    identity, _, error = await run_in_threadpool(_authenticate, request)
     if error:
         return error
     try:
@@ -86,7 +86,7 @@ async def academy_progress(request: Request):
 
 @router.get("/courses/{course_id}")
 async def academy_course_detail(course_id: str, request: Request):
-    identity, _, error = _authenticate(request)
+    identity, _, error = await run_in_threadpool(_authenticate, request)
     if error:
         return error
     try:
@@ -104,7 +104,7 @@ async def academy_course_detail(course_id: str, request: Request):
 
 @router.post("/courses/{course_id}/lessons/{lesson_id}/complete")
 async def academy_complete_lesson(course_id: str, lesson_id: str, request: Request):
-    identity, _, error = _authenticate(request)
+    identity, _, error = await run_in_threadpool(_authenticate, request)
     if error:
         return error
     try:
@@ -133,7 +133,7 @@ async def academy_submit_quiz(course_id: str, request: Request):
             {"status": "error", "error": {"code": "invalid_json", "message": "Submit an answers object."}},
             status_code=400,
         )
-    identity, _, error = _authenticate(request, body)
+    identity, _, error = await run_in_threadpool(_authenticate, request, body)
     if error:
         return error
     try:
