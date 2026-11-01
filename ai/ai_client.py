@@ -759,15 +759,17 @@ def validate_gemini_models() -> dict[str, Any]:
             clean = str(model or "").strip().removeprefix("models/")
             if clean and clean not in candidates:
                 candidates.append(clean)
-        selected = next((model for model in candidates if model in valid), None)
+        valid_candidates = [model for model in candidates if model in valid]
+        selected = valid_candidates[0] if valid_candidates else None
         if selected:
             GEMINI_MODEL = selected
             GEMINI_FALLBACK_MODEL = next(
-                (model for model in candidates if model in valid and model != selected),
-                GEMINI_FALLBACK_MODEL,
+                (model for model in valid_candidates if model != selected),
+                "",
             )
             result["model_valid"] = True
             result["selected_model"] = selected
+            result["fallback_model"] = GEMINI_FALLBACK_MODEL or None
         else:
             print("GEMINI ListModels reachable, but neither configured model is available")
         print(

@@ -121,6 +121,26 @@ class GeminiRoutingTests(unittest.TestCase):
             "I can help assess your security controls and incident response plan."
         ))
 
+
+    def test_mvi_rule_engine_fallback_is_not_counted_as_generated_answer(self):
+        with (
+            patch.object(ai_client, "TEXT_PROVIDER_ORDER", ["mvi"]),
+            patch.object(ai_client, "_provider_enabled", return_value=True),
+            patch.object(
+                ai_client,
+                "_request_mvi",
+                side_effect=ai_client.AIClientError(
+                    "MVI returned its non-generative rule-engine fallback.",
+                    provider="mvi",
+                    error_code="mvi_rule_engine_fallback",
+                ),
+            ),
+        ):
+            result = ai_client.ask_hf("Explain a technical topic.")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_code"], "mvi_rule_engine_fallback")
+
     def test_configured_gemini_precedes_mvi_even_if_env_lists_mvi_first(self):
         with (
             patch.object(ai_client, "TEXT_PROVIDER_ORDER", ["mvi", "gemini"]),

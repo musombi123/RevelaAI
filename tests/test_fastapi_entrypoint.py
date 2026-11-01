@@ -128,6 +128,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert schema["info"]["title"] == "RevelaAI API"
     assert "/api/chat" in schema["paths"]
     assert "/api/research" in schema["paths"]
+    assert "/api/brain/status" in schema["paths"]
     assert "/api/security-academy/courses" in schema["paths"]
     assert "/api/security-academy/courses/{course_id}" in schema["paths"]
     assert "/api/security-academy/progress" in schema["paths"]

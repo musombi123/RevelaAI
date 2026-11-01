@@ -11,6 +11,7 @@ import hashlib
 import os
 import platform
 import re
+from pathlib import Path
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -91,19 +92,33 @@ def _now() -> str:
 
 
 def capability_inventory() -> dict[str, Any]:
-    """Inventory known subsystems and distinguish code presence from runtime proof."""
+    """Inventory Python and native core components without claiming liveness."""
     modules = {
         "brain_os": "revelai.core.brain_os",
         "orchestrator": "ai.orchestrator",
         "adaptive_hub_router": "ai.intent_router",
         "global_brain_adapter": "ai.global_brain_adapter",
+        "text_provider_client": "ai.ai_client",
+        "ecosystem_registry": "ai.ecosystem.registry",
+        "core_mesh_adapter": "ai.core_mesh",
+        "conversation_store": "services.conversation_store",
+        "memory_service": "services.memory_service",
+        "memory_store": "services.memory_store",
         "self_knowledge_manifest": "revelai.core.agi_manifest",
-        "meta_engineer": "meta_engineer.introspector",
+        "core_auditor": "core_auditor.ledger",
+        "core_billing": "core_billing.service",
+        "core_evolve": "core_evolve.engine",
+        "core_foundry": "core_foundry.factory.foundry_builder",
+        "core_inspector": "core_inspector.inspector",
+        "core_meter": "core_meter.meter",
+        "core_migrate": "core_migrate.service",
+        "core_seed": "core_seed.seed_runner",
+        "core_uncopyable": "core_uncopyable.recipe_lock",
         "defensive_shield": "revelai.sci_core.defensive_shield",
         "disaster_diagnostics": "revelai.sci_core.disaster_manager",
         "research_engine": "revelai.sci_core.research_engine",
     }
-    items = {}
+    items: dict[str, dict[str, Any]] = {}
     for name, module in modules.items():
         try:
             present = importlib.util.find_spec(module) is not None
@@ -117,20 +132,72 @@ def capability_inventory() -> dict[str, Any]:
             "runtime_healthy": None,
             "status": "present_unverified" if present else "missing",
         }
-    items["text_provider"] = {
-        "module": "ai.ai_client",
-        "implemented_in_source": True,
-        "configured": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")),
-        "tested": None,
-        "runtime_healthy": None,
-        "status": "configured_unverified" if (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")) else "configuration_unknown_or_missing",
+
+    root = Path(__file__).resolve().parents[2]
+    native_sources = {
+        "core_zero": root / "core-zero" / "cmd" / "usect-zero" / "main.go",
+        "core_one_genesis": root / "core-one" / "cmd" / "genesis" / "main.go",
+        "core_two_infinite_mind": root / "core-two" / "cmd" / "revela-mind" / "main.go",
     }
+    native_components = {
+        name: {
+            "source_path": str(path.relative_to(root)),
+            "implemented_in_source": path.is_file(),
+            "configured": None,
+            "tested": None,
+            "runtime_healthy": None,
+            "status": "present_unverified" if path.is_file() else "missing",
+        }
+        for name, path in native_sources.items()
+    }
+
+    try:
+        from ai.ai_client import get_text_provider_status
+        provider_status = get_text_provider_status()
+        configured_providers = provider_status.get("providers", {})
+        if not isinstance(configured_providers, dict):
+            configured_providers = {}
+        enabled_names = [
+            name for name, item in configured_providers.items()
+            if isinstance(item, dict) and item.get("enabled") is True
+        ]
+        validation = provider_status.get("gemini_model_validation", {})
+        gemini_validated = (
+            isinstance(validation, dict)
+            and validation.get("reachable") is True
+            and validation.get("model_valid") is True
+        )
+        items["text_provider"] = {
+            "module": "ai.ai_client",
+            "implemented_in_source": True,
+            "configured": bool(enabled_names),
+            "tested": gemini_validated,
+            "runtime_healthy": None,
+            "enabled_providers": enabled_names,
+            "status": "configured_unverified" if enabled_names else "not_configured",
+            "note": "A configured provider is not proof that a live generation request succeeded.",
+        }
+    except Exception as exc:
+        items["text_provider"] = {
+            "module": "ai.ai_client",
+            "implemented_in_source": True,
+            "configured": False,
+            "tested": False,
+            "runtime_healthy": False,
+            "status": "diagnostic_failed",
+            "error_type": type(exc).__name__,
+        }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": _now(),
         "runtime": {"python": platform.python_version(), "platform": platform.system()},
         "capabilities": items,
-        "interpretation": "Source presence and configuration are not proof of successful live operation.",
+        "native_cores": native_components,
+        "interpretation": (
+            "Source presence, credentials and model-list validation are separate evidence levels. "
+            "Only a successful live operation establishes runtime health."
+        ),
     }
 
 
@@ -539,11 +606,27 @@ def diagnose_and_recover() -> dict[str, Any]:
     try:
         from ai.ai_client import get_text_provider_status
         provider = get_text_provider_status()
-        # Never echo provider configuration payloads: they may grow to include
-        # environment-derived details. Report only the provider-status shape.
-        provider_configured = bool(provider)
-        checks.append({"component": "text_provider", "status": "configured_unverified" if provider_configured else "degraded",
-                       "evidence": "provider_status_available" if provider_configured else "provider_not_confirmed"})
+        providers = provider.get("providers", {}) if isinstance(provider, dict) else {}
+        provider_configured = any(
+            isinstance(item, dict) and item.get("enabled") is True
+            for item in providers.values()
+        ) if isinstance(providers, dict) else False
+        gemini = providers.get("gemini", {}) if isinstance(providers, dict) else {}
+        gemini_validation = provider.get("gemini_model_validation", {}) if isinstance(provider, dict) else {}
+        checks.append({
+            "component": "text_provider",
+            "status": "configured_unverified" if provider_configured else "degraded",
+            "evidence": "provider_enabled_configuration_present" if provider_configured else "no_enabled_text_provider",
+            "active_provider_candidates": [
+                name for name, item in providers.items()
+                if isinstance(item, dict) and item.get("enabled") is True
+            ] if isinstance(providers, dict) else [],
+            "gemini_model_list_validated": bool(
+                isinstance(gemini_validation, dict)
+                and gemini_validation.get("reachable") is True
+                and gemini_validation.get("model_valid") is True
+            ),
+        })
     except Exception as exc:
         checks.append({"component": "text_provider", "status": "degraded", "evidence": type(exc).__name__})
     overall = "healthy" if checks and all(item["status"] == "healthy" for item in checks) else "degraded_or_unverified"

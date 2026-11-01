@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from ai.ai_client import get_text_provider_status, hf_configured
+from ai.ai_client import get_image_provider_status, get_text_provider_status, hf_configured
 
 load_dotenv()
 logger = logging.getLogger("revelaai.runtime")
@@ -51,11 +51,14 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 
 
 def configured_image_model() -> str:
-    """Read-only image model reporting; ai.ai_client owns actual provider routing."""
-    return (
-        os.getenv("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-dev").strip()
-        or "black-forest-labs/FLUX.1-dev"
-    )
+    """Report the model actually selected by ai.ai_client's image provider."""
+    try:
+        status = get_image_provider_status()
+        model = status.get("model") if isinstance(status, dict) else None
+        return str(model).strip() if model else ""
+    except Exception as exc:
+        logger.warning("Could not resolve image provider model | error_type=%s", type(exc).__name__)
+        return ""
 
 
 def get_revelaai_text_status() -> dict[str, Any]:
@@ -76,11 +79,21 @@ def get_active_text_provider() -> str:
     providers = status.get("providers", {})
     if not isinstance(order, list) or not isinstance(providers, dict):
         return "none"
+    aliases = {
+        "google": "gemini", "google-ai": "gemini", "googleai": "gemini",
+        "hf": "huggingface", "hugging-face": "huggingface",
+        "mvi-ai": "mvi", "mvi_ai": "mvi",
+    }
+    # Mirror ask_hf(): configured Gemini always precedes legacy provider order.
+    gemini = providers.get("gemini", {})
+    if isinstance(gemini, dict) and gemini.get("enabled") is True:
+        return "gemini"
     for value in order:
         name = str(value or "").strip().lower()
-        info = providers.get(name, {})
-        if isinstance(info, dict) and info.get("enabled", False):
-            return name
+        canonical = aliases.get(name, name)
+        info = providers.get(canonical, {})
+        if isinstance(info, dict) and info.get("enabled") is True:
+            return canonical
     return "none"
 
 
@@ -90,7 +103,12 @@ def get_active_text_model() -> str | None:
     providers = status.get("providers", {})
     if not isinstance(providers, dict):
         return None
-    info = providers.get(provider, {})
+    canonical = {
+        "hf": "huggingface", "hugging-face": "huggingface",
+        "google": "gemini", "google-ai": "gemini", "googleai": "gemini",
+        "mvi-ai": "mvi", "mvi_ai": "mvi",
+    }.get(provider, provider)
+    info = providers.get(canonical, {})
     if not isinstance(info, dict):
         return None
     model = info.get("primary_model") or info.get("model")

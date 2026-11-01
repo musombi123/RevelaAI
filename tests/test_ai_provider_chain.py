@@ -30,6 +30,7 @@ def test_gemini_list_models_selects_first_available_configured_model(monkeypatch
     assert result["reachable"] is True
     assert result["model_valid"] is True
     assert result["selected_model"] == "gemini-3.1-flash-lite"
+    assert result["fallback_model"] is None
     assert client.GEMINI_MODEL == "gemini-3.1-flash-lite"
 
 

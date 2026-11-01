@@ -224,6 +224,16 @@ def ready():
         "pdf_processor": _pdf_available(),
     }
     core_ready = bool(checks["text_provider"] and checks["text_model"])
+    selected_validation = (
+        gemini_validation
+        if provider == "gemini" and isinstance(gemini_validation, dict)
+        else {}
+    )
+    readiness_evidence = (
+        "gemini_model_list_validated"
+        if selected_validation.get("reachable") is True and selected_validation.get("model_valid") is True
+        else "provider_configured_generation_not_live_tested"
+    )
     return JSONResponse(
         {
             "status": "ready" if core_ready else "degraded",
@@ -235,10 +245,85 @@ def ready():
                 "ready": core_ready,
                 "text_required": True,
                 "huggingface_multimodal_optional": True,
+            "readiness_evidence": readiness_evidence,
+            "generation_smoke_test_performed": False,
             },
         },
         status_code=200 if core_ready else 503,
     )
+
+
+@router.get("/api/brain/status")
+def brain_runtime_status():
+    """Credential-free view of the director, provider chain, ecosystem and body cores."""
+    provider_status = get_text_provider_status()
+    active_provider = get_active_text_provider()
+    active_model = get_active_text_model()
+
+    try:
+        from ai.ecosystem import ecosystem
+        ecosystem_domains = ecosystem.domains()
+    except Exception:
+        ecosystem_domains = []
+
+    try:
+        from revelai.core.brain_os import capability_inventory
+        inventory = capability_inventory()
+    except Exception:
+        inventory = {"capabilities": {}, "interpretation": "Inventory unavailable."}
+
+    try:
+        from ai.core_mesh import get_core_mesh_dashboard
+        mesh = get_core_mesh_dashboard()
+    except Exception as exc:
+        mesh = {"status": "unavailable", "error_code": type(exc).__name__, "cores": {}}
+
+    providers = provider_status.get("providers", {})
+    providers = providers if isinstance(providers, dict) else {}
+    gemini_status = providers.get("gemini", {})
+    gemini_status = gemini_status if isinstance(gemini_status, dict) else {}
+    gemini_validation = provider_status.get("gemini_model_validation", {})
+    gemini_validation = gemini_validation if isinstance(gemini_validation, dict) else {}
+
+    return {
+        "status": "success",
+        "service": "revelaai",
+        "brain": {
+            "director": "ai.orchestrator.Orchestrator",
+            "global_adapter": "ai.global_brain_adapter.build_global_context",
+            "decision_flow": [
+                "global_brain_adapter",
+                "intent_and_capability_routing",
+                "orchestrator_context_assembly",
+                "specialist_and_core_dispatch",
+                "gemini_first_text_generation",
+                "response_validation_and_memory",
+                "brain_os_outcome_telemetry",
+            ],
+            "active_text_provider": active_provider,
+            "active_text_model": active_model,
+            "text_provider_configured": active_provider != "none" and bool(active_model),
+            "gemini": {
+                "enabled": gemini_status.get("enabled") is True,
+                "model_validation": gemini_validation,
+            },
+            "provider_chain": provider_status,
+            "ecosystem_domains": ecosystem_domains,
+            "source_inventory": inventory,
+            "body_cores": mesh,
+            "safety": {
+                "tool_dispatch_is_server_side": True,
+                "signed_tool_registry_required": True,
+                "human_approval_for_consequential_changes": True,
+                "automatic_merge": False,
+                "automatic_production_mutation": False,
+            },
+            "verification_note": (
+                "Provider configuration and Gemini ListModels validation are separate evidence levels. "
+                "This endpoint does not spend tokens on a synthetic generation request."
+            ),
+        },
+    }
 
 
 @router.post("/chat")
