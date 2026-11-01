@@ -17,6 +17,9 @@ from bson.errors import InvalidId
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("revelaai.fastapi.auth")
+# Retained for compatibility with the main AI/chat memory identity adapter.
+JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
+JWT_ALGORITHM = "HS256"
 REVELACODE_BACKEND_URL = (
     os.getenv("REVELACODE_BACKEND_URL", "https://revelacode-backend.onrender.com")
     .strip()
