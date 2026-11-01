@@ -18,11 +18,13 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements.txt "pytest>=8,<10"
       - name: Compile all new Python modules
-        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor core_inspector ai/ai_client.py ai/global_brain_adapter.py ai/orchestrator.py ai/core_mesh.py ai/tool_registry.py ai/operator_tool_dispatch.py services/runtime_config.py services/ai_service.py services/image_service.py services/security_academy_catalog.py services/security_academy.py fastapi_routes/ai.py fastapi_routes/chat.py fastapi_routes/system.py fastapi_routes/core_mesh.py fastapi_routes/security_academy.py
+        run: python -m compileall -q rvx recipe mesh core_billing core_meter marketplace revela_platform core_foundry core_seed core_auditor core_inspector ai/ai_client.py ai/global_brain_adapter.py ai/orchestrator.py ai/core_mesh.py ai/tool_registry.py ai/operator_tool_dispatch.py services/runtime_config.py services/ai_service.py services/image_service.py services/security_academy_catalog.py services/security_academy.py fastapi_routes/auth.py fastapi_routes/ai.py fastapi_routes/chat.py fastapi_routes/system.py fastapi_routes/core_mesh.py fastapi_routes/security_academy.py
       - name: Test brain, Gemini-first provider chain, MVI fallback and runtime contracts
         run: python -m pytest -q tests/test_ai_provider_chain.py tests/test_gemini_routing.py tests/test_global_brain_adapter.py tests/test_ai_runtime_contracts.py
       - name: Test reverse-engineering Security Academy catalog, grading and guardrails
         run: python -m pytest -q tests/test_security_academy.py
+      - name: Test authoritative RevelaCode auth bridge for Academy and Core Mesh
+        run: python -m pytest -q tests/test_revelacode_auth_bridge.py
       - name: Test the brain director, Gemini-first provider chain and runtime inventory
         run: python -m pytest -q tests/test_ai_provider_chain.py tests/test_gemini_routing.py tests/test_global_brain_adapter.py tests/test_brain_runtime_inventory.py tests/test_fastapi_entrypoint.py
       - name: Test direct operator tool dispatch and Guardian safety gates
