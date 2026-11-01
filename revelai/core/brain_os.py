@@ -105,6 +105,8 @@ def capability_inventory() -> dict[str, Any]:
         "memory_service": "services.memory_service",
         "memory_store": "services.memory_store",
         "self_knowledge_manifest": "revelai.core.agi_manifest",
+        # Backwards-compatible inventory key retained for existing admin diagnostics.
+        "meta_engineer": "meta_engineer.introspector",
         "core_auditor": "core_auditor.ledger",
         "core_billing": "core_billing.service",
         "core_evolve": "core_evolve.engine",
