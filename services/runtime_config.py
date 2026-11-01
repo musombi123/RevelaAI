@@ -79,11 +79,21 @@ def get_active_text_provider() -> str:
     providers = status.get("providers", {})
     if not isinstance(order, list) or not isinstance(providers, dict):
         return "none"
+    aliases = {
+        "google": "gemini", "google-ai": "gemini", "googleai": "gemini",
+        "hf": "huggingface", "hugging-face": "huggingface",
+        "mvi-ai": "mvi", "mvi_ai": "mvi",
+    }
+    # Mirror ask_hf(): configured Gemini always precedes legacy provider order.
+    gemini = providers.get("gemini", {})
+    if isinstance(gemini, dict) and gemini.get("enabled") is True:
+        return "gemini"
     for value in order:
         name = str(value or "").strip().lower()
-        info = providers.get(name, {})
-        if isinstance(info, dict) and info.get("enabled", False):
-            return name
+        canonical = aliases.get(name, name)
+        info = providers.get(canonical, {})
+        if isinstance(info, dict) and info.get("enabled") is True:
+            return canonical
     return "none"
 
 
@@ -93,7 +103,12 @@ def get_active_text_model() -> str | None:
     providers = status.get("providers", {})
     if not isinstance(providers, dict):
         return None
-    info = providers.get(provider, {})
+    canonical = {
+        "hf": "huggingface", "hugging-face": "huggingface",
+        "google": "gemini", "google-ai": "gemini", "googleai": "gemini",
+        "mvi-ai": "mvi", "mvi_ai": "mvi",
+    }.get(provider, provider)
+    info = providers.get(canonical, {})
     if not isinstance(info, dict):
         return None
     model = info.get("primary_model") or info.get("model")

@@ -361,7 +361,7 @@ def generate_image_asset(
         if image is None:
 
             raise RuntimeError(
-                "Hugging Face returned no image."
+                "Pollinations returned no image."
             )
 
         filename, filepath = (

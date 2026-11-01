@@ -43,6 +43,7 @@ The backend provider status exposes model identifiers and configuration state on
 | `core_migrate` | Device enrollment, migration planning and artifact verification. |
 | `core_seed` | Licensed child provisioning and offline verification. |
 | `core_uncopyable` | Recipe, hardware identity, license and integrity gates. |
+| `services.conversation_store`, `services.memory_service`, `services.memory_store` | Bounded conversation sessions and authenticated, user-scoped Smart Memory persistence. |
 | `core` | Shared Python runtime configuration, logging and security primitives. |
 
 The ecosystem registry connects Biashara, Shamba, Elimu and Community providers through the approved RevelaCode gateway. RevelaAI must not bypass that gateway to access platform MongoDB records.

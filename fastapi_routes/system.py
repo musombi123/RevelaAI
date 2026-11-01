@@ -85,7 +85,7 @@ def capabilities():
                     "text_aware": True, "fallback": True,
                     "provider_aware": True, "server_execution": True,
                 },
-                "engines": {"raster": "huggingface", "structured_vector": "svg"},
+                "engines": {"raster": "pollinations", "structured_vector": "svg"},
                 "formats": [
                     "square", "portrait", "landscape", "wide", "story", "banner",
                     "social_portrait", "presentation", "phone",
@@ -210,7 +210,7 @@ def ready():
         "text_provider": provider != "none",
         "text_model": bool(model),
         "huggingface": hf_configured(),
-        "image_model": bool(configured_image_model()),
+        "image_model": bool(get_image_provider_status().get("enabled")),
         "online_research": _online_research_available(),
         "pdf_processor": _pdf_available(),
     }

@@ -180,7 +180,7 @@ def _image_response(
         },
         sources=[],
         meta={
-            "provider": "huggingface" if asset["asset_type"] == "png" else "huggingface-svg",
+            "provider": "pollinations" if asset["asset_type"] == "png" else "revelacode-svg",
             "model": configured_image_model() if asset["asset_type"] == "png" else None,
             "build_id": REVELAAI_BUILD_ID,
             "image_engine": asset["image_plan"].get("engine"),
