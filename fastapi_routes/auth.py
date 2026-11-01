@@ -20,6 +20,11 @@ logger = logging.getLogger("revelaai.fastapi.auth")
 # Retained for compatibility with the main AI/chat memory identity adapter.
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 JWT_ALGORITHM = "HS256"
+# Retained for the existing Meta-Engineer identity/verification contracts.
+REVELAAI_SERVICE_KEY = (
+    os.getenv("REVELAAI_SERVICE_KEY", "").strip()
+    or os.getenv("REVELACODE_VERIFY_KEY", "").strip()
+)
 REVELACODE_BACKEND_URL = (
     os.getenv("REVELACODE_BACKEND_URL", "https://revelacode-backend.onrender.com")
     .strip()
