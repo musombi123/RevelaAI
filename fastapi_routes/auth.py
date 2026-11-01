@@ -1,8 +1,9 @@
-"""Framework-independent authentication helpers for native FastAPI routes.
+"""Authentication bridge for native FastAPI routes.
 
-The signed JWT establishes identity, while RevelaCode's protected verification
-endpoint remains the authority for whether the account exists. Identity hints
-are consistency checks only and never establish identity.
+RevelaCode Backend is the authority for JWT signature, expiry, account status,
+and canonical identity. RevelaAI forwards the bearer token to the protected
+current-user endpoint and uses only the canonical ID returned by that service.
+Identity hints are consistency checks only and never establish identity.
 """
 from __future__ import annotations
 
@@ -16,16 +17,10 @@ from bson.errors import InvalidId
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("revelaai.fastapi.auth")
-JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
-JWT_ALGORITHM = "HS256"
 REVELACODE_BACKEND_URL = (
     os.getenv("REVELACODE_BACKEND_URL", "https://revelacode-backend.onrender.com")
     .strip()
     .rstrip("/")
-)
-REVELAAI_SERVICE_KEY = (
-    os.getenv("REVELAAI_SERVICE_KEY", "").strip()
-    or os.getenv("REVELACODE_VERIFY_KEY", "").strip()
 )
 try:
     VERIFY_TIMEOUT_SECONDS = max(1.0, min(15.0, float(os.getenv("REVELACODE_VERIFY_TIMEOUT_SECONDS", "4"))))
