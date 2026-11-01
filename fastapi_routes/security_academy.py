@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from fastapi_routes.auth import authenticate_identity
+from fastapi_routes.auth import authenticate_platform_identity
 from services.security_academy import (
     complete_lesson,
     get_course_detail,
@@ -23,7 +23,7 @@ logger = logging.getLogger("revelaai.security_academy")
 
 
 def _authenticate(request: Request, payload: dict[str, Any] | None = None):
-    identity, user_id, error = authenticate_identity(
+    identity, user_id, error = authenticate_platform_identity(
         request.headers.get("authorization", ""),
         request.headers,
         payload or {},
