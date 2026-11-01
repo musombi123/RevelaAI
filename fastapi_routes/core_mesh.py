@@ -932,7 +932,9 @@ async def learn_unknown_api(request: Request, country: str = "", lang: str = "")
 
 @router.get("/v1/learn/known")
 async def learn_known_api(request: Request):
-    user_id, auth_error = _resolve_user(request.headers.get("Authorization", ""))
+    user_id, auth_error = await run_in_threadpool(
+        _resolve_user, request.headers.get("Authorization", "")
+    )
     if auth_error:
         return auth_error
     if not user_id:
