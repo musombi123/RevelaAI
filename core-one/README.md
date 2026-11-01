@@ -402,7 +402,7 @@ The endpoint is a documented integration contract, not a claim that the current 
 | `GENESIS_MODEL_BASE_URL` | Enable an optional model adapter | Disabled |
 | `GENESIS_MODEL_NAME` | Model identifier | `existing-revelaai-model` |
 | `GENESIS_MODEL_API_KEY` | Server-side model credential | Empty |
-| `GENESIS_SIGNING_KEY` | Optional HMAC-SHA-256 signing key for artifact manifests | Manifest may contain hashes without an HMAC |
+| `GENESIS_SIGNING_KEY` | Base64-encoded Ed25519 32-byte seed or 64-byte private key used to sign and verify registry artifacts | Required for signed registry publication and verification |
 | `GENESIS_WORKAROUND_THRESHOLD` | Repeated workaround signals before an automatic proposal trigger | `6` |
 | `GENESIS_DEMAND_THRESHOLD` | Repeated evidence-topic hits before an automatic proposal trigger | `5` |
 | `GENESIS_MAX_CORE_FILES` | File-count threshold for routing expansion plans to `gen2/` | `5000` |
