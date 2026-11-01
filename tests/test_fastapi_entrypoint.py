@@ -309,7 +309,10 @@ def test_smart_memory_routes_require_identity() -> None:
 def test_signed_tool_execution_requires_core_mesh_operator(monkeypatch) -> None:
     monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "approved-operator")
     monkeypatch.delenv("META_ENGINEER_ADMIN_USER_IDS", raising=False)
-    monkeypatch.setattr(core_mesh_routes, "_authenticated_tool_user", lambda request: "ordinary-user")
+    async def authenticated_ordinary_user(_request):
+        return "ordinary-user"
+
+    monkeypatch.setattr(core_mesh_routes, "_authenticated_tool_user", authenticated_ordinary_user)
     called = {"execute": False}
 
     def unexpected_execution(*args, **kwargs):
@@ -333,9 +336,7 @@ def test_signed_tool_execution_requires_core_mesh_operator(monkeypatch) -> None:
 
 
 def test_core_mesh_routes_keep_authentication_boundary(monkeypatch) -> None:
-    # The test isolates invalid/missing credentials from missing server configuration.
-    monkeypatch.setattr(core_mesh_routes, "JWT_SECRET", "test-shared-secret-for-auth-boundary")
-
+    # Missing credentials are rejected before making a server-to-server call.
     response = client.get("/api/core-mesh/dashboard")
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "authentication_required"
@@ -349,11 +350,45 @@ def test_core_mesh_routes_keep_authentication_boundary(monkeypatch) -> None:
     assert known.json()["error"]["code"] == "authentication_required"
 
 
-def test_core_mesh_reports_missing_jwt_verifier_as_configuration_error(monkeypatch) -> None:
-    monkeypatch.setattr(core_mesh_routes, "JWT_SECRET", "")
-    response = client.get("/api/core-mesh/dashboard")
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "jwt_verifier_not_configured"
+def test_core_mesh_preserves_authoritative_backend_auth_error(monkeypatch) -> None:
+    from fastapi.responses import JSONResponse
+
+    monkeypatch.setattr(
+        core_mesh_routes,
+        "resolve_revelacode_user",
+        lambda _authorization: (
+            None,
+            JSONResponse(
+                {"status": "error", "error": {"code": "invalid_token", "message": "RevelaCode rejected the session."}},
+                status_code=401,
+            ),
+        ),
+    )
+    response = client.get(
+        "/api/core-mesh/dashboard",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_token"
+
+
+def test_core_mesh_accepts_user_verified_by_revelacode_backend(monkeypatch) -> None:
+    monkeypatch.setattr(
+        core_mesh_routes,
+        "resolve_revelacode_user",
+        lambda _authorization: ("507f1f77" + "bcf86cd7" + "99439011", None),
+    )
+    monkeypatch.setattr(
+        core_mesh_routes,
+        "get_core_mesh_dashboard",
+        lambda force_refresh=False: {"cores": {"zero": {"reachable": True}}},
+    )
+    response = client.get(
+        "/api/core-mesh/dashboard",
+        headers={"Authorization": "Bearer test-token"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
 
 
 
