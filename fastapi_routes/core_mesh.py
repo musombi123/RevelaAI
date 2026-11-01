@@ -5,8 +5,6 @@ import json
 import logging
 import os
 from typing import Any
-
-import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -43,6 +41,8 @@ from ai.tool_registry import (
     rollback_signed_tool,
 )
 
+from fastapi_routes.auth import resolve_revelacode_user
+
 from services.revenue_entitlements import check_entitlement
 
 from ai.unknown_learning import (
@@ -55,33 +55,9 @@ from ai.unknown_learning import (
 
 router = APIRouter(tags=["Core Mesh", "Living Brain Learning"])
 logger = logging.getLogger("revelaai.fastapi.core_mesh")
-JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
-JWT_ALGORITHM = "HS256"
-
-
-def _resolve_user(authorization: str) -> str | None:
-    """Preserve the existing Core Mesh JWT contract (identity only)."""
-    header = (authorization or "").strip()
-    parts = header.split(None, 1)
-    if (
-        not JWT_SECRET
-        or len(parts) != 2
-        or parts[0].casefold() != "bearer"
-        or not parts[1].strip()
-    ):
-        return None
-    try:
-        claims = jwt.decode(
-            parts[1].strip(),
-            JWT_SECRET,
-            algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
-        )
-    except jwt.InvalidTokenError:
-        return None
-    user_id = claims.get("sub") or claims.get("user_id") or claims.get("id")
-    user_id = str(user_id or "").strip()
-    return user_id or None
+def _resolve_user(authorization: str) -> tuple[str | None, JSONResponse | None]:
+    """Ask RevelaCode to verify the bearer token and return its canonical user ID."""
+    return resolve_revelacode_user(authorization)
 
 
 def _operator_allowed(user_id: str) -> bool:
@@ -143,7 +119,9 @@ def _operator_failure(user_id: str):
 
 
 def _core_mesh_dashboard(authorization: str, refresh: str):
-    user_id = _resolve_user(authorization)
+    user_id, auth_error = _resolve_user(authorization)
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     try:
@@ -172,7 +150,9 @@ def _core_mesh_dashboard(authorization: str, refresh: str):
 
 
 def _proposal(authorization: str, body: Any, kind: str):
-    user_id = _resolve_user(authorization)
+    user_id, auth_error = _resolve_user(authorization)
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     operator_error = _operator_failure(user_id)
@@ -218,7 +198,9 @@ def _learn_unknown(
     country_query: str,
     language_query: str,
 ):
-    user_id = _resolve_user(authorization)
+    user_id, auth_error = _resolve_user(authorization)
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     if not isinstance(body, dict):
@@ -308,7 +290,9 @@ def _learn_unknown(
 
 
 def _publish_known(authorization: str, topic_key: str, body: Any):
-    user_id = _resolve_user(authorization)
+    user_id, auth_error = _resolve_user(authorization)
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     operator_error = _operator_failure(user_id)
@@ -390,7 +374,9 @@ def _core_mesh_upstream_error(exc: CoreMeshError):
 
 
 def _authenticated_core_mesh_user(request: Request) -> str | JSONResponse:
-    user_id = _resolve_user(request.headers.get("Authorization", ""))
+    user_id, auth_error = _resolve_user(request.headers.get("Authorization", ""))
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     return user_id
@@ -695,7 +681,9 @@ def _tool_registry_error(exc: GenesisToolRegistryError):
 
 
 def _authenticated_tool_user(request: Request) -> str | JSONResponse:
-    user_id = _resolve_user(request.headers.get("Authorization", ""))
+    user_id, auth_error = _resolve_user(request.headers.get("Authorization", ""))
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     return user_id
@@ -951,7 +939,9 @@ async def learn_unknown_api(request: Request, country: str = "", lang: str = "")
 
 @router.get("/v1/learn/known")
 async def learn_known_api(request: Request):
-    user_id = _resolve_user(request.headers.get("Authorization", ""))
+    user_id, auth_error = _resolve_user(request.headers.get("Authorization", ""))
+    if auth_error:
+        return auth_error
     if not user_id:
         return _auth_failure()
     records = await run_in_threadpool(list_known)
