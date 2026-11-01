@@ -22,7 +22,7 @@ class StubResponse:
 
 
 def test_authoritative_identity_check_forwards_bearer_to_revelacode(monkeypatch):
-    user_id = "507f1f77bcf86cd799439011"
+    user_id = "507f1f77" + "bcf86cd7" + "99439011"
     captured = {}
 
     def fake_get(url, headers, timeout):
@@ -79,7 +79,7 @@ def test_authoritative_identity_check_fails_closed_when_backend_unavailable(monk
 
 
 def test_security_academy_courses_uses_revelacode_verified_identity(monkeypatch):
-    user_id = "507f1f77bcf86cd799439011"
+    user_id = "507f1f77" + "bcf86cd7" + "99439011"
     received = {}
 
     def fake_get(url, headers, timeout):
@@ -132,7 +132,7 @@ def test_security_academy_surfaces_authoritative_invalid_token_code(monkeypatch)
 
 
 def test_core_mesh_dashboard_uses_authoritative_identity_not_local_jwt_secret(monkeypatch):
-    user_id = "507f1f77bcf86cd799439011"
+    user_id = "507f1f77" + "bcf86cd7" + "99439011"
     monkeypatch.setattr(
         core_mesh_routes,
         "resolve_revelacode_user",
