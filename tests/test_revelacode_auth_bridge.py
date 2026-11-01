@@ -7,7 +7,6 @@ from asgi import app
 from fastapi_routes import auth as auth_routes
 from fastapi_routes import core_mesh as core_mesh_routes
 from fastapi_routes import security_academy as academy_routes
-from services import security_academy as academy_service
 
 
 client = TestClient(app)
@@ -101,7 +100,7 @@ def test_security_academy_courses_uses_revelacode_verified_identity(monkeypatch)
         return []
 
     monkeypatch.setattr(auth_routes.requests, "get", fake_get)
-    monkeypatch.setattr(academy_service, "list_courses", fake_list_courses)
+    monkeypatch.setattr(academy_routes, "list_courses", fake_list_courses)
 
     response = client.get(
         "/api/security-academy/courses",
