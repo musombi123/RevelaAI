@@ -65,23 +65,12 @@ def _operator_allowed(user_id: str) -> bool:
 
 
 def _auth_failure():
-    if not JWT_SECRET:
-        return JSONResponse(
-            {
-                "status": "error",
-                "error": {
-                    "code": "jwt_verifier_not_configured",
-                    "message": "JWT verification is not configured on RevelaAI. Configure the shared JWT_SECRET before retrying.",
-                },
-            },
-            status_code=503,
-        )
     return JSONResponse(
         {
             "status": "error",
             "error": {
                 "code": "authentication_required",
-                "message": "Sign in with a valid RevelaCode session to access core status.",
+                "message": "Sign in with a valid RevelaCode session to access Core Mesh.",
             },
         },
         status_code=401,
