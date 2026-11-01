@@ -362,8 +362,10 @@ def _core_mesh_upstream_error(exc: CoreMeshError):
     )
 
 
-def _authenticated_core_mesh_user(request: Request) -> str | JSONResponse:
-    user_id, auth_error = _resolve_user(request.headers.get("Authorization", ""))
+async def _authenticated_core_mesh_user(request: Request) -> str | JSONResponse:
+    user_id, auth_error = await run_in_threadpool(
+        _resolve_user, request.headers.get("Authorization", "")
+    )
     if auth_error:
         return auth_error
     if not user_id:
@@ -373,7 +375,7 @@ def _authenticated_core_mesh_user(request: Request) -> str | JSONResponse:
 
 @router.get("/api/core-mesh/genesis/status")
 async def core_mesh_genesis_status_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     try:
@@ -385,7 +387,7 @@ async def core_mesh_genesis_status_api(request: Request):
 
 @router.get("/api/core-mesh/genesis/proposals")
 async def core_mesh_genesis_proposals_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     try:
@@ -397,7 +399,7 @@ async def core_mesh_genesis_proposals_api(request: Request):
 
 @router.get("/api/core-mesh/genesis/proposals/{name}")
 async def core_mesh_genesis_proposal_api(name: str, request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -414,7 +416,7 @@ async def core_mesh_genesis_proposal_api(name: str, request: Request):
 async def core_mesh_genesis_hardware_guide_api(
     name: str, request: Request, country: str = "KE", lang: str = ""
 ):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -429,7 +431,7 @@ async def core_mesh_genesis_hardware_guide_api(
 
 @router.get("/api/core-mesh/genesis/tools/{name}/capability-plan")
 async def core_mesh_genesis_capability_plan_api(name: str, request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -444,7 +446,7 @@ async def core_mesh_genesis_capability_plan_api(name: str, request: Request):
 
 @router.post("/api/core-mesh/genesis/queue")
 async def core_mesh_genesis_queue_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     body = await _body_or_none(request)
@@ -468,7 +470,7 @@ async def core_mesh_genesis_queue_api(request: Request):
 
 @router.get("/api/core-mesh/genesis/key")
 async def core_mesh_genesis_key_info_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     try:
@@ -480,7 +482,7 @@ async def core_mesh_genesis_key_info_api(request: Request):
 
 @router.post("/api/core-mesh/genesis/key/request")
 async def core_mesh_genesis_key_request_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     body = await _body_or_none(request)
@@ -506,7 +508,7 @@ async def core_mesh_genesis_rvx_compile_api(request: Request):
     if entitlement_error is not None:
         return entitlement_error
 
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -527,7 +529,7 @@ async def core_mesh_genesis_rvx_compile_api(request: Request):
 
 @router.get("/api/core-mesh/genesis/events")
 async def core_mesh_genesis_events_api(request: Request, limit: int = 100):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -568,7 +570,7 @@ async def core_mesh_dashboard_api(request: Request, refresh: str = ""):
 
 @router.post("/api/core-mesh/genesis/invent")
 async def core_mesh_genesis_invent_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -586,7 +588,7 @@ async def core_mesh_genesis_invent_api(request: Request):
 
 @router.post("/api/core-mesh/mind/evolve")
 async def core_mesh_mind_evolve_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -604,7 +606,7 @@ async def core_mesh_mind_evolve_api(request: Request):
 
 @router.post("/api/core-mesh/mind/candidates")
 async def core_mesh_mind_candidates_api(request: Request):
-    user_id = _authenticated_core_mesh_user(request)
+    user_id = await _authenticated_core_mesh_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _operator_failure(user_id)
@@ -669,8 +671,10 @@ def _tool_registry_error(exc: GenesisToolRegistryError):
     )
 
 
-def _authenticated_tool_user(request: Request) -> str | JSONResponse:
-    user_id, auth_error = _resolve_user(request.headers.get("Authorization", ""))
+async def _authenticated_tool_user(request: Request) -> str | JSONResponse:
+    user_id, auth_error = await run_in_threadpool(
+        _resolve_user, request.headers.get("Authorization", "")
+    )
     if auth_error:
         return auth_error
     if not user_id:
@@ -711,7 +715,7 @@ def _genesis_owner_failure(user_id: str):
 
 @router.get("/api/core-mesh/tools")
 async def core_mesh_tools_api(request: Request, provider: str = ""):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     configured_order = [
@@ -742,7 +746,7 @@ async def core_mesh_tools_api(request: Request, provider: str = ""):
 
 @router.get("/api/core-mesh/tools/registry")
 async def core_mesh_tool_registry_api(request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
@@ -757,7 +761,7 @@ async def core_mesh_tool_registry_api(request: Request):
 
 @router.post("/api/core-mesh/tools/execute")
 async def core_mesh_tool_execute_api(request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
@@ -788,7 +792,7 @@ async def core_mesh_tool_execute_api(request: Request):
 
 @router.post("/api/core-mesh/tools/{name}/publish")
 async def core_mesh_tool_publish_api(name: str, request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
@@ -803,7 +807,7 @@ async def core_mesh_tool_publish_api(name: str, request: Request):
 
 @router.post("/api/core-mesh/tools/{name}/{version}/{artifact_hash}/activate")
 async def core_mesh_tool_activate_api(name: str, version: str, artifact_hash: str, request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
@@ -832,7 +836,7 @@ async def core_mesh_tool_activate_api(name: str, version: str, artifact_hash: st
 
 @router.post("/api/core-mesh/tools/{name}/{version}/{artifact_hash}/confirm")
 async def core_mesh_tool_confirm_api(name: str, version: str, artifact_hash: str, request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
@@ -864,7 +868,7 @@ async def core_mesh_tool_confirm_api(name: str, version: str, artifact_hash: str
 
 @router.post("/api/core-mesh/tools/{name}/deactivate")
 async def core_mesh_tool_deactivate_api(name: str, request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
@@ -879,7 +883,7 @@ async def core_mesh_tool_deactivate_api(name: str, request: Request):
 
 @router.post("/api/core-mesh/tools/{name}/rollback")
 async def core_mesh_tool_rollback_api(name: str, request: Request):
-    user_id = _authenticated_tool_user(request)
+    user_id = await _authenticated_tool_user(request)
     if not isinstance(user_id, str):
         return user_id
     operator_error = _approved_tool_operator(user_id)
