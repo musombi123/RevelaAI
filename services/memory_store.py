@@ -42,6 +42,9 @@ if MONGO_URI:
         _revelai_db["learnings"].create_index(
             [("userId", ASCENDING), ("createdAt", DESCENDING)]
         )
+        _revelai_db["security_course_progress"].create_index(
+            [("userId", ASCENDING), ("courseId", ASCENDING)], unique=True
+        )
     except Exception:
         logger.exception("Memory MongoDB initialization failed")
         _mongo_client = None
@@ -58,6 +61,7 @@ conversations = lambda: _collection("conversations")
 memories = lambda: _collection("memories")
 ideas = lambda: _collection("ideas")
 learnings = lambda: _collection("learnings")
+security_course_progress = lambda: _collection("security_course_progress")
 
 
 def _now() -> datetime:
