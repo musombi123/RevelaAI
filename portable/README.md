@@ -145,3 +145,55 @@ Ghidra, GNU ddrescue, The Sleuth Kit, Autopsy, TestDisk/PhotoRec, Volatility 3, 
 Cloud RevelaAI, hosted providers and any unbundled connectors remain online services. This USB release is a local-first field layer, not a complete offline clone of every RevelaAI cloud service.
 
 Remote sync is allowlisted to `revelaai.onrender.com` by default. A deployment using a different approved HTTPS hostname must explicitly configure `REVELA_FIELD_ALLOWED_SYNC_HOSTS` as a comma-separated list in the local launch environment. Only exact hostnames are accepted; custom remote ports and redirects are rejected. The Field Engine applies its Guardian sync gate before transmission.
+
+
+### Import a real SBOM before vulnerability matching
+
+The USB supports offline imports from CycloneDX JSON 1.4–1.7 and SPDX JSON 2.3:
+
+```text
+revela-field manifest import --format cyclonedx --file ./data/bom.json --out ./data/package-manifest.json --authorized
+revela-field manifest import --format spdx-json --file ./data/software.spdx.json --out ./data/package-manifest.json --authorized
+```
+
+The importer preserves the SBOM creation timestamp and tool provenance, normalizes component Package URLs by separating the version, traverses nested CycloneDX components, and deduplicates exact package/version entries. Entries missing an exact version or Package URL are counted as skipped. The output manifest must be a new path; the source SBOM is never edited.
+
+After import, run the signed-feed `vuln scan` command described below. CycloneDX XML, SPDX 3.x, direct OS package-database acquisition and dependency-range resolution are not included yet. An SBOM is only as complete and current as its producer; an empty scan is not proof of a clean system.
+
+## Signed offline vulnerability assessment
+### Collect installed software directly from the host
+
+The Field Engine can generate an initial package manifest from the local operating-system package database:
+
+```text
+revela-field manifest collect --out ./data/package-manifest.json --authorized
+```
+
+On Windows it reads the conventional uninstall registry entries from HKLM, WOW6432Node and HKCU and records only display name, version and publisher. On Linux it reads dpkg or RPM package metadata. The collector is read-only, does not contact repositories, does not install or remove packages, and creates a new manifest rather than overwriting an existing one.
+
+Coverage is intentionally limited. Windows portable applications, software not registered in the uninstall keys, drivers and per-user package-manager environments may be absent. Linux language-specific environments and software installed outside dpkg/RPM may be absent. The report includes provenance, skipped-entry counts and coverage warnings. For a richer inventory, import a CycloneDX or SPDX SBOM instead.
+
+The native collector uses bounded output buffers for package-manager/registry subprocesses and caps the collected listing at 16 MiB. It never collects install paths, documents, browser profiles, credentials or tokens.
+
+
+The native engine includes two additional commands:
+
+```text
+revela-field feed verify --file ./data/vuln-feed.json --public-key ./data/trusted-publisher.pub --fingerprint YOUR_PINNED_SHA256 --authorized
+
+revela-field vuln scan --manifest ./data/package-manifest.json --feed ./data/vuln-feed.json --public-key ./data/trusted-publisher.pub --fingerprint YOUR_PINNED_SHA256 --authorized --out-dir ./data/findings
+```
+
+The feed envelope contains a Base64 JSON payload and an Ed25519 signature. The operator supplies the publisher public key and its SHA-256 fingerprint obtained separately from a trusted channel. A public key copied from the same untrusted USB as the feed is not sufficient. The engine rejects invalid signatures, wrong key fingerprints, malformed schemas, and expired feeds.
+
+The manifest currently uses the versioned `revela-package-manifest/1` JSON format: `schema_version`, `generated_at`, `source`, and `packages[]` with `ecosystem`, `name`, `version`, and Package URL. A sample format is documented in `docs/VULNERABILITY_FEED_FORMAT.md`.
+
+Matching is deliberately exact: Package URL and version string must both match an advisory. It does not interpret version ranges, distro backports, aliases, OS vendor patch levels, or transitive dependency resolution. A zero-match result means only that this exact matcher found no entries in this particular signed snapshot; it is not proof that the device is vulnerability-free.
+
+Each match becomes a normal Field Engine finding with:
+- package-manifest and signed-feed evidence references;
+- feed ID, publisher, expiry and payload digest in the assessment report;
+- severity, advisory ID and reported fixed versions;
+- `scope=local`, `simulated=false`, and a review-only remediation recommendation.
+
+The scanner never downloads updates, installs packages, removes software, disables services or modifies the supplied manifest. Exported findings can be submitted to Meta Engineer using the normal authenticated `sync` command.

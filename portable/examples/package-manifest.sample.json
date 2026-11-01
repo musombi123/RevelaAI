@@ -1,0 +1,19 @@
+{
+  "schema_version": "revela-package-manifest/1",
+  "generated_at": "2026-10-31T12:00:00Z",
+  "source": "example-only-replace-with-approved-SBOM-exporter",
+  "packages": [
+    {
+      "ecosystem": "npm",
+      "name": "example-lib",
+      "version": "1.2.3",
+      "package_url": "pkg:npm/example-lib"
+    },
+    {
+      "ecosystem": "go",
+      "name": "example.org/example/module",
+      "version": "v1.4.0",
+      "package_url": "pkg:golang/example.org/example/module"
+    }
+  ]
+}

@@ -56,6 +56,11 @@ jobs:
           go -C core-two test -race ./...
           go -C core-two vet ./...
 
+      - name: Test and vet shared worldwide library
+        run: |
+          go -C lib/worldwide test ./...
+          go -C lib/worldwide vet ./...
+
       - name: Smoke-test the existing ZERO + Genesis + Mind composition
         shell: bash
         run: |
@@ -135,6 +140,15 @@ jobs:
           "$engine" doctor
           "$engine" simulate --scenario vpn-observation --finding-out "$RUNNER_TEMP/field-finding.json"
           test -s "$RUNNER_TEMP/field-finding.json"
+          "$engine" manifest collect --out "$RUNNER_TEMP/host-packages-linux.json" --authorized
+          python - <<'PY'
+          import json, os
+          path = os.path.join(os.environ["RUNNER_TEMP"], "host-packages-linux.json")
+          with open(path, encoding="utf-8") as f:
+              manifest = json.load(f)
+          assert manifest["schema_version"] == "revela-package-manifest/1"
+          assert manifest["packages"], "Linux package collector returned no packages"
+          PY
 
           "$engine" core-start --authorized >"$RUNNER_TEMP/field-core-start.log" 2>&1 &
           pid=$!
@@ -269,6 +283,60 @@ jobs:
           )
           foreach ($path in $required) {
             if (-not (Test-Path $path)) { throw "Required native binary missing: $path" }
+          }
+
+      - name: Smoke-test the Windows USB supervisor on loopback
+        shell: pwsh
+        run: |
+          $engine = (Resolve-Path "portable\bin\windows-amd64\revela-field.exe").Path
+          & $engine doctor
+          & $engine simulate --scenario vpn-observation --finding-out "$env:RUNNER_TEMP\field-vpn-finding.json"
+          if ($LASTEXITCODE -ne 0) { throw "Windows synthetic scenario failed." }
+
+          $manifestPath = Join-Path $env:RUNNER_TEMP "host-packages-windows.json"
+          & $engine manifest collect --out $manifestPath --authorized
+          if ($LASTEXITCODE -ne 0) { throw "Windows installed-software inventory failed." }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.schema_version -ne "revela-package-manifest/1" -or $manifest.packages.Count -lt 1) {
+            throw "Windows package inventory did not create a populated versioned manifest."
+          }
+
+          $stdout = Join-Path $env:RUNNER_TEMP "field-engine-windows.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "field-engine-windows.stderr.log"
+          $process = Start-Process -FilePath $engine -ArgumentList @("core-start", "--authorized") -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 45; $attempt++) {
+              if ($process.HasExited) {
+                throw "Windows Field Engine supervisor exited before all three core services became healthy."
+              }
+              try {
+                $zero = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:8780/v1/health"
+                $one = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:8781/v1/genesis/health"
+                $two = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:8782/v1/mind/health"
+                if ($zero.StatusCode -eq 200 -and $one.StatusCode -eq 200 -and $two.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if (-not $ready) {
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              throw "Windows USB supervisor did not bring all three cores healthy on loopback."
+            }
+            # HTTP 200 from each loopback health endpoint is the runtime assertion.
+            # Do not read the supervisor stdout file until the child process exits.
+          } finally {
+            if (-not $process.HasExited) {
+              & taskkill.exe /PID $process.Id /T /F | Out-Null
+              $process.WaitForExit()
+            }
+            if (Test-Path $stdout) { Get-Content $stdout }
+            if (Test-Path $stderr) { Get-Content $stderr }
+            Remove-Item -Recurse -Force "portable\data" -ErrorAction SilentlyContinue
           }
 
       - name: Package Windows USB Edition

@@ -58,3 +58,6 @@ jobs:
         run: python -m pytest -q tests/test_usect_capability_surface.py
       - name: Run RVX, key, license, Foundry, Seed and Auditor tests
         run: python -m pytest -q tests/test_revela_security.py tests/test_fastapi_revenue.py tests/test_mesh_receiver.py
+
+      - name: Run USECT-EVOLVE and USECT-MIGRATE policy tests
+        run: python -m pytest -q tests/test_usect_evolve_migrate.py
