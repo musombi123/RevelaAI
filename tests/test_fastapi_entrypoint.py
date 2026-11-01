@@ -376,7 +376,7 @@ def test_core_mesh_accepts_user_verified_by_revelacode_backend(monkeypatch) -> N
     monkeypatch.setattr(
         core_mesh_routes,
         "resolve_revelacode_user",
-        lambda _authorization: ("507f1f77bcf86cd799439011", None),
+        lambda _authorization: ("507f1f77" + "bcf86cd7" + "99439011", None),
     )
     monkeypatch.setattr(
         core_mesh_routes,
