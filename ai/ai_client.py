@@ -723,15 +723,17 @@ def validate_gemini_models() -> dict[str, Any]:
             clean = str(model or "").strip().removeprefix("models/")
             if clean and clean not in candidates:
                 candidates.append(clean)
-        selected = next((model for model in candidates if model in valid), None)
+        valid_candidates = [model for model in candidates if model in valid]
+        selected = valid_candidates[0] if valid_candidates else None
         if selected:
             GEMINI_MODEL = selected
             GEMINI_FALLBACK_MODEL = next(
-                (model for model in candidates if model in valid and model != selected),
-                GEMINI_FALLBACK_MODEL,
+                (model for model in valid_candidates if model != selected),
+                "",
             )
             result["model_valid"] = True
             result["selected_model"] = selected
+            result["fallback_model"] = GEMINI_FALLBACK_MODEL or None
         else:
             print("GEMINI ListModels reachable, but neither configured model is available")
         print(
@@ -749,67 +751,38 @@ def validate_gemini_models() -> dict[str, Any]:
 
 
 def get_text_provider_status() -> dict[str, Any]:
-    """
-    Return safe text-provider diagnostics.
+    """Return safe diagnostics for every configured text provider.
 
-    Secrets are never returned.
+    Configuration is not a live generation test. Gemini's ListModels
+    validation is reported separately; HF and MVI stay explicitly unverified
+    until a real request succeeds.
     """
-
     return {
-        "provider_order": list(
-            TEXT_PROVIDER_ORDER
-        ),
+        "provider_order": list(TEXT_PROVIDER_ORDER),
         "gemini_model_validation": dict(GEMINI_MODEL_VALIDATION),
         "providers": {
-
             "gemini": {
                 "enabled": bool(
-                    GEMINI_ENABLED
-                    and GEMINI_API_KEY
-                    and GEMINI_API_BASE_URL
-                    and GEMINI_MODEL
+                    GEMINI_ENABLED and GEMINI_API_KEY and GEMINI_API_BASE_URL and GEMINI_MODEL
                 ),
-                "configured": bool(
-                    GEMINI_API_KEY
-                    and GEMINI_API_BASE_URL
-                    and GEMINI_MODEL
-                ),
-                "api_key_configured": bool(
-                    GEMINI_API_KEY
-                ),
+                "configured": bool(GEMINI_API_KEY and GEMINI_API_BASE_URL and GEMINI_MODEL),
+                "api_key_configured": bool(GEMINI_API_KEY),
                 "primary_model": GEMINI_MODEL,
-                "fallback_model": GEMINI_FALLBACK_MODEL,
-            },
-            "mvi": {
-                "enabled": bool(
-                    MVI_ENABLED
-                    and MVI_API_URL
-                ),
-                "configured": bool(
-                    MVI_API_URL
-                ),
-                "url_configured": bool(
-                    MVI_API_URL
-                ),
+                "fallback_model": GEMINI_FALLBACK_MODEL or None,
             },
             "huggingface": {
-                "enabled": bool(
-                    HF_TOKEN
-                    and HF_MODEL
-                ),
-                "configured": bool(
-                    HF_TOKEN
-                    and HF_MODEL
-                ),
-                "token_configured": bool(
-                    HF_TOKEN
-                ),
-                "model_configured": bool(
-                    HF_MODEL
-                ),
-                "fallback_model_configured": bool(
-                    HF_FALLBACK_MODEL
-                ),
+                "enabled": bool(HF_TOKEN and HF_MODEL),
+                "configured": bool(HF_TOKEN and HF_MODEL),
+                "token_configured": bool(HF_TOKEN),
+                "primary_model": HF_MODEL or None,
+                "fallback_model": HF_FALLBACK_MODEL or None,
+            },
+            "mvi": {
+                "enabled": bool(MVI_ENABLED and MVI_API_URL),
+                "configured": bool(MVI_API_URL),
+                "url_configured": bool(MVI_API_URL),
+                "api_key_configured": bool(MVI_API_KEY),
+                "model": "mvi-ai-engine",
             },
         },
         "image": get_image_provider_status(),
@@ -4447,6 +4420,49 @@ def ask_hf(
                     }
                 )
 
+                continue
+
+        # =====================================================
+        # MVI AI ENGINE
+        # =====================================================
+
+        if provider in {"mvi", "mvi-ai", "mvi_ai"}:
+            if not _provider_enabled("mvi"):
+                provider_errors.append({
+                    "provider": "mvi",
+                    "error": "MVI text provider is not configured or is disabled.",
+                    "error_code": "mvi_not_configured",
+                })
+                continue
+
+            started = time.time()
+            try:
+                result = _request_mvi(
+                    text=str(text),
+                    system_prompt=str(system_prompt or ""),
+                    context=context,
+                    session_id=session_id,
+                )
+                print(
+                    "TEXT PROVIDER SUCCESS | "
+                    "provider=mvi | "
+                    f"time={time.time() - started:.2f}s"
+                )
+                return result
+            except AIClientError as exc:
+                print(
+                    "TEXT PROVIDER FAILED | "
+                    "provider=mvi | "
+                    f"status={exc.status_code} | "
+                    f"error_code={exc.error_code} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+                provider_errors.append({
+                    "provider": "mvi",
+                    "error": str(exc),
+                    "error_code": exc.error_code or "mvi_error",
+                    "status_code": exc.status_code,
+                })
                 continue
 
         # =====================================================
