@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -30,6 +31,7 @@ import (
 	"github.com/musombi123/revela-field-engine/internal/guardian"
 	"github.com/musombi123/revela-field-engine/internal/inventory"
 	"github.com/musombi123/revela-field-engine/internal/simulate"
+	"github.com/musombi123/revela-field-engine/internal/vulnfeed"
 )
 
 const version = "0.3.0"
@@ -89,6 +91,16 @@ func main() {
 		err = runCoreStart(os.Args[2:])
 	case "sync":
 		err = runSync(os.Args[2:])
+	case "feed":
+		err = runFeed(os.Args[2:])
+	case "vuln":
+		err = runVulnerabilityScan(os.Args[2:])
+	case "manifest":
+		if len(os.Args) > 2 && os.Args[2] == "collect" {
+			err = runManifestCollect(os.Args[3:])
+		} else {
+			err = runManifestImport(os.Args[2:])
+		}
 	case "help", "-h", "--help":
 		usage()
 	default:
@@ -119,6 +131,14 @@ Commands:
   core-start --authorized      Start bundled ZERO/ONE/TWO services on loopback
   sync --finding FILE --url ORIGIN
                                Send one finding to Meta Engineer (REVELA_ADMIN_BEARER required)
+  feed verify --file FEED --public-key KEY --fingerprint SHA256
+                               Verify an offline Ed25519-signed advisory feed
+  manifest collect --out MANIFEST --authorized
+                               Read installed packages from the local Windows/Linux package database
+  manifest import --format cyclonedx|spdx-json --file SBOM --out MANIFEST --authorized
+                               Import a CycloneDX or SPDX JSON SBOM without modifying it
+  vuln scan --manifest FILE --feed FILE --public-key KEY --fingerprint SHA256 --authorized
+                               Match a local package manifest against the verified offline feed
   version                      Print version
 
 Safe simulation scenarios:
@@ -306,6 +326,353 @@ func syncHostAllowed(host string) bool {
 		}
 	}
 	return false
+}
+
+
+
+func writeManifest(path string, manifest vulnfeed.Manifest) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("--out is required")
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return fmt.Errorf("create manifest output directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("create manifest without overwriting existing file: %w", err)
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+
+func runManifestCollect(args []string) error {
+	fs := flag.NewFlagSet("manifest collect", flag.ContinueOnError)
+	outputPath := fs.String("out", "", "new package-manifest JSON output path (must not already exist)")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to inspect this computer's installed-software metadata")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if strings.TrimSpace(*outputPath) == "" {
+		return errors.New("--out is required")
+	}
+	snapshot, err := inventory.CollectInstalledPackages()
+	if err != nil {
+		return err
+	}
+	manifest := vulnfeed.Manifest{
+		SchemaVersion: vulnfeed.ManifestSchema,
+		GeneratedAt: snapshot.GeneratedAt,
+		Source: snapshot.Source,
+		Packages: make([]vulnfeed.Package, 0, len(snapshot.Packages)),
+	}
+	for _, item := range snapshot.Packages {
+		manifest.Packages = append(manifest.Packages, vulnfeed.Package{
+			Ecosystem: item.Ecosystem,
+			Name: item.Name,
+			Version: item.Version,
+			PackageURL: item.PackageURL,
+		})
+	}
+	if err := writeManifest(*outputPath, manifest); err != nil {
+		return err
+	}
+	return emit(map[string]any{
+		"status": "local_package_inventory_complete",
+		"manifest_file": *outputPath,
+		"source": snapshot.Source,
+		"generated_at": snapshot.GeneratedAt,
+		"packages_collected": len(snapshot.Packages),
+		"packages_skipped": snapshot.Skipped,
+		"warnings": snapshot.Warnings,
+		"host_changes": false,
+		"network_requests": false,
+		"guardian": decision,
+	})
+}
+
+func runManifestImport(args []string) error {
+	if len(args) == 0 || args[0] != "import" {
+		return errors.New("usage: manifest import --format cyclonedx|spdx-json --file SBOM --out MANIFEST --authorized")
+	}
+	fs := flag.NewFlagSet("manifest import", flag.ContinueOnError)
+	format := fs.String("format", "", "CycloneDX JSON or SPDX-2.3 JSON")
+	inputPath := fs.String("file", "", "source SBOM JSON file")
+	outputPath := fs.String("out", "", "new local package-manifest JSON path (must not already exist)")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to inspect this SBOM")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if strings.TrimSpace(*inputPath) == "" || strings.TrimSpace(*outputPath) == "" {
+		return errors.New("--file and --out are required")
+	}
+	data, err := vulnfeed.ReadRegularFile(*inputPath, vulnfeed.MaxManifestBytes)
+	if err != nil {
+		return err
+	}
+	var imported vulnfeed.SBOMImportResult
+	switch strings.ToLower(strings.TrimSpace(*format)) {
+	case "cyclonedx", "cyclonedx-json":
+		imported, err = vulnfeed.ParseCycloneDXJSON(data)
+	case "spdx", "spdx-json":
+		imported, err = vulnfeed.ParseSPDXJSON(data)
+	default:
+		return errors.New("--format must be cyclonedx or spdx-json")
+	}
+	if err != nil {
+		return err
+	}
+	if err := writeManifest(*outputPath, imported.Manifest); err != nil {
+		return err
+	}
+	return emit(map[string]any{
+		"status": "manifest_imported",
+		"source_format": strings.ToLower(strings.TrimSpace(*format)),
+		"source_file": *inputPath,
+		"source_sha256": fmt.Sprintf("%x", sha256.Sum256(data)),
+		"manifest_file": *outputPath,
+		"manifest_source": imported.Manifest.Source,
+		"manifest_generated_at": imported.Manifest.GeneratedAt,
+		"packages_imported": len(imported.Manifest.Packages),
+		"packages_skipped": imported.Skipped,
+		"warnings": imported.Warnings,
+		"source_modified": false,
+		"guardian": decision,
+	})
+}
+
+func loadVerifiedFeed(feedPath, publicKeyPath, fingerprint string) (vulnfeed.VerifiedFeed, error) {
+	feedBytes, err := vulnfeed.ReadRegularFile(feedPath, vulnfeed.MaxFeedBytes)
+	if err != nil {
+		return vulnfeed.VerifiedFeed{}, err
+	}
+	keyBytes, err := vulnfeed.ReadRegularFile(publicKeyPath, 4096)
+	if err != nil {
+		return vulnfeed.VerifiedFeed{}, err
+	}
+	publicKey, err := vulnfeed.ParsePublicKey(keyBytes)
+	if err != nil {
+		return vulnfeed.VerifiedFeed{}, err
+	}
+	return vulnfeed.VerifyEnvelope(feedBytes, publicKey, fingerprint, time.Now().UTC())
+}
+
+func runFeed(args []string) error {
+	if len(args) == 0 || args[0] != "verify" {
+		return errors.New("usage: feed verify --file FEED --public-key KEY --fingerprint SHA256 --authorized")
+	}
+	fs := flag.NewFlagSet("feed verify", flag.ContinueOnError)
+	feedPath := fs.String("file", "", "signed offline advisory feed envelope")
+	keyPath := fs.String("public-key", "", "trusted Ed25519 public key file (hex)")
+	fingerprint := fs.String("fingerprint", "", "trusted SHA-256 public-key fingerprint from a separate channel")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to assess this local data")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if *feedPath == "" || *keyPath == "" || *fingerprint == "" {
+		return errors.New("--file, --public-key and --fingerprint are required")
+	}
+	verified, err := loadVerifiedFeed(*feedPath, *keyPath, *fingerprint)
+	if err != nil {
+		return err
+	}
+	return emit(map[string]any{
+		"status": "verified",
+		"feed_id": verified.Feed.FeedID,
+		"provider": verified.Feed.Provider,
+		"issued_at": verified.Feed.IssuedAt,
+		"expires_at": verified.Feed.ExpiresAt,
+		"advisory_count": verified.AdvisoryCount,
+		"payload_sha256": verified.PayloadSHA256,
+		"public_key_sha256": verified.PublicKeySHA256,
+		"verified_at": verified.VerifiedAt,
+		"guardian": decision,
+	})
+}
+
+func findingSeverity(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "critical":
+		return "critical"
+	case "high":
+		return "high"
+	case "medium":
+		return "medium"
+	case "low":
+		return "low"
+	default:
+		return "informational"
+	}
+}
+
+func limitText(value string, maxRunes int) string {
+	if maxRunes < 1 {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes])
+}
+
+func buildVulnerabilityFinding(match vulnfeed.Match, feed vulnfeed.VerifiedFeed, manifestPath, manifestHash string, manifestBytes int64, now time.Time) contract.Finding {
+	identity := feed.Feed.FeedID + "|" + match.Advisory.ID + "|" + match.Package.PackageURL + "|" + match.Package.Version
+	sum := sha256.Sum256([]byte(identity))
+	recommendation := "Review the vendor advisory and update this package to a supported, remediated release after change approval."
+	if len(match.Advisory.FixedVersions) > 0 {
+		recommendation = "Review the vendor advisory and plan an update to one of these reported fixed versions: " +
+			strings.Join(match.Advisory.FixedVersions, ", ") + ". Validate application compatibility and approve the change before installation."
+	}
+	summary := limitText(match.Advisory.Summary, 4000)
+	evidence := []contract.Evidence{
+		{Kind: "local_package_manifest", Ref: manifestPath + "#" + match.Package.PackageURL, SHA256: manifestHash, Bytes: manifestBytes, Note: "Exact package URL and version found in the supplied local manifest."},
+		{Kind: "signed_vulnerability_feed", Ref: "feed://" + feed.Feed.FeedID, SHA256: feed.PayloadSHA256, Note: "Ed25519 signature and pinned public-key fingerprint verified; feed is within its validity period."},
+	}
+	for _, reference := range match.Advisory.References {
+		evidence = append(evidence, contract.Evidence{
+			Kind: "publisher_advisory_reference",
+			Ref: reference,
+			Note: "Publisher-supplied reference; the Field Engine did not fetch or independently verify this URL.",
+		})
+	}
+	return contract.Finding{
+		SchemaVersion: contract.SchemaVersion,
+		ID: "field-" + hex.EncodeToString(sum[:8]),
+		Source: "revela-field-engine",
+		ObservedAt: now.UTC(),
+		Target: match.Package.PackageURL,
+		Category: "software_vulnerability",
+		Severity: findingSeverity(match.Advisory.Severity),
+		Title: limitText(match.Advisory.ID + " affects " + match.Package.Name + " " + match.Package.Version, 240),
+		Summary: summary,
+		Evidence: evidence,
+		Recommendation: recommendation,
+		Scope: "local",
+		Simulated: false,
+	}
+}
+
+func writeFindings(outDir string, findings []contract.Finding) ([]string, error) {
+	if strings.TrimSpace(outDir) == "" {
+		return nil, errors.New("output directory is required for file export")
+	}
+	if err := os.MkdirAll(outDir, 0700); err != nil {
+		return nil, fmt.Errorf("create finding output directory: %w", err)
+	}
+	info, err := os.Lstat(outDir)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, errors.New("finding output directory must be a real directory, not a symlink")
+	}
+	written := []string{}
+	for _, finding := range findings {
+		path := filepath.Join(outDir, finding.ID+".json")
+		data, err := json.MarshalIndent(finding, "", "  ")
+		if err != nil {
+			return written, err
+		}
+		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return written, fmt.Errorf("create finding without overwriting an existing file: %w", err)
+		}
+		if _, err := file.Write(append(data, '\n')); err != nil {
+			_ = file.Close()
+			return written, err
+		}
+		if err := file.Close(); err != nil {
+			return written, err
+		}
+		written = append(written, path)
+	}
+	return written, nil
+}
+
+func runVulnerabilityScan(args []string) error {
+	if len(args) == 0 || args[0] != "scan" {
+		return errors.New("usage: vuln scan --manifest FILE --feed FILE --public-key KEY --fingerprint SHA256 --authorized")
+	}
+	fs := flag.NewFlagSet("vuln scan", flag.ContinueOnError)
+	manifestPath := fs.String("manifest", "", "explicit local package manifest JSON")
+	feedPath := fs.String("feed", "", "signed local vulnerability feed")
+	keyPath := fs.String("public-key", "", "trusted Ed25519 public key file (hex)")
+	fingerprint := fs.String("fingerprint", "", "trusted SHA-256 public-key fingerprint from a separate channel")
+	outDir := fs.String("out-dir", "", "optional directory to write one JSON finding per exact match")
+	authorized := fs.Bool("authorized", false, "confirm you are authorised to assess this local manifest")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	decision := guardian.Evaluate(guardian.Request{Action: "safe_vulnerability_check", Scope: "local", Authorized: *authorized})
+	if !decision.Allowed {
+		return errors.New(decision.Reason)
+	}
+	if *manifestPath == "" || *feedPath == "" || *keyPath == "" || *fingerprint == "" {
+		return errors.New("--manifest, --feed, --public-key and --fingerprint are required")
+	}
+	manifestBytes, err := vulnfeed.ReadRegularFile(*manifestPath, vulnfeed.MaxManifestBytes)
+	if err != nil {
+		return err
+	}
+	manifest, err := vulnfeed.ParseManifest(manifestBytes)
+	if err != nil {
+		return err
+	}
+	verified, err := loadVerifiedFeed(*feedPath, *keyPath, *fingerprint)
+	if err != nil {
+		return err
+	}
+	matches := vulnfeed.MatchExact(manifest, verified.Feed)
+	manifestSum := sha256.Sum256(manifestBytes)
+	now := time.Now().UTC()
+	findings := make([]contract.Finding, 0, len(matches))
+	for _, match := range matches {
+		findings = append(findings, buildVulnerabilityFinding(match, verified, *manifestPath, hex.EncodeToString(manifestSum[:]), int64(len(manifestBytes)), now))
+	}
+	response := map[string]any{
+		"status": "assessment_complete",
+		"guardian": decision,
+		"feed_id": verified.Feed.FeedID,
+		"feed_provider": verified.Feed.Provider,
+		"feed_expires_at": verified.Feed.ExpiresAt,
+		"feed_payload_sha256": verified.PayloadSHA256,
+		"manifest_sha256": hex.EncodeToString(manifestSum[:]),
+		"manifest_source": manifest.Source,
+		"manifest_generated_at": manifest.GeneratedAt,
+		"packages_assessed": len(manifest.Packages),
+		"advisories_in_feed": verified.AdvisoryCount,
+		"exact_matches": len(findings),
+		"matching_mode": "exact Package URL and exact version string only",
+		"finding_records": findings,
+		"software_modified": false,
+		"assessment_boundary": "No package ranges, distro backports, aliases or transitive dependency resolution were interpreted. No software was installed, updated, removed or disabled. No network requests were made.",
+	}
+	if strings.TrimSpace(*outDir) != "" {
+		written, err := writeFindings(*outDir, findings)
+		if err != nil {
+			return err
+		}
+		response["finding_files"] = written
+		delete(response, "finding_records")
+	}
+	return emit(response)
 }
 
 func validateSyncOrigin(raw string) (string, error) {
@@ -751,6 +1118,10 @@ func runMenu() error {
 		fmt.Println("4) Inventory an authorised local directory")
 		fmt.Println("5) Core health status (loopback only)")
 		fmt.Println("6) Start bundled ZERO/ONE/TWO locally")
+		fmt.Println("7) Verify a signed offline vulnerability feed")
+		fmt.Println("8) Scan a package manifest against the trusted offline feed")
+		fmt.Println("9) Import a CycloneDX or SPDX software bill of materials")
+		fmt.Println("10) Collect installed-software inventory from this host")
 		fmt.Println("0) Exit")
 		fmt.Print("Select: ")
 		value, err := reader.ReadString('\n')
@@ -783,6 +1154,69 @@ func runMenu() error {
 			if readErr != nil { return readErr }
 			if strings.TrimSpace(confirmation) != "START" { fmt.Println("Cancelled."); continue }
 			if err := runCoreStart([]string{"--authorized"}); err != nil { fmt.Println(err) }
+		case "7":
+			fmt.Print("Signed feed envelope path: ")
+			feedPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Trusted Ed25519 public-key file path: ")
+			keyPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Pinned SHA-256 fingerprint (verify separately with your publisher): ")
+			fingerprint, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to confirm this assessment: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			err := runFeed([]string{"verify", "--file", strings.TrimSpace(feedPath), "--public-key", strings.TrimSpace(keyPath), "--fingerprint", strings.TrimSpace(fingerprint), "--authorized"})
+			if err != nil { fmt.Println(err) }
+		case "8":
+			fmt.Print("Local package manifest JSON path: ")
+			manifestPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Signed vulnerability feed envelope path: ")
+			feedPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Trusted Ed25519 public-key file path: ")
+			keyPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Pinned SHA-256 fingerprint (verify separately with your publisher): ")
+			fingerprint, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to confirm this assessment: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			outDir := filepath.Join("data", "findings")
+			err := runVulnerabilityScan([]string{"scan", "--manifest", strings.TrimSpace(manifestPath), "--feed", strings.TrimSpace(feedPath), "--public-key", strings.TrimSpace(keyPath), "--fingerprint", strings.TrimSpace(fingerprint), "--authorized", "--out-dir", outDir})
+			if err != nil { fmt.Println(err) }
+		case "9":
+			fmt.Println("Formats: cyclonedx | spdx-json")
+			fmt.Print("SBOM format: ")
+			format, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("SBOM JSON path: ")
+			sbomPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("New manifest output path (must not exist): ")
+			manifestPath, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to confirm you may inspect this SBOM: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			err := runManifestImport([]string{"import", "--format", strings.TrimSpace(format), "--file", strings.TrimSpace(sbomPath), "--out", strings.TrimSpace(manifestPath), "--authorized"})
+			if err != nil { fmt.Println(err) }
+		case "10":
+			fmt.Print("New manifest output path (must not exist): ")
+			output, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			fmt.Print("Type AUTHORISED to read installed-software metadata from this computer: ")
+			confirmation, readErr := reader.ReadString('\n')
+			if readErr != nil { return readErr }
+			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
+			err := runManifestCollect([]string{"--out", strings.TrimSpace(output), "--authorized"})
+			if err != nil { fmt.Println(err) }
 		case "0":
 			return nil
 		default:

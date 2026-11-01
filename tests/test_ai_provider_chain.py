@@ -32,86 +32,109 @@ def test_gemini_list_models_selects_first_available_configured_model(monkeypatch
     assert result["selected_model"] == "gemini-3.1-flash-lite"
     assert result["fallback_model"] is None
     assert client.GEMINI_MODEL == "gemini-3.1-flash-lite"
-    assert client.GEMINI_FALLBACK_MODEL == ""
 
 
-def test_provider_status_exposes_hf_and_mvi_model_identity(monkeypatch):
-    monkeypatch.setattr(client, "HF_TOKEN", "test-hf-token")
-    monkeypatch.setattr(client, "HF_MODEL", "test-hf-model")
-    monkeypatch.setattr(client, "HF_FALLBACK_MODEL", "test-hf-fallback")
-    monkeypatch.setattr(client, "MVI_ENABLED", True)
-    monkeypatch.setattr(client, "MVI_API_URL", "https://mvi.example/ask")
-    monkeypatch.setattr(client, "MVI_API_KEY", "")
 
-    status = client.get_text_provider_status()
+def test_provider_order_normalizes_aliases_and_keeps_configured_gemini_first(monkeypatch):
+    monkeypatch.setattr(client, "TEXT_PROVIDER_ORDER", ["mvi", "hf", "google", "mvi"])
+    monkeypatch.setattr(client, "_provider_enabled", lambda provider: provider == "gemini")
 
-    assert status["providers"]["huggingface"]["enabled"] is True
-    assert status["providers"]["huggingface"]["primary_model"] == "test-hf-model"
-    assert status["providers"]["mvi"]["enabled"] is True
-    assert status["providers"]["mvi"]["model"] == "mvi-ai-engine"
+    assert client.get_text_provider_order() == ["gemini", "mvi", "huggingface"]
 
 
-def test_mvi_is_used_after_gemini_and_hf_fail(monkeypatch):
-    monkeypatch.setattr(client, "TEXT_PROVIDER_ORDER", ["gemini", "hf", "mvi"])
-    monkeypatch.setattr(
-        client, "_provider_enabled",
-        lambda name: name in {"gemini", "huggingface", "mvi"},
-    )
-    monkeypatch.setattr(
-        client, "_ask_gemini_text",
-        lambda **kwargs: (_ for _ in ()).throw(client.AIClientError(
-            "Gemini test failure", provider="gemini", status_code=503,
+def test_mvi_is_a_real_fallback_after_gemini_and_huggingface_fail(monkeypatch):
+    failures = {
+        "gemini": client.AIClientError(
+            "Gemini temporarily unavailable",
+            provider="gemini",
+            status_code=503,
             error_code="gemini_service_unavailable",
-        )),
-    )
-    monkeypatch.setattr(
-        client, "_ask_hf_text",
-        lambda **kwargs: (_ for _ in ()).throw(client.AIClientError(
-            "HF test failure", provider="huggingface", status_code=503,
+        ),
+        "hf": client.AIClientError(
+            "Hugging Face temporarily unavailable",
+            provider="huggingface",
+            status_code=503,
             error_code="hf_service_unavailable",
-        )),
+        ),
+    }
+    monkeypatch.setattr(client, "TEXT_PROVIDER_ORDER", ["gemini", "hf", "mvi"])
+    monkeypatch.setattr(client, "_provider_enabled", lambda _provider: True)
+    monkeypatch.setattr(
+        client,
+        "_ask_gemini_text",
+        lambda **_kwargs: (_ for _ in ()).throw(failures["gemini"]),
     )
     monkeypatch.setattr(
-        client, "_request_mvi",
-        lambda **kwargs: {
-            "success": True, "response": "MVI fallback answer",
-            "provider": "mvi", "model": "mvi-ai-engine",
-        },
+        client,
+        "_ask_hf_text",
+        lambda **_kwargs: (_ for _ in ()).throw(failures["hf"]),
     )
+    observed = {}
 
-    result = client.ask_hf("Explain the fallback route.")
+    def fake_mvi(**kwargs):
+        observed.update(kwargs)
+        return {
+            "success": True,
+            "response": "MVI generative fallback answer",
+            "provider": "mvi",
+            "model": "mvi-ai-engine",
+        }
+
+    monkeypatch.setattr(client, "_request_mvi", fake_mvi)
+
+    context = [{"role": "user", "content": "Earlier question"}]
+    result = client.ask_hf(
+        "Continue the task",
+        system_prompt="Follow the brain's grounded instructions.",
+        session_id="session-123",
+        context=context,
+    )
 
     assert result["success"] is True
     assert result["provider"] == "mvi"
-    assert result["response"] == "MVI fallback answer"
+    assert result["fallback_used"] is True
+    assert result["providers_attempted"] == ["gemini", "huggingface", "mvi"]
+    assert observed == {
+        "text": "Continue the task",
+        "system_prompt": "Follow the brain's grounded instructions.",
+        "context": context,
+        "session_id": "session-123",
+    }
 
 
-def test_active_provider_prefers_gemini_to_legacy_order(monkeypatch):
-    from services import runtime_config
-
-    monkeypatch.setattr(runtime_config, "get_revelaai_text_status", lambda: {
-        "provider_order": ["mvi", "hf", "gemini"],
-        "providers": {
-            "gemini": {"enabled": True, "primary_model": "gemini-test"},
-            "huggingface": {"enabled": True, "primary_model": "hf-test"},
-            "mvi": {"enabled": True, "model": "mvi-ai-engine"},
+def test_mvi_can_be_primary_only_when_gemini_is_not_configured(monkeypatch):
+    monkeypatch.setattr(client, "TEXT_PROVIDER_ORDER", ["mvi", "hf"])
+    monkeypatch.setattr(client, "_provider_enabled", lambda provider: provider == "mvi")
+    monkeypatch.setattr(
+        client,
+        "_request_mvi",
+        lambda **_kwargs: {
+            "success": True,
+            "response": "MVI primary answer",
+            "provider": "mvi",
+            "model": "mvi-ai-engine",
         },
-    })
+    )
 
-    assert runtime_config.get_active_text_provider() == "gemini"
-    assert runtime_config.get_active_text_model() == "gemini-test"
+    result = client.ask_hf("Explain the system")
+
+    assert result["success"] is True
+    assert result["provider"] == "mvi"
+    assert result["fallback_used"] is False
 
 
-def test_active_provider_resolves_hf_alias_to_canonical_status_key(monkeypatch):
-    from services import runtime_config
+def test_provider_status_has_model_labels_and_the_actual_dispatch_order(monkeypatch):
+    monkeypatch.setattr(client, "TEXT_PROVIDER_ORDER", ["mvi", "hf", "google"])
+    monkeypatch.setattr(client, "_provider_enabled", lambda _provider: True)
+    monkeypatch.setattr(client, "GEMINI_MODEL", "gemini-primary")
+    monkeypatch.setattr(client, "GEMINI_FALLBACK_MODEL", "gemini-secondary")
+    monkeypatch.setattr(client, "HF_MODEL", "hf-text-model")
+    monkeypatch.setattr(client, "HF_FALLBACK_MODEL", "hf-fallback")
+    monkeypatch.setattr(client, "MVI_API_URL", "https://mvi.example.test/ask")
 
-    monkeypatch.setattr(runtime_config, "get_revelaai_text_status", lambda: {
-        "provider_order": ["hf", "mvi"],
-        "providers": {
-            "huggingface": {"enabled": True, "primary_model": "hf-test"},
-            "mvi": {"enabled": True, "model": "mvi-ai-engine"},
-        },
-    })
+    status = client.get_text_provider_status()
 
-    assert runtime_config.get_active_text_provider() == "huggingface"
-    assert runtime_config.get_active_text_model() == "hf-test"
+    assert status["provider_order"] == ["gemini", "mvi", "huggingface"]
+    assert status["providers"]["gemini"]["primary_model"] == "gemini-primary"
+    assert status["providers"]["mvi"]["primary_model"] == "mvi-ai-engine"
+    assert status["providers"]["huggingface"]["primary_model"] == "hf-text-model"

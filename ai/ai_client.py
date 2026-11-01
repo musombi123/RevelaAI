@@ -635,6 +635,42 @@ def _provider_enabled(
     return False
 
 
+TEXT_PROVIDER_ALIASES = {
+    "gemini": "gemini",
+    "google": "gemini",
+    "google-ai": "gemini",
+    "googleai": "gemini",
+    "hf": "huggingface",
+    "huggingface": "huggingface",
+    "mvi": "mvi",
+    "mvi-ai": "mvi",
+    "mvi_ai": "mvi",
+}
+
+
+def canonical_text_provider(provider: str) -> str:
+    """Normalize legacy provider aliases to the canonical diagnostic key."""
+    value = str(provider or "").strip().lower()
+    return TEXT_PROVIDER_ALIASES.get(value, value)
+
+
+def get_text_provider_order() -> list[str]:
+    """Return the same normalized order used by generation and diagnostics.
+
+    Gemini is attempted first whenever it is configured. The configured
+    order is preserved for all remaining fallback providers.
+    """
+    configured = TEXT_PROVIDER_ORDER or ["gemini", "huggingface", "mvi"]
+    ordered: list[str] = []
+    for provider in configured:
+        canonical = canonical_text_provider(provider)
+        if canonical in {"gemini", "huggingface", "mvi"} and canonical not in ordered:
+            ordered.append(canonical)
+    if _provider_enabled("gemini"):
+        ordered = ["gemini"] + [provider for provider in ordered if provider != "gemini"]
+    return ordered
+
+
 def pollinations_configured() -> bool:
     """
     Return whether Pollinations image generation is
@@ -751,38 +787,35 @@ def validate_gemini_models() -> dict[str, Any]:
 
 
 def get_text_provider_status() -> dict[str, Any]:
-    """Return safe diagnostics for every configured text provider.
-
-    Configuration is not a live generation test. Gemini's ListModels
-    validation is reported separately; HF and MVI stay explicitly unverified
-    until a real request succeeds.
-    """
+    """Return safe provider diagnostics without exposing credentials."""
     return {
-        "provider_order": list(TEXT_PROVIDER_ORDER),
+        "provider_order": get_text_provider_order(),
+        "configured_provider_order": list(TEXT_PROVIDER_ORDER),
         "gemini_model_validation": dict(GEMINI_MODEL_VALIDATION),
         "providers": {
             "gemini": {
-                "enabled": bool(
-                    GEMINI_ENABLED and GEMINI_API_KEY and GEMINI_API_BASE_URL and GEMINI_MODEL
-                ),
+                "enabled": _provider_enabled("gemini"),
                 "configured": bool(GEMINI_API_KEY and GEMINI_API_BASE_URL and GEMINI_MODEL),
                 "api_key_configured": bool(GEMINI_API_KEY),
                 "primary_model": GEMINI_MODEL,
-                "fallback_model": GEMINI_FALLBACK_MODEL or None,
-            },
-            "huggingface": {
-                "enabled": bool(HF_TOKEN and HF_MODEL),
-                "configured": bool(HF_TOKEN and HF_MODEL),
-                "token_configured": bool(HF_TOKEN),
-                "primary_model": HF_MODEL or None,
-                "fallback_model": HF_FALLBACK_MODEL or None,
+                "fallback_model": GEMINI_FALLBACK_MODEL,
             },
             "mvi": {
-                "enabled": bool(MVI_ENABLED and MVI_API_URL),
+                "enabled": _provider_enabled("mvi"),
                 "configured": bool(MVI_API_URL),
                 "url_configured": bool(MVI_API_URL),
-                "api_key_configured": bool(MVI_API_KEY),
+                "primary_model": "mvi-ai-engine",
                 "model": "mvi-ai-engine",
+            },
+            "huggingface": {
+                "enabled": _provider_enabled("huggingface"),
+                "configured": bool(HF_TOKEN and HF_MODEL),
+                "token_configured": bool(HF_TOKEN),
+                "model_configured": bool(HF_MODEL),
+                "primary_model": HF_MODEL or None,
+                "model": HF_MODEL or None,
+                "fallback_model": HF_FALLBACK_MODEL or None,
+                "fallback_model_configured": bool(HF_FALLBACK_MODEL),
             },
         },
         "image": get_image_provider_status(),
@@ -4238,26 +4271,10 @@ def ask_hf(
         dict[str, Any]
     ] = []
 
-    # Gemini is the canonical generative provider. If configured, always try
-    # it first even if an older Render environment variable lists MVI first.
-    providers_to_try = list(TEXT_PROVIDER_ORDER)
-    if _provider_enabled("gemini"):
-        providers_to_try = ["gemini"] + [
-            item for item in providers_to_try
-            if str(item or "").strip().lower() not in {
-                "gemini", "google", "google-ai", "googleai"
-            }
-        ]
+    # Diagnostics and real generation share one normalized provider order.
+    providers_to_try = get_text_provider_order()
 
     for provider in providers_to_try:
-
-        provider = (
-            str(
-                provider or ""
-            )
-            .strip()
-            .lower()
-        )
 
         # =====================================================
         # GEMINI
@@ -4423,14 +4440,14 @@ def ask_hf(
                 continue
 
         # =====================================================
-        # MVI AI ENGINE
+        # MVI FALLBACK
         # =====================================================
 
-        if provider in {"mvi", "mvi-ai", "mvi_ai"}:
+        if provider == "mvi":
             if not _provider_enabled("mvi"):
                 provider_errors.append({
                     "provider": "mvi",
-                    "error": "MVI text provider is not configured or is disabled.",
+                    "error": "MVI text provider is not configured.",
                     "error_code": "mvi_not_configured",
                 })
                 continue
@@ -4443,16 +4460,19 @@ def ask_hf(
                     context=context,
                     session_id=session_id,
                 )
+                result["fallback_used"] = bool(provider_errors)
+                result["providers_attempted"] = [
+                    item.get("provider") for item in provider_errors
+                ] + ["mvi"]
                 print(
-                    "TEXT PROVIDER SUCCESS | "
-                    "provider=mvi | "
+                    "TEXT PROVIDER SUCCESS | provider=mvi | "
+                    f"fallback={result['fallback_used']} | "
                     f"time={time.time() - started:.2f}s"
                 )
                 return result
             except AIClientError as exc:
                 print(
-                    "TEXT PROVIDER FAILED | "
-                    "provider=mvi | "
+                    "TEXT PROVIDER FAILED | provider=mvi | "
                     f"status={exc.status_code} | "
                     f"error_code={exc.error_code} | "
                     f"time={time.time() - started:.2f}s"

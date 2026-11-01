@@ -126,3 +126,19 @@ Core-TWO uses local module replacements for Core-ONE, Core-ZERO and the worldwid
 ## 9. Acceptance rule
 
 A release is not "fully working" until source tests, race tests where applicable, static analysis, cross-platform builds, USB package smoke tests, core health checks, Guardian-negative tests and Meta Engineer hand-off tests all pass. Each result must be tied to a commit SHA and platform.
+
+## 9. Signed offline vulnerability intelligence
+## 10. Local installed-software inventory
+
+The native `manifest collect --out PATH --authorized` command can create a versioned package manifest directly from local host inventory. On Windows it reads the conventional uninstall registry roots (HKLM, WOW6432Node, HKCU) and retains only product display name, display version and publisher. On Linux it reads dpkg-query or RPM package metadata and retains package name, exact version, architecture and distro qualifiers. Registry/package-manager command output is bounded, commands have execution timeouts, and the collector does not modify installed software or contact external repositories.
+
+This inventory is a starting point, not a complete SBOM. It omits portable Windows applications, packages outside standard uninstall keys, language-specific virtual environments and software installed outside the detected Linux package manager. The generated manifest records its source timestamp and coverage warnings; use CycloneDX/SPDX imports when a richer SBOM exists.
+
+The collector output can be matched against the Ed25519-signed advisory snapshot via `vuln scan`. Matching remains exact on Package URL plus exact version text; false negatives are possible where advisories use version ranges, vendor backports or different package coordinates.
+
+
+The native `vulnfeed` package accepts a bounded JSON envelope whose payload is signed with Ed25519. The operator supplies the public key and a separately obtained SHA-256 fingerprint. The engine validates the fingerprint, signature, feed schema and expiry before reading advisories. It stores/returns the payload digest, publisher, feed ID, issue time and expiry in assessment output.
+
+The initial package manifest schema is `revela-package-manifest/1`, with Package URL coordinates and exact version strings. The matcher intentionally avoids guessing semver ranges, distro backports, aliases and transitive dependency versions. It emits one local-scope finding per exact match; no package is changed. The feed verification and exact matching code have offline unit tests for valid signatures, bad signatures, expired feeds, wrong fingerprints, tampering, malformed contracts, symlink/size handling and exact package matching.
+
+This is a signed-snapshot foundation, not yet a full OSV/CVE mirror, CycloneDX/SPDX parser, dependency resolver, live update service or comprehensive vulnerability scanner. The trusted publisher and key rotation process must be operated and independently verified by the product owner before customer use.

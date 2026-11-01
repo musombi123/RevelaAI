@@ -16,10 +16,10 @@ from services.image_service import is_image_generation_request
 from services.runtime_config import (
     APP_NAME, AUDIO_DIR, ENVIRONMENT, IMAGE_DIR, REVELAAI_BUILD_ID,
     REVELAAI_ENABLE_HF_TTS, REVELAAI_IMAGE_ENGINE_VERSION,
-    cleanup_generated_files, configured_image_model, get_active_text_model,
+    cleanup_generated_files, get_active_text_model,
     get_active_text_provider, get_revelaai_text_status,
 )
-from ai.ai_client import get_image_provider_status, hf_configured, get_text_provider_status
+from ai.ai_client import get_image_provider_status, get_text_provider_status, hf_configured
 from ai.json_utils import error_response
 
 router = APIRouter(tags=["System"])
@@ -65,6 +65,7 @@ def capabilities():
     providers = text_status.get("providers", {})
     gemini = providers.get("gemini", {}) if isinstance(providers, dict) else {}
     gemini = gemini if isinstance(gemini, dict) else {}
+    image_status = get_image_provider_status()
     return {
         "status": "success",
         "service": "revelaai",
@@ -78,14 +79,17 @@ def capabilities():
                 "providers": text_status,
             },
             "image_generation": {
-                "enabled": bool(configured_image_model() or REVELAAI_IMAGE_ENGINE_VERSION),
+                "enabled": True,
+                "status": "ready" if image_status.get("enabled") else "partial",
                 "provider": "pollinations",
+                "raster": image_status,
+                "structured_vector": {"enabled": True, "provider": "revelaai-svg"},
                 "routing": {
                     "primary": "ai-client", "planner": "image_prompt",
                     "text_aware": True, "fallback": True,
                     "provider_aware": True, "server_execution": True,
                 },
-                "engines": {"raster": "pollinations", "structured_vector": "svg"},
+                "engines": {"raster": "pollinations", "structured_vector": "revelaai-svg"},
                 "formats": [
                     "square", "portrait", "landscape", "wide", "story", "banner",
                     "social_portrait", "presentation", "phone",
@@ -129,6 +133,7 @@ def health():
     text_status = get_revelaai_text_status()
     active_provider = get_active_text_provider()
     active_model = get_active_text_model()
+    image_status = get_image_provider_status()
     return {
         "status": "ok",
         "service": "revelaai",
@@ -149,8 +154,10 @@ def health():
             },
             "image": {
                 "provider": "pollinations",
-                "configured": bool(get_image_provider_status().get("enabled")),
-                "primary_model": configured_image_model(),
+                "configured": bool(image_status.get("enabled")),
+                "primary_model": image_status.get("model"),
+                "status": image_status,
+                "structured_vector": {"enabled": True, "provider": "revelaai-svg"},
                 "routing": {
                     "owner": "ai_client", "planner": "image_prompt",
                     "text_aware": True, "fallback": True,
@@ -191,6 +198,7 @@ def ready():
     provider = get_active_text_provider()
     model = get_active_text_model()
     provider_status = get_text_provider_status()
+    image_status = get_image_provider_status()
     configured_providers = provider_status.get("providers", {})
     gemini_validation = provider_status.get("gemini_model_validation", {})
     provider_checks: dict[str, Any] = {}
@@ -201,7 +209,7 @@ def ready():
         provider_checks[public_name] = {
             "configured": is_configured,
             # Only Gemini currently has a startup reachability/model-list probe.
-            "reachable": gemini_validation.get("reachable") if public_name == "gemini" else (False if not is_configured else None),
+            "reachable": gemini_validation.get("reachable") if public_name == "gemini" else (None if is_configured else False),
             "model_valid": gemini_validation.get("model_valid") if public_name == "gemini" else (False if not is_configured else None),
             "model": info.get("primary_model") or info.get("model"),
         }
@@ -210,7 +218,8 @@ def ready():
         "text_provider": provider != "none",
         "text_model": bool(model),
         "huggingface": hf_configured(),
-        "image_model": bool(get_image_provider_status().get("enabled")),
+        "image_model": bool(image_status.get("enabled")),
+        "structured_svg": True,
         "online_research": _online_research_available(),
         "pdf_processor": _pdf_available(),
     }

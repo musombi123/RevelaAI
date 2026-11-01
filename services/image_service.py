@@ -361,7 +361,7 @@ def generate_image_asset(
         if image is None:
 
             raise RuntimeError(
-                "Pollinations returned no image."
+                "The configured raster image provider returned no image."
             )
 
         filename, filepath = (
