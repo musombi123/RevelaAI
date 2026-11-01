@@ -80,3 +80,47 @@ def test_raster_image_response_metadata_names_the_real_provider(monkeypatch):
     assert payload["success"] is True
     assert payload["meta"]["provider"] == "pollinations"
     assert payload["meta"]["model"] == "flux"
+
+
+
+def test_runtime_reports_the_selected_mvi_model_when_gemini_is_unavailable(monkeypatch):
+    from services import runtime_config
+
+    monkeypatch.setattr(runtime_config, "get_revelaai_text_status", lambda: {
+        "provider_order": ["mvi", "huggingface"],
+        "providers": {
+            "mvi": {"enabled": True, "primary_model": "mvi-ai-engine"},
+            "huggingface": {"enabled": True, "primary_model": "hf-test-model"},
+        },
+    })
+
+    assert runtime_config.get_active_text_provider() == "mvi"
+    assert runtime_config.get_active_text_model() == "mvi-ai-engine"
+
+
+def test_production_gateway_mounts_revelaai_and_imports_each_core_organ():
+    from importlib import import_module
+
+    from asgi import app as ai_app
+    from revela_platform.fastapi_app import app as platform_app
+
+    modules = (
+        "core_auditor.ledger",
+        "core_billing.service",
+        "core_evolve.engine",
+        "core_foundry.factory.foundry_builder",
+        "core_inspector.inspector",
+        "core_meter.meter",
+        "core_migrate.service",
+        "core_seed.seed_runner",
+        "core_uncopyable.recipe_lock",
+    )
+    for module_name in modules:
+        assert import_module(module_name) is not None
+
+    mounted = next(
+        route for route in platform_app.routes
+        if getattr(route, "name", "") == "revelaai-native-gateway"
+    )
+    assert mounted.path == "/"
+    assert mounted.app is ai_app

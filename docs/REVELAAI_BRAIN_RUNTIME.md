@@ -53,6 +53,7 @@ The provider order is normalized before use. If Gemini is configured, it is atte
 
 | Module | Responsibility in the wider system | Typical invocation boundary |
 | --- | --- | --- |
+| core | Legacy base configuration, logging and role-check helpers. These are not the active brain or the primary API security boundary. | Compatibility utilities only; production request authorization is handled by the native gateway and its auth modules. |
 | core_uncopyable | Owner integrity, signed recipe, license and hardware-bound safeguards. | Startup gates and protected license/recipe operations. |
 | core_billing | Signed licenses, plan lookup and entitlement/quota enforcement. | Billing, licensed tool and protected feature requests. |
 | core_meter | Usage accounting and quota-related measurements. | Metered platform operations. |
