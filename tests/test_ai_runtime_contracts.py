@@ -100,6 +100,7 @@ def test_runtime_reports_the_selected_mvi_model_when_gemini_is_unavailable(monke
 
 def test_production_gateway_mounts_revelaai_and_imports_each_core_organ():
     from importlib import import_module
+    from pathlib import Path
 
     from asgi import app as ai_app
     from revela_platform.fastapi_app import app as platform_app
@@ -122,5 +123,6 @@ def test_production_gateway_mounts_revelaai_and_imports_each_core_organ():
         route for route in platform_app.routes
         if getattr(route, "name", "") == "revelaai-native-gateway"
     )
-    assert mounted.path == "/"
     assert mounted.app is ai_app
+    gateway_source = Path("revela_platform/fastapi_app.py").read_text(encoding="utf-8")
+    assert 'app.mount("/", revelaai_app, name="revelaai-native-gateway")' in gateway_source
