@@ -309,7 +309,10 @@ def test_smart_memory_routes_require_identity() -> None:
 def test_signed_tool_execution_requires_core_mesh_operator(monkeypatch) -> None:
     monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "approved-operator")
     monkeypatch.delenv("META_ENGINEER_ADMIN_USER_IDS", raising=False)
-    monkeypatch.setattr(core_mesh_routes, "_authenticated_tool_user", lambda request: "ordinary-user")
+    async def authenticated_ordinary_user(_request):
+        return "ordinary-user"
+
+    monkeypatch.setattr(core_mesh_routes, "_authenticated_tool_user", authenticated_ordinary_user)
     called = {"execute": False}
 
     def unexpected_execution(*args, **kwargs):
