@@ -333,23 +333,19 @@ def _dashboard_snapshot() -> dict:
             # Render links the private URL and generated brain credential through
             # the Blueprint. Do not require a manually provisioned developer key,
             # duplicated URL alias, feature flag, or timeout override.
-            "zero_url_configured": bool(core_base_url("zero")),
             "zero_admin_token_configured": bool(core_admin_token("zero")),
             "zero_brain_token_configured": bool(os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()),
             "zero_enabled": usect_zero_is_enabled(),
-            "zero_tools_ready": bool(
+            "zero_brain_dispatcher_enabled": bool(
                 usect_zero_is_enabled()
-                and core_base_url("zero")
                 and os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
             ),
-            "zero_admin_actions_ready": bool(core_base_url("zero") and core_admin_token("zero")),
-            "genesis_url_configured": bool(os.getenv("GENESIS_BASE_URL")),
+            "zero_admin_actions_ready": bool(core_admin_token("zero")),
             "genesis_proxy_credential_configured": bool(os.getenv("GENESIS_ADMIN_TOKEN") or os.getenv("GENESIS_TOKEN")),
             "genesis_orchestrator_tools_enabled": os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
             "genesis_signing_key_configured": one_health.get("signing_key_configured"),
             "genesis_registry_ready": registry_ready,
             "active_signed_tools_count": active_signed_tools_count,
-            "mind_url_configured": bool(os.getenv("MIND_BASE_URL")),
             "write_credentials_configured": bool(core_admin_token("mind")),
             "core_mesh_operator_allowlist_configured": bool((os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip()),
         },
