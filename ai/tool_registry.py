@@ -16,6 +16,8 @@ from urllib.parse import quote, urlsplit
 
 import requests
 
+from services.core_config import core_admin_token, core_base_url
+
 logger = logging.getLogger("revelaai.genesis_tools")
 _MAX_RESPONSE_BYTES = 1_000_000
 _MAX_INPUT_BYTES = 64_000
@@ -57,10 +59,17 @@ class GenesisToolRegistryError(RuntimeError):
 
 
 def _configuration() -> tuple[str, dict[str, str]]:
-    raw_base = str(os.getenv("GENESIS_BASE_URL") or "").strip().rstrip("/")
-    token = str(os.getenv("GENESIS_ADMIN_TOKEN") or "").strip()
+    # Every signed tool shares the one Core-One service connection. Resolve it
+    # through the same server-side configuration used by Core Mesh; individual
+    # tool manifests never carry endpoint URLs.
+    raw_base = str(core_base_url("genesis") or "").strip().rstrip("/")
+    token = core_admin_token("genesis")
     if not raw_base:
-        raise GenesisToolRegistryError("Genesis is unavailable: GENESIS_BASE_URL is not configured.", code="genesis_unavailable", status_code=503)
+        raise GenesisToolRegistryError(
+            "Genesis is unavailable: the Core-One service connection has not been provisioned.",
+            code="genesis_unavailable",
+            status_code=503,
+        )
     if not token:
         raise GenesisToolRegistryError("Genesis tool access is not configured.", code="genesis_admin_token_not_configured", status_code=503)
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in raw_base):

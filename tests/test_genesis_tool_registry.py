@@ -51,7 +51,27 @@ def test_prompt_catalog_is_provider_neutral_and_not_executable():
     assert "never claim execution" in catalog[0]["description"]
 
 
+def test_registry_uses_shared_local_core_default_without_a_tool_url_setting(monkeypatch):
+    for name in (
+        "GENESIS_BASE_URL",
+        "RENDER",
+        "ENVIRONMENT",
+        "RENDER_SERVICE_ID",
+        "RENDER_EXTERNAL_URL",
+        "K_SERVICE",
+        "DYNO",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
+
+    base, headers = tool_registry._configuration()
+
+    assert base == "http://127.0.0.1:8781"
+    assert headers["X-Genesis-Token"] == "test-token"
+
+
 def test_registry_unavailable_does_not_return_empty_success(monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
     monkeypatch.delenv("GENESIS_BASE_URL", raising=False)
     monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-token")
     try:
@@ -60,7 +80,7 @@ def test_registry_unavailable_does_not_return_empty_success(monkeypatch):
         assert exc.code == "genesis_unavailable"
         assert exc.status_code == 503
     else:
-        raise AssertionError("missing Genesis URL must be an explicit unavailable state")
+        raise AssertionError("missing production Genesis service binding must be explicit")
 
 
 def test_execution_is_delegated_to_genesis_and_bounds_arguments(monkeypatch):
