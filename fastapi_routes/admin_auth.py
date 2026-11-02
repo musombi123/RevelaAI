@@ -105,7 +105,7 @@ def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse
             else ""
         )
         code = upstream_code if upstream_code in {
-            "admin_required", "user_identity_mismatch"
+            "admin_required", "user_identity_mismatch", "account_inactive"
         } else "admin_required"
         return None, _error(code, 403)
 
@@ -149,10 +149,22 @@ def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse
         )
 
     canonical_id = str(body.get("userId") or body.get("user_id") or body.get("id") or "").strip()
-    role = str(body.get("role") or "").strip().lower()
+    role = str(body.get("role") or "").strip().casefold()
+    raw_roles = body.get("roles")
+    if isinstance(raw_roles, str):
+        raw_roles = [raw_roles]
+    elif not isinstance(raw_roles, list):
+        raw_roles = []
+    current_roles = {
+        str(value).strip().casefold()
+        for value in raw_roles
+        if str(value or "").strip()
+    }
+    if role:
+        current_roles.add(role)
     authorized = body.get("authorized")
 
-    if not canonical_id or not role or not isinstance(authorized, bool):
+    if not canonical_id or not isinstance(authorized, bool):
         logger.warning(
             "RevelaCode administrator-verification returned an incomplete success payload."
         )
@@ -164,7 +176,7 @@ def require_platform_admin(authorization: str) -> tuple[str | None, JSONResponse
 
     # Do not trust cached/browser role labels. Only the authoritative response
     # from RevelaCode can authorize access to Meta-Engineer and its API routes.
-    if authorized is not True or role not in PLATFORM_ADMIN_ROLES:
+    if authorized is not True or not current_roles.intersection(PLATFORM_ADMIN_ROLES):
         return None, _error("admin_required", 403)
 
     return canonical_id, None
