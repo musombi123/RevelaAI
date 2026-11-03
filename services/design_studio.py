@@ -70,6 +70,16 @@ def _template(request: str, kind: str, requested: Any = None) -> str:
 def _extract_copy(request: str, supplied: Any = None) -> list[str]:
     raw = str(supplied or "").strip()
     if not raw:
+        quoted = re.findall(r'["“]([^"”]{1,180})["”]', request)
+        if quoted:
+            return [re.sub(r"\\s+", " ", line).strip()[:180] for line in quoted[:6] if line.strip()]
+        labelled = []
+        for label in ("title", "headline", "heading", "subtitle", "body", "footer", "date", "venue"):
+            match = re.search(rf"\\b{label}\\s*[:=]\\s*([^,;\\n]+)", request, re.I)
+            if match:
+                labelled.append(match.group(1).strip().strip('"\\''))
+        if labelled:
+            return [line[:180] for line in labelled[:6] if line]
         raw = str(extract_text(request) or "").strip()
     if not raw:
         match = re.search(r"\b(?:for|about|announcing)\s+(.+?)(?:\s+(?:using|with|in)\s+.+)?$", request, re.I)
@@ -309,6 +319,8 @@ def render_design(brief: dict[str, Any], background: Image.Image | None = None) 
 
     if template == "logo_sheet":
         draw.text((width // 2, margin + 20), title or "BRAND IDENTITY", font=_font(int(width * .045), True), fill=white, anchor="ma")
+        if subtitle:
+            _draw_wrapped(draw, subtitle, (width // 2, int(height * .17)), _font(int(width * .025), True), accent, width - margin * 2, 8, "center", 2)
         cell = int(width * .22)
         gap = int(width * .055)
         start_x = (width - (cell * 3 + gap * 2)) // 2
