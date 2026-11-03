@@ -199,6 +199,13 @@ FORMAT_PRESETS: dict[str, dict[str, Any]] = {
         "label": "Square",
     },
 
+    "a4": {
+        "aspect_ratio": "a4",
+        "width": 1240,
+        "height": 1754,
+        "label": "A4 Print",
+    },
+
     "portrait": {
         "aspect_ratio": "2:3",
         "width": 832,
@@ -482,7 +489,11 @@ def _detect_format(
     # Explicit aspect ratios
     # -----------------------------------------------------
 
-    if _has(
+    if _has(t, ("a4", "a4 print", "a4 paper")):
+
+        key = "a4"
+
+    elif _has(
         t,
         (
             "story",
