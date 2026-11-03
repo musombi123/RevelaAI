@@ -12,7 +12,10 @@ DEFAULT_CORS_ORIGINS = (
     "https://www.revelacode.co.ke",
     "https://revelacode.com",
     "https://www.revelacode.com",
+    # Tauri 2 desktop app and Capacitor Android app origins.
+    "http://tauri.localhost",
     "https://localhost",
+    "http://localhost",
 )
 
 
