@@ -6,7 +6,9 @@ inside its existing services; expose HTTP handlers through fastapi_routes/.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import asyncio
+import os
+from datetime import datetime, time as datetime_time, timedelta, timezone
 import base64
 import json
 import logging
@@ -49,6 +51,35 @@ from services.runtime_config import APP_NAME, ENVIRONMENT, MAX_CONTENT_LENGTH, R
 from services.security_state import SCI_RATE_LOCK, SCI_REQUEST_TIMES, SCI_THROTTLE
 
 logger = logging.getLogger("revelaai.asgi")
+
+_daily_learning_task: asyncio.Task | None = None
+
+
+def _seconds_until_daily_learning(now: datetime | None = None) -> float:
+    current = now or datetime.now(timezone.utc)
+    target = datetime.combine(current.date(), datetime_time(hour=3, minute=10), tzinfo=timezone.utc)
+    if target <= current:
+        target += timedelta(days=1)
+    return max(1.0, (target - current).total_seconds())
+
+
+async def _daily_learning_loop() -> None:
+    """Run the Gemini research cycle once daily while the single ASGI worker is alive."""
+    while True:
+        await asyncio.sleep(_seconds_until_daily_learning())
+        try:
+            from ai.daily_learning import run_daily_learning_cycle
+            result = await asyncio.to_thread(run_daily_learning_cycle)
+            logger.info(
+                "Daily learning scheduler completed | status=%s | run_date=%s | candidates=%s",
+                result.get("status"), result.get("run_date"), result.get("candidate_count"),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Daily learning scheduler failed | error_type=%s", type(exc).__name__)
+
+
 
 app = FastAPI(
     title="RevelaAI API",
@@ -221,6 +252,27 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "request_id": request_id,
         }
     return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.on_event("startup")
+async def start_daily_learning_scheduler() -> None:
+    """Start the opt-in daily Gemini source-discovery task in the single ASGI worker."""
+    global _daily_learning_task
+    enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if enabled and (_daily_learning_task is None or _daily_learning_task.done()):
+        _daily_learning_task = asyncio.create_task(_daily_learning_loop(), name="revelaai-daily-learning")
+
+
+@app.on_event("shutdown")
+async def stop_daily_learning_scheduler() -> None:
+    global _daily_learning_task
+    if _daily_learning_task is not None:
+        _daily_learning_task.cancel()
+        try:
+            await _daily_learning_task
+        except asyncio.CancelledError:
+            pass
+        _daily_learning_task = None
 
 
 @app.on_event("startup")
