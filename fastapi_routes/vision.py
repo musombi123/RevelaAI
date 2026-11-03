@@ -256,6 +256,12 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     except (ValueError, TypeError, IndexError, AttributeError):
         reply = ""
 
+    try:
+        from ai.gemini_tool_gateway import mark_core_usage
+        mark_core_usage("vision_runtime", "gemini_multimodal_analysis", "success" if reply else "empty_response")
+    except Exception:
+        pass
+
     if not reply:
         return JSONResponse(
             {
