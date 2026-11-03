@@ -278,7 +278,8 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     ).strip()[:128]
     try:
         from services.ai_service import process_message
-        from ai.gemini_tool_gateway import mark_core_usage
+        from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
+        from ai.core_mesh import core_mesh_operator_allowed
 
         followup_message = (
             "The user supplied an image and asked: " + prompt
@@ -287,13 +288,28 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
             + "\n\nAnswer the user's request using this observation. Use the shared registered tools if fresh online evidence or a real core operation is needed. "
             "Do not claim anything beyond the image observation or verified tool results."
         )
+        authorization = str(headers.get("authorization", ""))
+        allow_automation_tools = requires_automation_entitlement(followup_message, intent="file_analysis")
+        if allow_automation_tools:
+            _, automation_error = check_entitlement(
+                authorization,
+                hub="smart_ai",
+                feature="automation",
+                timeout_seconds=1.0,
+            )
+            allow_automation_tools = automation_error is None
+        allow_genesis_tools = bool(
+            allow_automation_tools and core_mesh_operator_allowed(str(user_id))
+        )
         chat_result = process_message(
             message=followup_message,
             context=[],
             intent="file_analysis",
             session_id=vision_session_id or None,
             user_id=str(user_id),
-            authorization=str(headers.get("authorization", "")),
+            allow_genesis_tools=allow_genesis_tools,
+            allow_automation_tools=allow_automation_tools,
+            authorization=authorization,
         )
         if isinstance(chat_result, dict):
             candidate = str(chat_result.get("response") or "").strip()
