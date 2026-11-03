@@ -4273,6 +4273,17 @@ def ask_hf(
 
     # Diagnostics and real generation share one normalized provider order.
     providers_to_try = get_text_provider_order()
+    tool_call_turn = bool(gemini_function_declarations)
+    gemini_provider_names = {"gemini", "google", "google-ai", "googleai"}
+    if tool_call_turn and not any(name in gemini_provider_names for name in providers_to_try):
+        return {
+            "success": False,
+            "response": "Gemini's native tool runtime is not in the configured provider order. No alternate model was allowed to simulate tool execution.",
+            "error_code": "gemini_tool_runtime_unavailable",
+            "provider": "gemini",
+            "model": GEMINI_MODEL,
+            "session_id": session_id,
+        }
 
     for provider in providers_to_try:
 
@@ -4303,6 +4314,16 @@ def ask_hf(
                         ),
                     }
                 )
+                if tool_call_turn:
+                    return {
+                        "success": False,
+                        "response": "Gemini's tool-capable text provider is not configured. No other model was allowed to impersonate the tool runtime.",
+                        "error_code": "gemini_tool_runtime_unavailable",
+                        "provider": "gemini",
+                        "model": GEMINI_MODEL,
+                        "providers_attempted": ["gemini"],
+                        "session_id": session_id,
+                    }
 
                 continue
 
@@ -4355,6 +4376,16 @@ def ask_hf(
                         ),
                     }
                 )
+                if tool_call_turn:
+                    return {
+                        "success": False,
+                        "response": "Gemini could not complete this tool-enabled turn. The requested tool was not executed, and no fallback model was allowed to simulate it.",
+                        "error_code": "gemini_tool_runtime_unavailable",
+                        "provider": "gemini",
+                        "model": GEMINI_MODEL,
+                        "providers_attempted": ["gemini"],
+                        "session_id": session_id,
+                    }
 
                 continue
 
