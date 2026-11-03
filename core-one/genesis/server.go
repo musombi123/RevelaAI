@@ -74,12 +74,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Health can report basic liveness even if the engine was not initialized.
 	if path == "/v1/genesis/health" && r.Method == http.MethodGet {
+		_, signingKeyErr := registrySigningKey()
 		writeAPIJSON(w, http.StatusOK, map[string]any{
 			"status":         "ok",
 			"version":        Version,
 			"standalone":     true,
 			"model_assisted": strings.TrimSpace(os.Getenv("GENESIS_MODEL_BASE_URL")) != "",
-			"signing_key_configured": strings.TrimSpace(os.Getenv("GENESIS_SIGNING_KEY")) != "",
+			"signing_key_configured": signingKeyErr == nil,
+			"signing_key_valid": signingKeyErr == nil,
 			"execution":      "proposal_only",
 			"merge":          "human_required",
 		})
