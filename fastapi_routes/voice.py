@@ -22,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from ai.ai_client import generate_hf_speech, transcribe_hf_audio
 from ai.intent_router import classify_intent
 from ai.core_mesh import core_mesh_operator_allowed
-from ai.gemini_tool_gateway import requires_automation_entitlement
+from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
 from services.revenue_entitlements import check_entitlement
 from services.ai_service import detect_capability, process_message
@@ -115,6 +115,7 @@ def _voice_sync(
     if not isinstance(transcription, dict):
         transcription = {"text": str(transcription or "")}
     heard = str(transcription.get("text") or "").strip()
+    mark_core_usage("voice_runtime", "speech_transcription", "success" if heard else "empty_transcript")
     if not heard:
         return _error("EMPTY_TRANSCRIPTION", "No speech could be transcribed.", 400)
 
@@ -294,6 +295,7 @@ def _voice_sync(
 
     try:
         audio_output = generate_hf_speech(response_text)
+        mark_core_usage("voice_runtime", "speech_synthesis", "success" if audio_output else "unavailable")
     except Exception:
         logger.exception("Voice synthesis failed")
         audio_output = None
