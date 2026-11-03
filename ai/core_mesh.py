@@ -497,6 +497,8 @@ def get_core_mesh_configuration_health() -> dict:
             "authenticated_status_reachable": genesis_token_verified,
             "reachable": genesis_reachable,
             "reason": (
+                str(genesis_health_probe.get("reason") or "core_service_not_configured")
+                if not genesis_url or not genesis_health_probe.get("reachable") else
                 "genesis_token_missing" if not genesis_token else
                 str(genesis_status_probe.get("reason") or "") or None
             ),
