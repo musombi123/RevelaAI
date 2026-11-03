@@ -419,8 +419,8 @@ def execute_tool(operation: str, arguments: dict[str, Any] | None = None) -> dic
 
     # Match the canonical Render Blueprint name and retain the legacy alias.
     api_key = (
-        os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
-        or os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
+        os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip()
+        or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()
     )
     if not api_key:
         result.update({
