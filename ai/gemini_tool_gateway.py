@@ -39,6 +39,8 @@ CORE_ENGAGEMENT = {
     "core_uncopyable": {"module": "core_uncopyable.recipe_lock", "role": "owner recipe and provenance trust status"},
     "sci_core": {"module": "revelai.sci_core.research_engine", "role": "civilian research and defensive analysis", "tools": ["revelaai_research"]},
     "brain_os": {"module": "revelai.core.brain_os", "role": "capability inventory and privacy-minimised outcomes"},
+    "core_billing": {"module": "core_billing.service", "role": "license, entitlement and billing authorization control plane"},
+    "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and guarded engineering proposals", "tools": ["operator_tool_dispatch"]},
 }
 
 GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
@@ -231,11 +233,14 @@ def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, An
         extra["enrolled_device_count"] = None
         extra["device_inventory_error"] = type(exc).__name__
     try:
-        from core_seed.seed_runner import seed_root
+        from core_seed.seed_runner import SeedRunner, seed_root
+        SeedRunner()
         seed_path = seed_root()
         extra["seed_runtime"] = {"source_present": True, "store_initialized": seed_path.exists()}
+        _mark("core_seed", "seed_runner_readiness", "success")
     except Exception as exc:
         extra["seed_runtime"] = {"source_present": False, "error_type": type(exc).__name__}
+        _mark("core_seed", "seed_runner_readiness", "degraded")
 
     try:
         from asgi import app as running_app
@@ -263,7 +268,8 @@ def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, An
     _mark("core_auditor", "verify", "success" if extra.get("audit_ledger", {}).get("ok") else "degraded")
     _mark("core_uncopyable", "recipe_lock_status", "success" if extra.get("owner_recipe", {}).get("locked") else "not_configured")
     _mark("core_migrate", "list_devices", "success")
-    _mark("core_seed", "seed_readiness", "success")
+    _mark("core_billing", "entitlement_control_plane", "registered")
+    _mark("meta_engineer", "architecture_tool_adapter", "registered")
     _mark("brain_os", "capability_inventory", "success")
     return {
         "status": "live_probe_complete" if include_live_probes else "inventory_complete",
@@ -424,6 +430,12 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
 
 
 
+def mark_core_usage(core: str, operation: str, status: str = "success") -> None:
+    """Record a sanitized engagement marker for an owning core adapter."""
+    if core in CORE_ENGAGEMENT:
+        _mark(core, operation, status)
+
+
 def dispatch_gemini_tool(name: str, arguments: dict[str, Any], *, user_id: str | None, authorization: str = "") -> dict[str, Any]:
     """Dispatch, then meter and audit the actual outcome without logging payloads."""
     started = time.monotonic()
@@ -442,5 +454,5 @@ def dispatch_gemini_tool(name: str, arguments: dict[str, Any], *, user_id: str |
 
 __all__ = [
     "CORE_ENGAGEMENT", "GENERAL_TOOL_DECLARATIONS", "dispatch_gemini_tool",
-    "gemini_tool_declarations", "is_gateway_tool",
+    "gemini_tool_declarations", "is_gateway_tool", "mark_core_usage",
 ]
