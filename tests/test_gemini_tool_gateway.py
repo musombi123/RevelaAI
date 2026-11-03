@@ -280,3 +280,43 @@ def test_disaster_diagnostic_is_operator_only_and_excludes_live_throttle_simulat
     )
     assert result["status"] == "blocked"
     assert result["reason"] == "tool_execution_failed"
+
+
+def test_shared_gemini_runtime_registers_voice_vision_and_all_core_adapters():
+    expected = {
+        "core_zero",
+        "core_one_genesis",
+        "core_two_infinite_mind",
+        "core_auditor",
+        "core_evolve",
+        "core_foundry",
+        "core_inspector",
+        "core_meter",
+        "core_migrate",
+        "core_seed",
+        "core_uncopyable",
+        "sci_core",
+        "brain_os",
+        "core_billing",
+        "meta_engineer",
+        "global_brain_adapter",
+        "orchestrator",
+        "gemini_reasoning",
+        "voice_runtime",
+        "vision_runtime",
+        "daily_learning",
+    }
+    assert expected.issubset(set(gateway.CORE_ENGAGEMENT))
+
+    declarations = _names()
+    assert "revelaai_research" in declarations
+    assert "revelaai_get_core_status" in declarations
+    assert "revelaai_get_learning_status" in declarations
+
+
+def test_daily_learning_is_enabled_by_default_but_can_be_explicitly_disabled(monkeypatch):
+    monkeypatch.delenv("REVELAAI_DAILY_LEARNING_ENABLED", raising=False)
+    assert gateway._core_status.__name__ == "_core_status"
+    assert gateway.CORE_ENGAGEMENT["daily_learning"]["module"] == "ai.daily_learning"
+    monkeypatch.setenv("REVELAAI_DAILY_LEARNING_ENABLED", "false")
+    assert __import__("os").getenv("REVELAAI_DAILY_LEARNING_ENABLED") == "false"
