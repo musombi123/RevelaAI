@@ -13,6 +13,8 @@ services:
         value: "https://revelacode.co.ke,https://www.revelacode.co.ke,https://revelacode-frontend.onrender.com,http://tauri.localhost,https://localhost,http://localhost,http://localhost:5173,http://127.0.0.1:5173"
       - key: REVELAAI_TEXT_PROVIDERS
         value: "gemini,hf,mvi"
+      - key: REVELAAI_DAILY_LEARNING_ENABLED
+        value: "true"
       # Authoritative platform-admin verifier used by routes/meta_engineer_routes.py.
       # Keep this server-side; bearer JWTs are never sent to the Go core.
       - key: REVELACODE_BACKEND_URL
