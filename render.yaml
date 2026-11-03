@@ -160,8 +160,10 @@ services:
       # Render terminates public TLS at the platform proxy; this is a private service.
       - key: GENESIS_TRUST_PROXY_TLS
         value: "true"
+      # Must be a base64-encoded Ed25519 32-byte seed or 64-byte private key.
+      # Render's generic generateValue is not guaranteed to produce valid key material.
       - key: GENESIS_SIGNING_KEY
-        generateValue: true
+        sync: false
       - key: GENESIS_OWNER_APPROVAL_TOKEN
         sync: false
       - key: GENESIS_ACTION_APPROVAL_TOKEN
