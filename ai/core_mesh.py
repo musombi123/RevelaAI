@@ -353,12 +353,46 @@ def _dashboard_snapshot() -> dict:
 
 
 
+def _core_probe(base: str, path: str, label: str, *, headers: dict[str, str] | None = None) -> dict:
+    """Return a secret-free reachability diagnosis for one private core."""
+    if not base:
+        return {
+            "configured": False, "reachable": False,
+            "reason": "core_service_not_configured",
+            "message": f"{label} has no private service URL in the RevelaAI gateway. Sync the Render Blueprint service reference.",
+        }
+    result = _safe_fetch(base, path, headers=headers)
+    if _is_online(result):
+        return {
+            "configured": True, "reachable": True, "reason": None,
+            "http_status": result.get("http_status"),
+            "message": f"{label} answered its health request.",
+        }
+    reason = str(result.get("reason") or "probe_failed")
+    if reason in {"upstream_http_401", "upstream_http_403"}:
+        message = f"{label} is running but rejected the gateway credential. Re-link the matching server-side token."
+    elif reason == "core_service_unreachable":
+        message = f"{label} has a configured URL, but the private service did not respond. Check that the Render private service is deployed and running."
+    elif reason == "core_service_not_configured":
+        message = f"{label} has no valid private service URL. Sync the Render Blueprint service reference."
+    else:
+        message = f"{label} did not pass its health request ({reason}). Check its deploy logs and internal port."
+    return {
+        "configured": True, "reachable": False, "reason": reason,
+        "http_status": result.get("http_status"), "message": message,
+    }
+
+
 def get_core_mesh_configuration_health() -> dict:
-    """Return admin-safe configuration checks; never return secret values."""
+    """Return operator-only configuration and reachability diagnostics; never return secret values."""
     zero_url = core_base_url("zero")
     genesis_url = core_base_url("genesis")
     mind_url = core_base_url("mind")
-    genesis_health = _safe_fetch(genesis_url, "/v1/genesis/health")
+
+    zero_probe = _core_probe(zero_url, "/v1/health", "USECT-ZERO")
+    genesis_health_probe = _core_probe(genesis_url, "/v1/genesis/health", "Genesis")
+    mind_probe = _core_probe(mind_url, "/v1/mind/health", "Infinite Mind")
+    genesis_health = _safe_fetch(genesis_url, "/v1/genesis/health") if genesis_url else {}
     genesis_signing = genesis_health.get("signing_key_configured")
     genesis_token = core_admin_token("genesis")
     genesis_status_probe = (
@@ -367,13 +401,16 @@ def get_core_mesh_configuration_health() -> dict:
     )
     genesis_token_invalid = genesis_status_probe.get("reason") in {"upstream_http_401", "upstream_http_403"}
     genesis_token_verified = bool(genesis_url and genesis_token and "reason" not in genesis_status_probe)
+    genesis_reachable = bool(genesis_health_probe.get("reachable") and genesis_token_verified)
 
     checks = [
         {
             "name": "USECT_ZERO_URL / USECT_ZERO_BASE_URL",
             "service": "RevelaAI gateway",
             "configured": bool(zero_url),
-            "message": "The private ZERO address is linked." if zero_url else "RevelaAI cannot locate the private ZERO service. Sync the Render Blueprint or set the internal service host:port.",
+            "message": zero_probe["message"],
+            "probe_status": "reachable" if zero_probe["reachable"] else "unavailable",
+            "probe_reason": zero_probe["reason"],
         },
         {
             "name": "USECT_ZERO_ENABLED=true",
@@ -385,19 +422,21 @@ def get_core_mesh_configuration_health() -> dict:
             "name": "USECT_ZERO_BRAIN_TOKEN",
             "service": "RevelaAI gateway + usect-zero-core",
             "configured": bool(os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip() or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()),
-            "message": "The gateway has the scoped ZERO brain credential." if (os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip() or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()) else "User-side AI calls to scoped ZERO tools will be unavailable. Link the same generated token from usect-zero-core.",
+            "message": "The gateway has the scoped ZERO brain credential. Its value must be linked from usect-zero-core with Render fromService; this presence check does not reveal or compare the secret." if (os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip() or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()) else "Missing on RevelaAI: scoped ZERO tools used by the user-side AI cannot authenticate. Link USECT_ZERO_BRAIN_TOKEN from usect-zero-core using Render fromService.",
         },
         {
             "name": "USECT_ZERO_ADMIN_TOKEN",
             "service": "RevelaAI gateway + usect-zero-core",
             "configured": bool(core_admin_token("zero")),
-            "message": "The gateway has the ZERO admin credential." if core_admin_token("zero") else "ZERO administrative actions will fail. Link the same generated token from usect-zero-core.",
+            "message": "The gateway has the ZERO admin credential; it must be the same service-linked value configured on usect-zero-core." if core_admin_token("zero") else "Missing on RevelaAI: protected ZERO administration cannot authenticate. Link USECT_ZERO_ADMIN_TOKEN from usect-zero-core.",
         },
         {
             "name": "GENESIS_BASE_URL",
             "service": "RevelaAI gateway",
             "configured": bool(genesis_url),
-            "message": "The private Genesis address is linked." if genesis_url else "RevelaAI cannot locate Genesis. Sync the Render Blueprint or set the internal Genesis host:port.",
+            "message": genesis_health_probe["message"],
+            "probe_status": "reachable" if genesis_health_probe["reachable"] else "unavailable",
+            "probe_reason": genesis_health_probe["reason"],
         },
         {
             "name": "GENESIS_ADMIN_TOKEN (or GENESIS_TOKEN)",
@@ -412,7 +451,7 @@ def get_core_mesh_configuration_health() -> dict:
                 if genesis_token_invalid else
                 "The gateway has a token, but equality cannot be verified until Genesis routing is healthy. Use the Render fromService link."
                 if genesis_token else
-                "Genesis status, registry and proposal requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one."
+                "Missing on RevelaAI: Genesis status, signed registry and invention proxy requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one."
             ),
         },
         {
@@ -420,7 +459,7 @@ def get_core_mesh_configuration_health() -> dict:
             "service": "genesis-core-one",
             "configured": genesis_signing is True,
             "unknown": genesis_signing is None,
-            "message": "Genesis reports its signing key configured." if genesis_signing is True else ("Genesis health could not be read, so signing-key status is unknown." if genesis_signing is None else "Set a strong GENESIS_SIGNING_KEY on genesis-core-one. Keep it only on that service."),
+            "message": "Genesis reports its Ed25519 signing key configured." if genesis_signing is True else ("Genesis health could not be read, so signing-key status is unknown. Restore private routing before diagnosing the key." if genesis_signing is None else "Missing or invalid on genesis-core-one: set GENESIS_SIGNING_KEY to base64-encoded Ed25519 32-byte seed material. Render generateValue is not a valid substitute."),
         },
         {
             "name": "GENESIS_ORCHESTRATOR_TOOLS_ENABLED=true",
@@ -432,31 +471,53 @@ def get_core_mesh_configuration_health() -> dict:
             "name": "MIND_BASE_URL",
             "service": "RevelaAI gateway",
             "configured": bool(mind_url),
-            "message": "The private Infinite Mind address is linked." if mind_url else "RevelaAI cannot locate Infinite Mind. Sync the Render Blueprint or set its internal host:port.",
+            "message": mind_probe["message"],
+            "probe_status": "reachable" if mind_probe["reachable"] else "unavailable",
+            "probe_reason": mind_probe["reason"],
         },
         {
             "name": "MIND_ADMIN_TOKEN",
             "service": "RevelaAI gateway + infinite-mind-core",
             "configured": bool(core_admin_token("mind")),
-            "message": "The gateway has the Mind mutation credential; the Render fromService link must point to the same token on infinite-mind-core." if core_admin_token("mind") else "Mind evolution requests cannot authenticate. Link MIND_ADMIN_TOKEN from infinite-mind-core.",
+            "message": "The gateway has the Mind mutation credential; Render fromService must link the matching value from infinite-mind-core." if core_admin_token("mind") else "Missing on RevelaAI: Mind mutation requests cannot authenticate. Link MIND_ADMIN_TOKEN from infinite-mind-core.",
         },
         {
             "name": "CORE_MESH_ADMIN_USER_IDS (or META_ENGINEER_ADMIN_USER_IDS)",
             "service": "RevelaAI gateway",
             "configured": bool((os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip()),
-            "message": "An operator allowlist is configured." if (os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip() else "Add the canonical RevelaCode user ID(s) allowed to operate Core Mesh. Do not use a browser-side role flag.",
+            "message": "An operator allowlist is configured." if (os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip() else "Missing on RevelaAI: add the canonical RevelaCode user ID(s) allowed to operate Core Mesh. Do not use a browser-side role flag.",
         },
     ]
     missing = [item["name"] for item in checks if not item["configured"]]
     unknown = [item["name"] for item in checks if item.get("unknown")]
+    core_probes = {
+        "zero": zero_probe,
+        "genesis": {
+            **genesis_health_probe,
+            "authenticated_status_reachable": genesis_token_verified,
+            "reachable": genesis_reachable,
+            "reason": (
+                "genesis_token_missing" if not genesis_token else
+                str(genesis_status_probe.get("reason") or "") or None
+            ),
+            "message": (
+                "Genesis health and authenticated status both responded."
+                if genesis_reachable else
+                "Genesis health responded, but its authenticated status route did not. Check GENESIS_ADMIN_TOKEN and the Render service link."
+                if genesis_health_probe["reachable"] else genesis_health_probe["message"]
+            ),
+        },
+        "mind": mind_probe,
+    }
     return {
-        "status": "ready" if not missing and not unknown else "needs_configuration",
+        "status": "ready" if not missing and not unknown and all(p.get("reachable") for p in core_probes.values()) else "needs_configuration",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "secrets_returned": False,
         "missing_variable_names": missing,
         "unknown_variable_names": unknown,
         "items": checks,
-        "note": "Presence checks never expose secret values. Remote health confirms service responses; it does not prove token equality unless Render fromService links are used.",
+        "core_probes": core_probes,
+        "note": "No secret values are returned. A configured variable is not proof of token equality unless Render fromService links the core's value. A reachable health endpoint is not proof of end-to-end production readiness.",
     }
 
 
