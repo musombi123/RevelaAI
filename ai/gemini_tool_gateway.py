@@ -396,6 +396,10 @@ def _automation_entitlement(authorization: str) -> dict[str, Any] | None:
         }
 
 
+def _daily_learning_enabled() -> bool:
+    return _daily_learning_enabled()
+
+
 def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, Any]:
     from revelai.core.brain_os import capability_inventory
     inventory = capability_inventory()
