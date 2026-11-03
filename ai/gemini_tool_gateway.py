@@ -220,10 +220,10 @@ def requires_automation_entitlement(message: str, intent: str = "general") -> bo
 
 
 _READ_ONLY_TOOL_REQUEST_PATTERNS = (
-    re.compile(r"\\b(?:search online|browse online|look up|find sources|research|cite sources|provide sources|source links)\\b", re.I),
-    re.compile(r"\\b(?:latest|most recent|current state|current version|recent release|up to date)\\b", re.I),
-    re.compile(r"\\b(?:core status|core readiness|which cores|what cores|daily learning status|learning cycle status|verify seed)\\b", re.I),
-    re.compile(r"\\bseed_[a-f0-9]{24}\\b", re.I),
+    re.compile(r"\b(?:search online|browse online|look up|find sources|research|cite sources|provide sources|source links)\b", re.I),
+    re.compile(r"\b(?:latest|most recent|current state|current version|recent release|up to date)\b", re.I),
+    re.compile(r"\b(?:core status|core readiness|which cores|what cores|daily learning status|learning cycle status|verify seed)\b", re.I),
+    re.compile(r"\bseed_[a-f0-9]{24}\b", re.I),
 )
 
 
