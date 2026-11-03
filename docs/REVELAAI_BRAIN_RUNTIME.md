@@ -4,7 +4,7 @@
 
 RevelaAI is a coordinated software system, not one model with direct control of every module.
 
-- **Gemini is the primary generative reasoning engine.** It interprets the grounded prompt and produces language or, for an explicitly authorized operator workflow, a structured tool-call request.
+- **Gemini is the primary generative reasoning and tool-selection engine.** Every text turn, voice transcript and vision-chat handoff receives the safe shared read-only function catalogue. Entitled automation and operator-only declarations are added only when the authenticated route grants them. Gemini proposes calls; the server-owned gateway executes them after independent validation.
 - **The global brain adapter** (ai/global_brain_adapter.py) adds the requested/effective hub, capability context, interaction style, and canonical manifest constraints.
 - **The orchestrator** (ai/orchestrator.py) determines domains and specialist intents, retrieves allowed RevelaCode context, invokes configured research and specialist providers, and builds evidence for the model.
 - **The AI service** (services/ai_service.py) is the central coordinator. It selects server-owned capabilities, applies specialist and engineering dispatch, assembles the grounded prompt, calls the provider chain, validates model tool requests, and constructs the result.
@@ -48,6 +48,24 @@ The production outer FastAPI app explicitly runs the mounted RevelaAI ASGI appli
     Grounded response + execution metadata
 
 The provider order is normalized before use. If Gemini is configured, it is attempted first regardless of older aliases or an environment list that places MVI earlier. Hugging Face and MVI are fallbacks in the remaining configured order. An MVI rule-engine/template response is rejected rather than presented as generative model output.
+
+
+## Shared Gemini tool runtime, voice, vision and daily learning
+
+Every normal text request is offered the shared safe read-only Gemini function catalogue. This lets Gemini decide when current research, core status, learning status, seed verification or a bounded read-only USECT-ZERO operation is useful. It is not forced to call a tool on every request.
+
+The same `process_message()` service is used after voice transcription and after Gemini Live Vision has described an image. Therefore those modalities converge on the same Gemini reasoning and tool-selection layer. Speech recognition and speech synthesis remain specialist adapters (currently Hugging Face); Gemini reasons over the transcript and may request registered tools. Live Vision sends the image to the configured Gemini multimodal model, then hands the visual evidence to the same chat/tool pipeline.
+
+The general catalogue includes:
+- Evidence-backed online research across software, agriculture, education, business, science, engineering, health and other professional areas.
+- Tool/app/plugin/agent planning through Core Foundry.
+- Review-only code scaffolding through Meta-Engineer.
+- Bounded USECT-ZERO operations, guarded Core-One/Genesis signed Tier-0 tools, and proposal-only Core-Two/Core-Evolve improvements.
+- Defensive research/diagnostics, seed verification, dry-run device migration and daily-learning status.
+
+Automation functions are only declared after the request route grants the automation entitlement. Operator-only functions additionally require the canonical Core Mesh operator identity. The Gemini tool gateway records sanitized call outcomes through Core Auditor and Core Meter. The core-engagement inventory reports source presence, adapter registration, calls in this process and last outcome separately; a registered adapter is not proof of upstream health.
+
+Daily Gemini learning is enabled by default unless `REVELAAI_DAILY_LEARNING_ENABLED=false`. The single ASGI worker performs an idempotent startup catch-up and then runs daily at 03:10 UTC. It researches eight tracks spanning Gemini/API changes, tool standards, agent builders, developer operations, voice/vision, science/engineering, professional workflows and security/governance. Gemini converts source-linked records into a review queue. This is retrieval and evidence review, not model-weight training, automatic package installation, code execution or production self-modification. Candidates require human review.
 
 ## Core responsibilities
 
