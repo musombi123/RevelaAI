@@ -1923,6 +1923,7 @@ def process_message(
         if model_function_declarations and not proposal_already_created:
             model_call_kwargs["gemini_function_declarations"] = model_function_declarations
         result = ask_hf(**model_call_kwargs)
+        mark_core_usage("gemini_reasoning", "chat_generation", str(result.get("provider") or "unknown") if isinstance(result, dict) else "invalid_result")
 
     except Exception as exc:
 
