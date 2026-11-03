@@ -686,7 +686,7 @@ async def generated_image_asset(filename: str):
     if path.parent != root or not path.is_file():
         return _error("IMAGE_NOT_FOUND", "This generated file has expired or does not exist.", 404)
     media_types = {".png": "image/png", ".jpg": "image/jpeg", ".pdf": "application/pdf", ".svg": "image/svg+xml"}
-    return FileResponse(path, media_type=media_types.get(path.suffix.lower(), "application/octet-stream"), filename=filename)
+    return FileResponse(path, media_type=media_types.get(path.suffix.lower(), "application/octet-stream"), filename=filename, content_disposition_type="inline")
 
 
 @router.post("/ai")
