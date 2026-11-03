@@ -64,11 +64,25 @@ def _seconds_until_daily_learning(now: datetime | None = None) -> float:
 
 
 async def _daily_learning_loop() -> None:
-    """Run the Gemini research cycle once daily while the single ASGI worker is alive."""
+    """Run one catch-up cycle on startup, then repeat daily at 03:10 UTC."""
+    from ai.daily_learning import run_daily_learning_cycle
+
+    # The cycle is idempotent by UTC date. This catch-up means a deployment
+    # started after 03:10 UTC still learns that day instead of waiting 24 hours.
+    try:
+        result = await asyncio.to_thread(run_daily_learning_cycle)
+        logger.info(
+            "Daily learning catch-up completed | status=%s | run_date=%s | candidates=%s",
+            result.get("status"), result.get("run_date"), result.get("candidate_count"),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Daily learning catch-up failed | error_type=%s", type(exc).__name__)
+
     while True:
         await asyncio.sleep(_seconds_until_daily_learning())
         try:
-            from ai.daily_learning import run_daily_learning_cycle
             result = await asyncio.to_thread(run_daily_learning_cycle)
             logger.info(
                 "Daily learning scheduler completed | status=%s | run_date=%s | candidates=%s",
@@ -258,7 +272,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def start_daily_learning_scheduler() -> None:
     """Start the opt-in daily Gemini source-discovery task in the single ASGI worker."""
     global _daily_learning_task
-    enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
     if enabled and (_daily_learning_task is None or _daily_learning_task.done()):
         _daily_learning_task = asyncio.create_task(_daily_learning_loop(), name="revelaai-daily-learning")
 
