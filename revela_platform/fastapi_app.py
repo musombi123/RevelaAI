@@ -93,6 +93,9 @@ _DEFAULT_CORS_ORIGINS = (
     "https://revelacode-frontend.onrender.com",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://tauri.localhost",
+    "https://localhost",
+    "http://localhost",
 )
 _configured_cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
 _CORS_ORIGINS = list(dict.fromkeys(
