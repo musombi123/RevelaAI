@@ -40,6 +40,12 @@ CORE_ENGAGEMENT = {
     "core_uncopyable": {"module": "core_uncopyable.recipe_lock", "role": "owner recipe and provenance trust status"},
     "sci_core": {"module": "revelai.sci_core.research_engine", "role": "civilian research, prototype drafts and defensive diagnostics", "tools": ["revelaai_research", "revelaai_build_civilian_prototype", "revelaai_disaster_diagnostic", "revelaai_defensive_scan"]},
     "brain_os": {"module": "revelai.core.brain_os", "role": "capability inventory and privacy-minimised outcomes"},
+    "global_brain_adapter": {"module": "ai.global_brain_adapter", "role": "hub, capability and interaction-context adaptation"},
+    "orchestrator": {"module": "ai.orchestrator", "role": "domain routing, evidence retrieval and specialist coordination"},
+    "gemini_reasoning": {"module": "ai.ai_client", "role": "primary language-model reasoning and native function calling"},
+    "voice_runtime": {"module": "fastapi_routes.voice", "role": "speech transcription, Gemini reasoning handoff and speech synthesis"},
+    "vision_runtime": {"module": "fastapi_routes.vision", "role": "Gemini multimodal image analysis and Gemini chat handoff"},
+    "daily_learning": {"module": "ai.daily_learning", "role": "scheduled evidence discovery and Gemini review queue"},
     "core_billing": {"module": "core_billing.service", "role": "license, entitlement and billing authorization control plane"},
     "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and review-only code scaffolding", "tools": ["revelaai_inspect_meta_engineer", "revelaai_draft_feature"]},
 }
@@ -463,7 +469,7 @@ def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, An
             .limit(1)
         )
         learning_latest = learning_rows[0] if learning_rows and isinstance(learning_rows[0], dict) else {}
-        learning_enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        learning_enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
         extra["daily_learning"] = {
             "enabled": learning_enabled,
             "schedule": "03:10 UTC daily",
