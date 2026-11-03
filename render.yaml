@@ -8,6 +8,9 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn revela_platform.fastapi_app:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
+      # Explicit allow-list for the web frontend and native WebView clients.
+      - key: CORS_ORIGINS
+        value: "https://revelacode.co.ke,https://www.revelacode.co.ke,https://revelacode-frontend.onrender.com,http://tauri.localhost,https://localhost,http://localhost,http://localhost:5173,http://127.0.0.1:5173"
       - key: REVELAAI_TEXT_PROVIDERS
         value: "gemini,hf,mvi"
       # Authoritative platform-admin verifier used by routes/meta_engineer_routes.py.
