@@ -1831,15 +1831,15 @@ def process_message(
     ))
     genesis_active_tools: list[dict[str, Any]] = []
     genesis_function_declarations: list[dict[str, Any]] = []
-    offers_tool_functions = bool(
-        allow_automation_tools or requires_read_only_tool_declarations(normalized_message)
-    )
-    model_function_declarations: list[dict[str, Any]] = (
-        gemini_tool_declarations(
-            include_privileged=bool(user_id and core_mesh_operator_allowed(user_id) and allow_genesis_tools),
-            include_automation=bool(allow_automation_tools),
-        )
-        if offers_tool_functions else []
+    # Gemini is the single reasoning/tool-selection layer for every text turn,
+    # including transcripts handed off from voice and image observations handed
+    # off from Live Vision. Safe read-only functions are always available; write,
+    # proposal and operator functions are included only after the route has
+    # granted the matching entitlement and identity checks.
+    offers_tool_functions = True
+    model_function_declarations: list[dict[str, Any]] = gemini_tool_declarations(
+        include_privileged=bool(user_id and core_mesh_operator_allowed(user_id) and allow_genesis_tools),
+        include_automation=bool(allow_automation_tools),
     )
     genesis_tool_execution: dict[str, Any] | None = None
     genesis_tools_enabled = (
