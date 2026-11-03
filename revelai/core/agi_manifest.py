@@ -254,20 +254,20 @@ AGI_MANIFEST: dict[str, Any] = {
             "verification": "implemented_in_source; live invocation and per-core reachability require runtime evidence",
         },
         "tool_factory": {
-            "description": "Foundry creates structured, review-only plans for new tools and applications from requirements; it does not execute generated code or deploy.",
-            "verification": "implemented_in_source; each plan requires human review and later independent validation",
+            "description": "Gemini can combine Foundry's structured tool/app plan with Meta-Engineer's backend, frontend, database or full-stack scaffold generator. Generated artifacts are review-only; no source is written to the live repository, executed or deployed.",
+            "verification": "implemented_in_source; automation entitlement is required; every generated scaffold remains a proposal until human review and independent validation",
         },
         "daily_capability_discovery": {
-            "description": "A scheduled Gemini research cycle collects fresh public web evidence and writes source-linked capability candidates for review.",
-            "verification": "scheduler_enabled_in_render_blueprint; successful daily execution and durable MongoDB persistence require runtime verification",
+            "description": "A scheduled Gemini research cycle searches official and public sources across model APIs, MCP/OpenAPI, agent/tool builders, developer operations, voice/vision, science/engineering, professional industries and security governance. Gemini converts source-bounded findings into review candidates.",
+            "verification": "ASGI startup scheduler is enabled by REVELAAI_DAILY_LEARNING_ENABLED=true in render.yaml; last run and candidate counts are queryable; successful daily retrieval and durable MongoDB persistence still require runtime evidence",
         },
         "vision_chat_tool_handoff": {
-            "description": "Gemini analyzes explicitly supplied image frames and can continue the image conversation through the shared tool-enabled reasoning pipeline.",
-            "verification": "source_present; camera permission, Gemini vision and chat tool dispatch must succeed for each request",
+            "description": "An explicitly shared image is analyzed by Gemini Vision, then its bounded text observation is handed to the same Gemini chat and registered-tool gateway. Image bytes are not retained by the vision route.",
+            "verification": "source_present; Gemini vision, camera permission, hub entitlement and any requested core-tool entitlement are checked independently per request",
         },
         "voice_chat_tool_handoff": {
-            "description": "Speech transcription feeds the Gemini conversation and its shared tool gateway; speech synthesis remains a specialist audio adapter.",
-            "verification": "source_present; ASR/TTS provider configuration and Gemini chat availability are separate",
+            "description": "Audio transcription is performed by the configured ASR adapter; the transcript enters the same Gemini reasoning and tool gateway, while speech synthesis is handled by the configured TTS adapter.",
+            "verification": "source_present; ASR/TTS provider configuration, voice entitlement, Gemini availability and automation entitlement are separate conditions",
         },
     },
     "capability_summary": CAPABILITY_SUMMARY.copy(),
