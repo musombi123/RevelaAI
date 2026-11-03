@@ -55,16 +55,24 @@ def infer_interaction_tone(message: str) -> str:
 def detect_capabilities(message: str, payload: dict[str, Any] | None = None) -> list[str]:
     payload = payload if isinstance(payload, dict) else {}
     text = str(message or "").lower()
-    capabilities = ["text_reasoning", "hub_adaptation", "contextual_memory"]
-    if payload.get("visionDescription") or payload.get("vision_description") or payload.get("vision"):
-        capabilities.append("vision_context")
-    if payload.get("fileText") or payload.get("documentText") or payload.get("attachmentText"):
+    capabilities = ["text_reasoning", "hub_adaptation", "contextual_memory", "gemini_tool_orchestration", "registered_tool_catalogue"]
+    if any(payload.get(key) for key in ("visionDescription", "vision_description", "vision", "image", "images", "visionFrame")):
+        capabilities.extend(["vision_context", "vision_chat"])
+    if any(payload.get(key) for key in ("fileText", "documentText", "attachmentText")):
         capabilities.append("document_context")
-    if payload.get("voiceTranscript") or payload.get("voice_transcript"):
-        capabilities.append("voice_transcript")
+    if any(payload.get(key) for key in ("voiceTranscript", "voice_transcript", "audioTranscript")):
+        capabilities.extend(["voice_input", "voice_transcript"])
+    if any(payload.get(key) for key in ("audioOutput", "voiceOutput", "audio_url")):
+        capabilities.append("voice_output")
     if re.search(r"\b(generate|create|draw|make)\b.{0,40}\b(image|picture|illustration|poster|logo|artwork)\b", text):
         capabilities.append("existing_image_router")
-    return capabilities
+    if re.search(r"\b(build|create|design|invent|develop|make)\b.{0,60}\b(tool|app|application|agent|plugin|connector|workflow|skill|api)\b", text):
+        capabilities.append("tool_building")
+    if re.search(r"\b(research|search|look up|find sources|latest|current|recent|new release|documentation)\b", text):
+        capabilities.append("online_research")
+    if re.search(r"\b(speak|talk|voice|read aloud|pronounce|transcribe|speech)\b", text):
+        capabilities.append("voice_interaction")
+    return list(dict.fromkeys(capabilities))
 
 
 def build_global_context(
