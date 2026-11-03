@@ -6,6 +6,7 @@ The image model is used only for optional backgrounds and illustration assets.
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -119,9 +120,16 @@ def build_design_brief(
         ratio = "a4"
     width, height = SIZES.get(ratio, (1080, 1350))
     supplied_copy = options.get("text") or options.get("copy")
+    explicit_fields = [
+        str(options.get(field) or "").strip()
+        for field in ("title", "subtitle", "body", "footer")
+        if str(options.get(field) or "").strip()
+    ]
     revision_copy = str(extract_text(revision) or "").strip() if revision else ""
     if revision_copy:
         exact_lines = _extract_copy(revision, revision_copy)
+    elif explicit_fields:
+        exact_lines = explicit_fields[:6]
     elif supplied_copy:
         exact_lines = _extract_copy(request, supplied_copy)
     elif previous.get("exact_copy"):
@@ -131,8 +139,9 @@ def build_design_brief(
     translation_requested = bool(re.search(r"\b(swahili|kiswahili|translate|translation)\b", revision, re.I))
     prompt = (
         "Create a production-ready graphic design brief as strict JSON only. "
-        "Keys: layout (one short sentence), palette (3 to 5 hex colours), "
-        "hierarchy (title_scale number 0.9 to 1.8), font_style (sans|serif|display), "
+        "Keys: layout (specific alignment and composition), palette (3 to 5 hex colours), "
+        "hierarchy (title_scale number 0.9 to 1.8 plus a short hierarchy description), "
+        "font_style (sans|serif|display), icons (up to 3 simple icon names such as star, leaf, bolt, book, globe), "
         "motifs (up to 3 short visual motifs), background_prompt (one short image-only prompt), "
         "title, subtitle, body, footer. "
         "Do not add claims, dates, phone numbers or brand names. Preserve provided copy verbatim. "
@@ -188,13 +197,14 @@ def build_design_brief(
         "template": template,
         "layout": str(previous.get("layout") or model_brief.get("layout") or "editorial grid with a strong headline and generous whitespace")[:240],
         "palette": palette,
-        "font_style": str(model_brief.get("font_style") or "sans")[:20],
+        "font_style": str(model_brief.get("font_style") or previous.get("font_style") or "sans").lower()[:20],
+        "icons": [str(x)[:40] for x in model_brief.get("icons", [])[:3]] if isinstance(model_brief.get("icons"), list) else [],
         "motifs": [str(x)[:60] for x in model_brief.get("motifs", [])[:3]] if isinstance(model_brief.get("motifs"), list) else [],
         "background_prompt": str(model_brief.get("background_prompt") or "")[:500],
-        "title": title,
-        "subtitle": subtitle,
-        "body": body,
-        "footer": str(model_brief.get("footer") or previous.get("footer") or "")[:180],
+        "title": str(options.get("title") or title)[:180],
+        "subtitle": str(options.get("subtitle") or subtitle)[:180],
+        "body": str(options.get("body") or body)[:420],
+        "footer": str(options.get("footer") or model_brief.get("footer") or previous.get("footer") or "")[:180],
         "exact_copy": exact_lines,
         "aspect_ratio": ratio,
         "width": width,
@@ -207,19 +217,80 @@ def build_design_brief(
     }
 
 
-def _font(size: int, bold: bool = False, serif: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _font(size: int, bold: bool = False, serif: bool = False, display: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size = max(12, int(size))
     candidates = []
     if serif:
-        candidates += ["/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"]
+        candidates += [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        ]
+    elif display:
+        candidates += [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
     else:
-        candidates += ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
-    candidates += ["C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf"]
+        candidates += [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+    candidates += [
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+    ]
     for path in candidates:
         try:
             return ImageFont.truetype(path, size=size)
         except OSError:
             continue
     return ImageFont.load_default()
+
+
+def _fit_font(draw: ImageDraw.ImageDraw, text: str, start_size: int, max_width: int,
+              max_lines: int, *, bold: bool = True, serif: bool = False, display: bool = False) -> ImageFont.ImageFont:
+    """Shrink only as much as needed to keep exact copy inside the safe area."""
+    for size in range(max(14, int(start_size)), 13, -2):
+        font = _font(size, bold=bold, serif=serif, display=display)
+        lines = _wrap(draw, text, font, max_width)
+        if len(lines) <= max_lines and all(draw.textbbox((0, 0), line, font=font)[2] <= max_width for line in lines):
+            return font
+    return _font(14, bold=bold, serif=serif, display=display)
+
+
+def _draw_motif(draw: ImageDraw.ImageDraw, name: str, center: tuple[int, int], size: int, color: str) -> None:
+    """Draw a small, deterministic decorative icon without external assets."""
+    x, y = center
+    key = str(name or "").lower()
+    width = max(3, size // 10)
+    if any(word in key for word in ("star", "spark", "shine")):
+        points = []
+        for i in range(10):
+            angle = -math.pi / 2 + i * math.pi / 5
+            radius = size // 2 if i % 2 == 0 else size // 5
+            points.append((x + int(math.cos(angle) * radius), y + int(math.sin(angle) * radius)))
+        draw.polygon(points, fill=color)
+    elif "leaf" in key:
+        draw.ellipse((x-size//2, y-size//3, x+size//2, y+size//3), fill=color)
+        draw.line((x-size//3, y+size//4, x+size//3, y-size//4), fill="#FFFFFF", width=width)
+    elif any(word in key for word in ("bolt", "flash", "energy")):
+        draw.polygon([(x, y-size//2), (x-size//4, y), (x, y), (x-size//8, y+size//2), (x+size//3, y-size//8), (x+size//8, y-size//8)], fill=color)
+    elif "book" in key:
+        draw.rounded_rectangle((x-size//2, y-size//2, x, y+size//2), radius=width, outline=color, width=width)
+        draw.rounded_rectangle((x, y-size//2, x+size//2, y+size//2), radius=width, outline=color, width=width)
+        draw.line((x, y-size//2, x, y+size//2), fill=color, width=width)
+    elif "globe" in key:
+        draw.ellipse((x-size//2, y-size//2, x+size//2, y+size//2), outline=color, width=width)
+        draw.arc((x-size//4, y-size//2, x+size//4, y+size//2), 0, 360, fill=color, width=width)
+        draw.line((x-size//2, y, x+size//2, y), fill=color, width=width)
+    else:
+        draw.ellipse((x-size//2, y-size//2, x+size//2, y+size//2), fill=color)
+
+
+def _draw_pill(draw: ImageDraw.ImageDraw, text: str, xy: tuple[int, int], font: ImageFont.ImageFont,
+               fill: str, text_fill: str, pad_x: int = 24, pad_y: int = 12) -> None:
+    x, y = xy
+    box = draw.textbbox((0, 0), text, font=font)
+    width, height = box[2] - box[0], box[3] - box[1]
+    draw.rounded_rectangle((x, y, x + width + pad_x * 2, y + height + pad_y * 2), radius=(height + pad_y * 2) // 2, fill=fill)
+    draw.text((x + pad_x, y + pad_y - box[1]), text, font=font, fill=text_fill)
 
 
 def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> list[str]:
@@ -263,117 +334,191 @@ def _gradient(size: tuple[int, int], first: str, second: str) -> Image.Image:
 
 
 def render_design(brief: dict[str, Any], background: Image.Image | None = None) -> Image.Image:
-    """Render a crisp raster design with exact copy and reusable layout templates."""
+    """Render one of eight typography-first, high-resolution templates with exact copy."""
     width, height = int(brief["width"]), int(brief["height"])
-    palette = list(brief.get("palette") or BRAND)
+    palette = [_hex_color(value) for value in (brief.get("palette") or BRAND)]
+    palette = [value for value in palette if value]
     primary, secondary, accent = (palette + list(BRAND))[:3]
     template = str(brief.get("template") or "poster")
     dark = template in {"poster", "story", "whatsapp_status", "business_card", "logo_sheet"}
-    image = background.convert("RGB").resize((width, height), Image.Resampling.LANCZOS) if background is not None else _gradient((width, height), "#0D1B2A" if dark else "#F8FAFC", "#172F4A" if dark else "#E8F1F8")
+    if background is not None:
+        image = background.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
+        overlay = Image.new("RGBA", (width, height), (7, 19, 34, 142) if dark else (248, 250, 252, 176))
+        image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+    else:
+        image = _gradient((width, height), "#0B1727" if dark else "#F7F5EF", "#173A55" if dark else "#E5EEF5")
     draw = ImageDraw.Draw(image, "RGBA")
-    margin = int(min(width, height) * float(brief.get("safe_margin", 0.085)))
-    white = "#FFFFFF" if dark else "#10243A"
-    muted = "#D8E4EF" if dark else "#536579"
+    margin = max(32, int(min(width, height) * float(brief.get("safe_margin", 0.085))))
+    right = width - margin
+    bottom = height - margin
     title = str(brief.get("title") or "")
     subtitle = str(brief.get("subtitle") or "")
     body = str(brief.get("body") or "")
     footer = str(brief.get("footer") or "")
-    title_size = int(min(width, height) * (0.095 * float(brief.get("title_scale", 1.0))))
-    title_font = _font(title_size, True, brief.get("font_style") == "serif")
-    sub_font = _font(max(22, int(title_size * 0.38)), True)
-    body_font = _font(max(19, int(title_size * 0.25)))
-    tiny_font = _font(max(16, int(title_size * 0.18)), True)
+    serif = str(brief.get("font_style") or "").lower() == "serif"
+    display = str(brief.get("font_style") or "").lower() == "display"
+    white = "#FFFFFF" if dark else "#10243A"
+    muted = "#DCE7F0" if dark else "#536579"
+    title_size = int(min(width, height) * (0.105 * float(brief.get("title_scale", 1.0))))
+    title_font = _fit_font(draw, title, title_size, width - margin * 2, 4, serif=serif, display=display)
+    sub_font = _font(max(22, int(title_size * 0.34)), True, serif=serif)
+    body_font = _font(max(19, int(title_size * 0.22)))
+    tiny_font = _font(max(16, int(title_size * 0.16)), True)
+    icons = brief.get("icons") if isinstance(brief.get("icons"), list) else []
+    motifs = brief.get("motifs") if isinstance(brief.get("motifs"), list) else []
+    decorations = [str(x) for x in (icons + motifs)[:3]]
 
-    # Shared polished geometry: a high-contrast accent rail, soft cards and safe-area guides.
-    draw.rounded_rectangle((margin, margin, width - margin, height - margin), radius=int(margin * 0.45),
-                           outline=accent + "CC", width=max(2, int(width * 0.003)))
-    draw.ellipse((width - margin * 2, -margin, width + margin, margin * 2), fill=primary + "35")
-    draw.ellipse((-margin, height - margin * 2, margin * 2, height + margin), fill=accent + "28")
+    # Reusable high-quality visual language: precise safe area, contrast, accents and detail.
+    draw.rounded_rectangle((margin, margin, right, bottom), radius=max(22, margin // 3),
+                           outline=accent + "CC", width=max(2, width // 360))
+    draw.ellipse((int(width * .76), -int(height * .12), int(width * 1.08), int(height * .20)), fill=primary + "42")
+    draw.ellipse((-int(width * .12), int(height * .80), int(width * .20), int(height * 1.12)), fill=accent + "35")
+    for index, motif in enumerate(decorations):
+        _draw_motif(draw, motif, (right - (index * max(70, margin // 2)), margin + max(30, margin // 2)), max(28, margin // 2), accent if index % 2 == 0 else primary)
 
     if template == "business_card":
-        draw.rounded_rectangle((margin, margin, width - margin, height - margin), radius=36, fill="#10243A")
-        draw.rounded_rectangle((margin, margin, margin + int(width * .045), height - margin), radius=16, fill=accent)
-        mark = (title[:1] or "R").upper()
-        draw.ellipse((margin * 2, height // 2 - 100, margin * 2 + 200, height // 2 + 100), fill=primary)
-        draw.text((margin * 2 + 70, height // 2 - 75), mark, font=_font(145, True), fill="#FFFFFF")
-        x = margin * 2 + 260
-        _draw_wrapped(draw, title or "Your name", (x, height // 2 - 125), title_font, "#FFFFFF", width - x - margin * 2, 10, "left", 2)
-        _draw_wrapped(draw, subtitle, (x, height // 2 + 55), sub_font, accent, width - x - margin * 2, 8, "left", 2)
-        _draw_wrapped(draw, body, (x, height // 2 + 145), body_font, "#D8E4EF", width - x - margin * 2, 8, "left", 3)
+        draw.rounded_rectangle((margin, margin, right, bottom), radius=38, fill="#10243A")
+        draw.rounded_rectangle((margin, margin, margin + max(14, width // 48), bottom), radius=14, fill=accent)
+        mark_size = int(min(width, height) * .25)
+        cx, cy = margin * 2 + mark_size // 2, height // 2
+        draw.ellipse((cx-mark_size//2, cy-mark_size//2, cx+mark_size//2, cy+mark_size//2), fill=primary)
+        _draw_motif(draw, decorations[0] if decorations else "star", (cx, cy), mark_size // 2, "#FFFFFF")
+        x = margin * 2 + mark_size + 34
+        available = right - x - margin
+        name_font = _fit_font(draw, title or "Your name", int(height * .12), available, 2, display=display, serif=serif)
+        _draw_wrapped(draw, title or "Your name", (x, height // 2 - int(height * .22)), name_font, "#FFFFFF", available, 8, "left", 2)
+        _draw_wrapped(draw, subtitle, (x, height // 2 + int(height * .02)), sub_font, accent, available, 8, "left", 2)
+        _draw_wrapped(draw, body, (x, height // 2 + int(height * .16)), body_font, "#D8E4EF", available, 8, "left", 3)
+        if footer:
+            _draw_wrapped(draw, footer, (x, bottom - margin // 2), tiny_font, "#FFFFFF", available, 6, "left", 2)
         return image
 
     if template == "certificate":
-        draw.rectangle((margin, margin, width - margin, height - margin), outline=accent, width=max(6, width // 100))
-        draw.rectangle((margin + 18, margin + 18, width - margin - 18, height - margin - 18), outline=primary, width=max(2, width // 350))
+        draw.rectangle((margin, margin, right, bottom), outline=accent, width=max(5, width // 150))
+        inner = margin + max(18, margin // 5)
+        draw.rectangle((inner, inner, width-inner, height-inner), outline=primary, width=max(2, width // 420))
+        _draw_motif(draw, "star", (width // 2, margin * 2), max(40, margin // 2), accent)
         y = margin + int(height * .13)
-        _draw_wrapped(draw, title or "CERTIFICATE", (width // 2, y), _font(int(width * .055), True, True), accent, width - margin * 3, 16, "center", 2)
-        y += int(height * .18)
-        _draw_wrapped(draw, subtitle or "This certificate is presented to", (width // 2, y), sub_font, muted, width - margin * 3, 12, "center", 2)
+        _draw_wrapped(draw, title or "CERTIFICATE", (width // 2, y), _fit_font(draw, title or "CERTIFICATE", int(width*.06), width-margin*3, 2, serif=True), accent, width-margin*3, 16, "center", 2)
+        y += int(height * .16)
+        _draw_wrapped(draw, subtitle or "This certificate is presented to", (width // 2, y), sub_font, muted, width-margin*3, 12, "center", 2)
         y += int(height * .13)
-        _draw_wrapped(draw, body or "Recipient name", (width // 2, y), _font(int(width * .052), True, True), white, width - margin * 3, 18, "center", 3)
-        y += int(height * .23)
-        draw.line((margin * 2, y, width - margin * 2, y), fill=accent, width=3)
+        recipient_font = _fit_font(draw, body or "Recipient name", int(width*.055), width-margin*3, 3, serif=True)
+        y = _draw_wrapped(draw, body or "Recipient name", (width // 2, y), recipient_font, white, width-margin*3, 18, "center", 3)
+        y += int(height * .12)
+        draw.line((margin*2, y, right-margin*2, y), fill=accent, width=3)
         if footer:
-            _draw_wrapped(draw, footer, (width // 2, y + 40), tiny_font, muted, width - margin * 3, 8, "center", 2)
+            _draw_wrapped(draw, footer, (width // 2, y+35), tiny_font, muted, width-margin*3, 8, "center", 2)
         return image
 
     if template == "logo_sheet":
-        draw.text((width // 2, margin + 20), title or "BRAND IDENTITY", font=_font(int(width * .045), True), fill=white, anchor="ma")
+        _draw_wrapped(draw, title or "BRAND IDENTITY", (width//2, margin+22), _fit_font(draw, title or "BRAND IDENTITY", int(width*.05), width-margin*2, 2, display=True), white, width-margin*2, 8, "center", 2)
         if subtitle:
-            _draw_wrapped(draw, subtitle, (width // 2, int(height * .17)), _font(int(width * .025), True), accent, width - margin * 2, 8, "center", 2)
-        cell = int(width * .22)
-        gap = int(width * .055)
-        start_x = (width - (cell * 3 + gap * 2)) // 2
-        start_y = int(height * .25)
+            _draw_wrapped(draw, subtitle, (width//2, int(height*.14)), sub_font, accent, width-margin*2, 8, "center", 2)
+        cell = int(min(width, height) * .205)
+        gap = int(cell * .13)
+        grid_width = cell * 3 + gap * 2
+        start_x = (width - grid_width) // 2
+        start_y = int(height * .23)
         labels = ["Wordmark", "Monogram", "Icon", "Outline", "Stacked", "Badge", "Symbol", "Reverse", "Compact"]
+        mark = (title[:2] or "RC").upper()
         for index, label in enumerate(labels):
             row, col = divmod(index, 3)
-            x = start_x + col * (cell + gap)
-            y = start_y + row * (cell + gap)
-            draw.rounded_rectangle((x, y, x + cell, y + cell), radius=24, fill="#FFFFFF" if index % 2 else "#172F4A", outline=accent, width=3)
-            mark = (title[:2] or "RC").upper()
-            draw.ellipse((x + cell * .25, y + cell * .16, x + cell * .75, y + cell * .66), fill=primary if index % 2 else accent)
-            draw.text((x + cell // 2, y + cell * .30), mark, font=_font(int(cell * .18), True), fill="#FFFFFF", anchor="mm")
-            draw.text((x + cell // 2, y + cell * .80), label, font=tiny_font, fill="#10243A" if index % 2 else "#FFFFFF", anchor="mm")
+            x, y = start_x + col*(cell+gap), start_y + row*(cell+gap)
+            dark_cell = index % 2 == 0
+            fill = "#10243A" if dark_cell else "#FFFFFF"
+            text_color = "#FFFFFF" if dark_cell else "#10243A"
+            draw.rounded_rectangle((x,y,x+cell,y+cell), radius=max(14,cell//10), fill=fill, outline=accent, width=max(2,cell//90))
+            draw.ellipse((x+cell*.27,y+cell*.10,x+cell*.73,y+cell*.56), fill=primary if dark_cell else accent)
+            draw.text((x+cell//2,y+cell*.33), mark, font=_font(int(cell*.17),True,display=True), fill="#FFFFFF", anchor="mm")
+            draw.text((x+cell//2,y+cell*.79), label, font=_font(max(14,int(cell*.075)),True), fill=text_color, anchor="mm")
+        if footer:
+            _draw_wrapped(draw, footer, (width//2, bottom-margin//2), tiny_font, muted, width-margin*2, 8, "center", 2)
         return image
 
-    # Poster, flyer, social, story and WhatsApp templates.
-    if template in {"story", "whatsapp_status"}:
-        y = int(height * .23)
-        draw.rounded_rectangle((margin, int(height * .10), width - margin, int(height * .17)), radius=30, fill=accent)
+    # Poster: editorial hero composition with strong left alignment and a bold accent rail.
+    if template == "poster":
+        draw.rectangle((margin, margin, right, margin + int(height*.12)), fill=primary)
+        _draw_pill(draw, str(brief.get("layout") or "FEATURED EVENT")[:34].upper(), (margin*1.35, margin+int(height*.035)), tiny_font, accent, "#10243A")
+        y = int(height*.29)
+        title_font = _fit_font(draw, title, int(min(width,height)*.13*float(brief.get("title_scale",1.0))), width-margin*3, 4, serif=serif, display=display)
+        y = _draw_wrapped(draw, title, (margin*1.35,y), title_font, white, width-margin*3, 8, "left", 4)
         if subtitle:
-            _draw_wrapped(draw, subtitle.upper(), (width // 2, int(height * .20)), sub_font, accent, width - margin * 2, 10, "center", 2)
-    elif template == "instagram_post":
-        draw.polygon([(0, 0), (int(width * .44), 0), (0, int(height * .44))], fill=primary)
-        draw.rounded_rectangle((margin, margin, width - margin, height - margin), radius=38, outline=accent, width=6)
-        y = int(height * .24)
-    elif template == "flyer":
-        draw.rectangle((0, 0, int(width * .075), height), fill=primary)
-        draw.rounded_rectangle((margin, margin, width - margin, height - margin), radius=24, fill="#FFFFFF" if not background else "#10243A88")
-        y = int(height * .18)
-    else:
-        draw.rectangle((margin, margin, width - margin, int(height * .20)), fill=primary)
-        y = int(height * .27)
+            y += int(height*.035)
+            y = _draw_wrapped(draw, subtitle, (margin*1.35,y), sub_font, accent, width-margin*3, 10, "left", 3)
+        if body:
+            y += int(height*.045)
+            _draw_wrapped(draw, body, (margin*1.35,y), body_font, muted, width-margin*3, 12, "left", 6)
+        if footer:
+            draw.rounded_rectangle((margin, bottom-int(height*.12), right, bottom), radius=24, fill=primary)
+            _draw_wrapped(draw, footer, (width//2, bottom-int(height*.085)), tiny_font, "#FFFFFF", width-margin*3, 8, "center", 2)
+        return image
 
-    if template not in {"story", "whatsapp_status", "instagram_post", "flyer"}:
-        y = int(height * .28)
-    if title:
-        y = _draw_wrapped(draw, title, (width // 2 if template in {"instagram_post", "story", "whatsapp_status"} else margin * 1.35, y),
-                          title_font, white, width - margin * 2, int(title_size * .18),
-                          "center" if template in {"instagram_post", "story", "whatsapp_status"} else "left", 4)
+    # Flyer: bright information-first layout with an event title block and detail panel.
+    if template == "flyer":
+        draw.rounded_rectangle((margin, margin, right, int(height*.36)), radius=30, fill=primary)
+        _draw_pill(draw, "YOU'RE INVITED", (margin*1.35, margin*1.35), tiny_font, accent, "#10243A")
+        y = int(height*.19)
+        title_font = _fit_font(draw, title, int(min(width,height)*.105*float(brief.get("title_scale",1.0))), width-margin*3, 4, serif=serif, display=display)
+        y = _draw_wrapped(draw, title, (margin*1.35,y), title_font, "#FFFFFF", width-margin*3, 8, "left", 4)
+        if subtitle:
+            _draw_wrapped(draw, subtitle, (margin*1.35,y+18), sub_font, "#F8FAFC", width-margin*3, 8, "left", 2)
+        panel_top = int(height*.43)
+        draw.rounded_rectangle((margin, panel_top, right, bottom), radius=28, fill="#FFFFFF", outline=accent, width=3)
+        if body:
+            _draw_wrapped(draw, body, (margin*1.4,panel_top+int(height*.08)), body_font, "#10243A", width-margin*2.8, 12, "left", 7)
+        if footer:
+            draw.rounded_rectangle((margin*1.35,bottom-int(height*.13),right-margin*1.35,bottom-int(height*.035)), radius=18, fill=secondary)
+            _draw_wrapped(draw, footer, (width//2,bottom-int(height*.105)), tiny_font, "#FFFFFF", width-margin*3, 8, "center", 2)
+        return image
+
+    # Square social post: a clean centered composition with graphic corner geometry.
+    if template == "instagram_post":
+        draw.polygon([(0,0),(int(width*.42),0),(0,int(height*.42))], fill=primary)
+        draw.polygon([(width, height),(int(width*.70),height),(width,int(height*.70))], fill=accent)
+        draw.rounded_rectangle((margin*1.25,margin*1.25,right-margin*1.25,bottom-margin*1.25), radius=36, fill="#10243A" if dark else "#FFFFFF", outline=accent, width=5)
+        y = int(height*.27)
+        if subtitle:
+            _draw_wrapped(draw, subtitle.upper(), (width//2,y), tiny_font, accent, width-margin*4, 8, "center", 2)
+            y += int(height*.07)
+        title_font = _fit_font(draw,title,int(min(width,height)*.105*float(brief.get("title_scale",1.0))),width-margin*4,4,serif=serif,display=display)
+        y = _draw_wrapped(draw,title,(width//2,y),title_font,white,width-margin*4,10,"center",4)
+        if body:
+            y += int(height*.045)
+            _draw_wrapped(draw,body,(width//2,y),body_font,muted,width-margin*4,10,"center",6)
+        if footer:
+            _draw_pill(draw,footer,(margin*1.8,bottom-int(height*.13)),tiny_font,primary,"#FFFFFF")
+        return image
+
+    # Vertical story/status canvas: large readable title, high contrast and a clear CTA.
+    if template in {"story", "whatsapp_status"}:
+        draw.rounded_rectangle((margin,int(height*.10),right,int(height*.17)),radius=24,fill=primary)
+        _draw_pill(draw,"UPDATE",(margin*1.35,int(height*.115)),tiny_font,accent,"#10243A")
+        y = int(height*.27)
+        if subtitle:
+            _draw_wrapped(draw,subtitle.upper(),(width//2,y),tiny_font,accent,width-margin*2,10,"center",2)
+            y += int(height*.08)
+        title_font = _fit_font(draw,title,int(min(width,height)*.13*float(brief.get("title_scale",1.0))),width-margin*2,5,serif=serif,display=display)
+        y = _draw_wrapped(draw,title,(width//2,y),title_font,white,width-margin*2,12,"center",5)
+        if body:
+            y += int(height*.06)
+            _draw_wrapped(draw,body,(width//2,y),body_font,muted,width-margin*2,12,"center",6)
+        if footer:
+            draw.rounded_rectangle((margin,bottom-int(height*.13),right,bottom),radius=28,fill=primary)
+            _draw_wrapped(draw,footer,(width//2,bottom-int(height*.095)),tiny_font,"#FFFFFF",width-margin*2,8,"center",2)
+        return image
+
+    # Safe fallback retains poster hierarchy for future registered template aliases.
+    y = int(height*.25)
+    y = _draw_wrapped(draw,title,(margin*1.3,y),title_font,white,width-margin*2.6,10,"left",4)
     if subtitle:
-        y += int(height * .025)
-        y = _draw_wrapped(draw, subtitle, (width // 2, y), sub_font, accent if dark else primary,
-                          width - margin * 2, 12, "center", 3)
+        y += 22
+        y = _draw_wrapped(draw,subtitle,(margin*1.3,y),sub_font,accent,width-margin*2.6,8,"left",3)
     if body:
-        y += int(height * .045)
-        y = _draw_wrapped(draw, body, (width // 2, y), body_font, muted if dark else "#334155",
-                          width - margin * 2, 12, "center", 7)
+        y += 28
+        y = _draw_wrapped(draw,body,(margin*1.3,y),body_font,muted,width-margin*2.6,10,"left",6)
     if footer:
-        draw.rounded_rectangle((margin, height - margin * 2, width - margin, height - margin), radius=24, fill=primary)
-        _draw_wrapped(draw, footer, (width // 2, height - margin * 1.65), tiny_font, "#FFFFFF", width - margin * 3, 8, "center", 2)
-    elif template in {"poster", "flyer"}:
-        draw.line((margin, height - margin * 1.6, width - margin, height - margin * 1.6), fill=accent, width=4)
+        _draw_wrapped(draw,footer,(width//2,bottom-margin),(width-margin*2),tiny_font,muted,width-margin*2,8,"center",2)
     return image
 
 
