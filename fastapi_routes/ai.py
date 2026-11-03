@@ -11,12 +11,13 @@ import json
 import logging
 import os
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
 
 import jwt
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from ai.ai_client import get_image_provider_status
@@ -39,7 +40,7 @@ from services.image_service import generate_image_asset, parse_image_options
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
 from services.runtime_config import (
-    MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
+    IMAGE_DIR, MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
     get_active_text_provider,
 )
 
@@ -162,15 +163,25 @@ def _image_response(
         )
     except ValueError as exc:
         return _error("IMAGE_REQUEST_INVALID", str(exc), 400, request_id)
-    except Exception:
+    except Exception as exc:
         logger.exception("Image generation failed | request_id=%s", request_id)
-        return _error(
-            "IMAGE_GENERATION_FAILED",
-            "RevelaAI could not generate the requested design.",
-            502,
-            request_id,
+        error_code = str(getattr(exc, "error_code", "") or "")
+        message_text = (
+            "Image generation timed out. Please retry; your design request has not been lost."
+            if "timeout" in error_code.lower() or "timeout" in str(exc).lower()
+            else "The image service is temporarily unavailable. Please retry in a moment."
         )
+        return _error("IMAGE_GENERATION_FAILED", message_text, 502, request_id)
 
+    # Keep the latest design request in the same conversation session so
+    # follow-up edits such as "make the title bigger" revise that design.
+    session["last_design_request"] = str(image_options.get("base_request") or message)[:1800]
+    session["last_design_options"] = {
+        key: image_options[key]
+        for key in ("aspect_ratio", "width", "height", "output_format", "template", "text", "use_ai_background")
+        if key in image_options
+    }
+    session["last_design_brief"] = asset.get("design_brief")
     save_image_conversation(session_id, session, message, success=True)
     response = enforce_base_schema(
         query=message,
@@ -189,6 +200,8 @@ def _image_response(
             "engine_version": REVELAAI_IMAGE_ENGINE_VERSION,
             "intent": "image_generation",
             "design": asset["image_plan"],
+            "design_brief": asset.get("design_brief"),
+            "downloads": asset.get("downloads", {}),
             "image": {
                 "width": asset["width"],
                 "height": asset["height"],
@@ -306,6 +319,17 @@ def _ai_sync(
         except ValueError as exc:
             return _error("INVALID_IMAGE_OPTIONS", str(exc), 400, request_id)
 
+    revision_requested = bool(
+        session.get("last_design_request")
+        and re.search(r"\\b(change|switch|replace|make|increase|decrease|bigger|smaller|use|translate|recolour|recolor|move|remove|add|edit|revise)\\b", message, re.I)
+    )
+    if revision_requested:
+        original_design_request = str(session.get("last_design_request") or "").strip()
+        revision_text = message
+        stored_options = session.get("last_design_options") if isinstance(session.get("last_design_options"), dict) else {}
+        image_options = {**stored_options, **image_options, "base_request": original_design_request, "revision": revision_text}
+        message = original_design_request + "\\nRevision request: " + revision_text
+
     if not message:
         return _error("EMPTY_MESSAGE", "Message or file required.", 400, request_id)
     if len(message) > 80_000:
@@ -346,7 +370,7 @@ def _ai_sync(
         )
 
         capability = detect_capability(message, intent=intent)
-        image_request = capability == "image_generation"
+        image_request = capability == "image_generation" or revision_requested
         if image_request:
             intent = "image_generation"
         session["topic"] = intent
@@ -636,6 +660,19 @@ async def _parse_body(request: Request):
     except Exception:
         body = {}
     return (body if isinstance(body, dict) else {}), None, None, None
+
+
+@router.get("/ai/images/{filename}", include_in_schema=False)
+async def generated_image_asset(filename: str):
+    """Serve only generated media files from the dedicated temporary image directory."""
+    if not filename or os.path.basename(filename) != filename or not re.fullmatch(r"revelaai_[a-f0-9]{32}\\.(png|jpg|pdf|svg)", filename):
+        return _error("IMAGE_NOT_FOUND", "This generated file is not available.", 404)
+    root = Path(IMAGE_DIR).resolve()
+    path = (root / filename).resolve()
+    if path.parent != root or not path.is_file():
+        return _error("IMAGE_NOT_FOUND", "This generated file has expired or does not exist.", 404)
+    media_types = {".png": "image/png", ".jpg": "image/jpeg", ".pdf": "application/pdf", ".svg": "image/svg+xml"}
+    return FileResponse(path, media_type=media_types.get(path.suffix.lower(), "application/octet-stream"), filename=filename)
 
 
 @router.post("/ai")
