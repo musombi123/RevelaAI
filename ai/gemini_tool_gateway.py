@@ -473,7 +473,7 @@ def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, An
             .limit(1)
         )
         learning_latest = learning_rows[0] if learning_rows and isinstance(learning_rows[0], dict) else {}
-        learning_enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+        learning_enabled = _daily_learning_enabled()
         extra["daily_learning"] = {
             "enabled": learning_enabled,
             "schedule": "03:10 UTC daily",
@@ -776,7 +776,7 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
                 .limit(1)
             )
             latest = records[0] if records and isinstance(records[0], dict) else {}
-            enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+            enabled = _daily_learning_enabled()
             result = {
                 "enabled": enabled,
                 "schedule": "daily at 03:10 UTC",
