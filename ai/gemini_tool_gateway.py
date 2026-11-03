@@ -28,9 +28,9 @@ _ACTIVITY: dict[str, dict[str, Any]] = {}
 CORE_ENGAGEMENT = {
     "core_zero": {"module": "ai.usect_zero_tools", "role": "bounded engineering operations", "tools": ["usect_zero_*"]},
     "core_one_genesis": {"module": "ai.tool_registry", "role": "signed tool registry and sandbox dispatch", "tools": ["genesis_*"]},
-    "core_two_infinite_mind": {"module": "ai.core_mesh", "role": "guarded evolution proposals", "tools": ["revelaai_propose_evolution"]},
+    "core_two_infinite_mind": {"module": "ai.core_mesh", "role": "native Infinite Mind proposal service", "tools": ["revelaai_request_mind_evolution"]},
     "core_auditor": {"module": "core_auditor.ledger", "role": "tamper-evident tool execution audit"},
-    "core_evolve": {"module": "core_evolve.engine", "role": "bounded candidate improvement proposals", "tools": ["revelaai_propose_evolution"]},
+    "core_evolve": {"module": "core_evolve.engine", "role": "bounded metric-based candidate improvement proposals", "tools": ["revelaai_propose_evolution"]},
     "core_foundry": {"module": "core_foundry.factory.foundry_builder", "role": "review-only app and tool plans", "tools": ["revelaai_plan_tool"]},
     "core_inspector": {"module": "core_inspector.inspector", "role": "source, test and route inventory", "tools": ["revelaai_get_core_status"]},
     "core_meter": {"module": "core_meter.meter", "role": "per-tool usage and latency metering"},
@@ -40,7 +40,7 @@ CORE_ENGAGEMENT = {
     "sci_core": {"module": "revelai.sci_core.research_engine", "role": "civilian research and defensive analysis", "tools": ["revelaai_research"]},
     "brain_os": {"module": "revelai.core.brain_os", "role": "capability inventory and privacy-minimised outcomes"},
     "core_billing": {"module": "core_billing.service", "role": "license, entitlement and billing authorization control plane"},
-    "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and guarded engineering proposals", "tools": ["operator_tool_dispatch"]},
+    "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and guarded engineering proposals", "tools": ["revelaai_inspect_meta_engineer", "operator_tool_dispatch"]},
 }
 
 GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
@@ -110,6 +110,23 @@ GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
             },
             "required": ["system_id", "objective", "metrics"],
         },
+    },
+    {
+        "name": "revelaai_request_mind_evolution",
+        "description": "Send a bounded improvement objective to the native Infinite Mind/Core-Two service. Requires Core Mesh operator authorization and the automation entitlement. Creates a proposal only; no source is executed or merged.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "objective": {"type": "string", "description": "Improvement objective, maximum 500 characters."},
+                "tool_name": {"type": "string", "description": "Registered tool identifier, lowercase letters, digits, underscore or hyphen."},
+            },
+            "required": ["objective", "tool_name"],
+        },
+    },
+    {
+        "name": "revelaai_inspect_meta_engineer",
+        "description": "Run the read-only Meta-Engineer architecture scanner. Returns module structure, import dependencies, model schemas and available route slots. Requires a Core Mesh operator and automation entitlement; never writes or executes code.",
+        "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "revelaai_plan_device_migration",
@@ -191,6 +208,36 @@ def _operator_allowed(user_id: str | None) -> bool:
         return bool(core_mesh_operator_allowed(user_id))
     except Exception:
         return False
+
+
+def _automation_entitlement(authorization: str) -> dict[str, Any] | None:
+    """Reuse the authoritative RevelaCode Smart AI automation entitlement."""
+    try:
+        from services.revenue_entitlements import check_entitlement
+        _value, error = check_entitlement(
+            authorization, hub="smart_ai", feature="automation"
+        )
+        if error is None:
+            return None
+        try:
+            payload = json.loads(error.body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, AttributeError):
+            payload = {}
+        return {
+            "status": "blocked",
+            "executed": False,
+            "reason": str(payload.get("code") or "automation_entitlement_required"),
+            "message": str(payload.get("message") or "The AI automation entitlement is required."),
+            "http_status": int(getattr(error, "status_code", 402)),
+        }
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "executed": False,
+            "reason": "automation_entitlement_unavailable",
+            "error_type": type(exc).__name__,
+            "http_status": 503,
+        }
 
 
 def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, Any]:
@@ -328,6 +375,19 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
         if not tool_name or len(json.dumps(args, default=str).encode("utf-8")) > MAX_ARGUMENT_BYTES:
             raise ValueError("Tool arguments are invalid or exceed the size limit.")
 
+        entitlement_tools = set(ZERO_BY_NAME) | {
+            "revelaai_plan_tool",
+            "revelaai_propose_evolution",
+            "revelaai_request_mind_evolution",
+            "revelaai_plan_device_migration",
+            "revelaai_defensive_scan",
+            "revelaai_inspect_meta_engineer",
+        }
+        if tool_name in entitlement_tools:
+            entitlement = _automation_entitlement(authorization)
+            if entitlement is not None:
+                return {"tool": tool_name, **entitlement}
+
         if tool_name in ZERO_BY_NAME:
             operation = str(ZERO_BY_NAME[tool_name]["operation"])
             outcome = execute_zero_tool(operation, args)
@@ -395,6 +455,32 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
             return {"tool": tool_name, "status": "proposal_only", "executed": False,
                     "result": _json_safe(proposal.model_dump(mode="json")),
                     "safety": {"candidate_source_execution": False, "human_approval_required": True, "automatic_merge": False}}
+
+        if tool_name == "revelaai_request_mind_evolution":
+            if not _operator_allowed(user_id):
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "core_mesh_operator_required"}
+            objective = str(args.get("objective") or "").strip()
+            tool_name_arg = str(args.get("tool_name") or "").strip().lower()
+            if not objective or len(objective) > 500:
+                raise ValueError("objective must be 1–500 characters.")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", tool_name_arg):
+                raise ValueError("tool_name must use lowercase letters, digits, underscores or hyphens.")
+            from ai.core_mesh import propose_mind_evolution
+            result = propose_mind_evolution(objective, tool_name_arg)
+            _mark("core_two_infinite_mind", "native_mind_evolution_proposal", "proposal_only")
+            return {"tool": tool_name, "status": "proposal_only", "executed": False,
+                    "result": _json_safe(result),
+                    "safety": {"candidate_source_execution": False, "human_approval_required": True, "automatic_merge": False}}
+
+        if tool_name == "revelaai_inspect_meta_engineer":
+            if not _operator_allowed(user_id):
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "core_mesh_operator_required"}
+            from meta_engineer.introspector import scan_architecture
+            architecture = scan_architecture()
+            _mark("meta_engineer", "architecture_scan", "success")
+            return {"tool": tool_name, "status": "executed", "executed": True,
+                    "result": _json_safe(architecture),
+                    "safety": {"read_only": True, "candidate_source_execution": False, "automatic_merge": False}}
 
         if tool_name == "revelaai_plan_device_migration":
             if not _operator_allowed(user_id):
