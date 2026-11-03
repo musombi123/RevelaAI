@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -321,7 +322,7 @@ def _ai_sync(
 
     revision_requested = bool(
         session.get("last_design_request")
-        and re.search(r"\\b(change|switch|replace|make|increase|decrease|bigger|smaller|use|translate|recolour|recolor|move|remove|add|edit|revise)\\b", message, re.I)
+        and re.search(r"\b(change|switch|replace|make|increase|decrease|bigger|smaller|use|translate|recolour|recolor|move|remove|add|edit|revise)\b", message, re.I)
     )
     if revision_requested:
         original_design_request = str(session.get("last_design_request") or "").strip()
@@ -665,7 +666,7 @@ async def _parse_body(request: Request):
 @router.get("/ai/images/{filename}", include_in_schema=False)
 async def generated_image_asset(filename: str):
     """Serve only generated media files from the dedicated temporary image directory."""
-    if not filename or os.path.basename(filename) != filename or not re.fullmatch(r"revelaai_[a-f0-9]{32}\\.(png|jpg|pdf|svg)", filename):
+    if not filename or os.path.basename(filename) != filename or not re.fullmatch(r"revelaai_[a-f0-9]{32}\.(png|jpg|pdf|svg)", filename):
         return _error("IMAGE_NOT_FOUND", "This generated file is not available.", 404)
     root = Path(IMAGE_DIR).resolve()
     path = (root / filename).resolve()
