@@ -76,13 +76,20 @@ def _subject_from_bearer(authorization: str) -> str | None:
     return value or None
 
 
-def _session_id(headers: Mapping[str, str], cookies: Mapping[str, str], subject: str | None) -> str:
+def _session_id(
+    headers: Mapping[str, str],
+    cookies: Mapping[str, str],
+    subject: str | None,
+    payload: Mapping[str, Any] | None = None,
+) -> str:
     header_id = next(
         (str(v).strip() for k, v in headers.items() if str(k).casefold() == "x-session-id"),
         "",
     )
     cookie_id = str(cookies.get("revelaai_session") or "").strip()
-    session_id = (header_id or cookie_id or uuid.uuid4().hex)[:128]
+    body = payload if isinstance(payload, Mapping) else {}
+    body_id = str(body.get("sessionId") or body.get("session_id") or body.get("conversationId") or "").strip()
+    session_id = (header_id or cookie_id or body_id or uuid.uuid4().hex)[:128]
     if subject:
         session_id = f"{subject}:{session_id}"[:128]
     return session_id
@@ -236,7 +243,7 @@ def _ai_sync(
         "",
     )
     user_id = _subject_from_bearer(authorization)
-    session_id = _session_id(headers, cookies, user_id)
+    session_id = _session_id(headers, cookies, user_id, payload)
     session = get_session(session_id)
 
     memory_user_oid = None
