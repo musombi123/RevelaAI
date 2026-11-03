@@ -85,6 +85,12 @@ def parse_image_options(source: Any) -> dict[str, Any]:
         if not isinstance(copy, str) or len(copy) > 1200:
             raise ValueError("Design text must be a string of 1,200 characters or fewer.")
         options["text"] = copy
+    for field, limit in (("title", 180), ("subtitle", 180), ("body", 600), ("footer", 180)):
+        value = source.get(field)
+        if value is not None:
+            if not isinstance(value, str) or len(value) > limit:
+                raise ValueError(f"Design {field} must be a string of {limit} characters or fewer.")
+            options[field] = value
     options["use_ai_background"] = source.get("use_ai_background") is True
     return options
 
