@@ -13,6 +13,7 @@ from ai.core_mesh import (
     CoreMeshError,
     core_mesh_operator_allowed,
     get_core_mesh_dashboard,
+    get_core_mesh_configuration_health,
     get_genesis_capability_plan,
     get_genesis_hardware_guide,
     get_genesis_key_request_info,
@@ -559,6 +560,19 @@ async def core_mesh_genesis_events_api(request: Request, limit: int = 100):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/api/core-mesh/configuration")
+async def core_mesh_configuration_api(request: Request):
+    """Operator-only configuration diagnostics; never return secret values."""
+    user_id = await _authenticated_core_mesh_user(request)
+    if not isinstance(user_id, str):
+        return user_id
+    operator_error = _operator_failure(user_id)
+    if operator_error:
+        return operator_error
+    result = await run_in_threadpool(get_core_mesh_configuration_health)
+    return {"status": "success", "data": result}
 
 
 @router.get("/api/core-mesh/dashboard")
