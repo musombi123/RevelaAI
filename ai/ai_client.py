@@ -354,9 +354,9 @@ POLLINATIONS_API_BASE_URL = (
 POLLINATIONS_IMAGE_MODEL = (
     os.getenv(
         "POLLINATIONS_IMAGE_MODEL",
-        "flux",
+        "google/gemini-3-pro-image",
     ).strip()
-    or "flux"
+    or "google/gemini-3-pro-image"
 )
 
 # Empty by default.
