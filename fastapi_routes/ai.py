@@ -201,8 +201,13 @@ def _image_response(
         },
         sources=[],
         meta={
-            "provider": "pollinations" if asset["asset_type"] == "png" else "revelaai-svg",
-            "model": get_image_provider_status().get("model") if asset["asset_type"] == "png" else None,
+            "provider": (
+                "revelaai-design-studio"
+                if asset["image_plan"].get("engine") == "design_renderer"
+                else "pollinations" if asset["image_plan"].get("engine") == "pollinations"
+                else "revelaai-svg"
+            ),
+            "model": get_image_provider_status().get("model") if asset["image_plan"].get("engine") == "pollinations" else None,
             "build_id": REVELAAI_BUILD_ID,
             "image_engine": asset["image_plan"].get("engine"),
             "engine_version": REVELAAI_IMAGE_ENGINE_VERSION,
@@ -220,7 +225,7 @@ def _image_response(
             "multimodal": {
                 "type": "image",
                 "format": asset["asset_type"],
-                "editable": asset["asset_type"] == "svg",
+                "editable": asset["asset_type"] == "svg" or asset["image_plan"].get("engine") == "design_renderer",
             },
         },
     )
