@@ -25,6 +25,7 @@ from ai.hub_prompts import HUB_LABELS, get_identity_answer
 from ai.intent_router import classify_intent
 from ai.usect_zero_tools import select_tool_for_message
 from ai.core_mesh import core_mesh_operator_allowed
+from ai.gemini_tool_gateway import requires_automation_entitlement
 from ai.json_utils import enforce_base_schema, error_response, extract_json
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET, authenticate_identity
 from revelai.core.agi_manifest import get_self_description_answer
@@ -326,25 +327,22 @@ def _ai_sync(
                 previous_context = (previous_context + [personalization])[-MAX_HISTORY:]
 
         intent = classify_intent(message)
-        # High-cost USECT-ZERO tool actions are not allowed to bypass the
-        # same Smart AI trial/subscription gate used by the other AI routes.
-        if select_tool_for_message(message, intent=intent):
+        # Tool creation and Core operations use the same automation grant
+        # regardless of whether the request arrives as text or an attachment.
+        allow_automation_tools = requires_automation_entitlement(message, intent=intent)
+        if allow_automation_tools:
             _, tool_entitlement_error = check_entitlement(
                 authorization,
                 hub="smart_ai",
                 feature="automation",
+                timeout_seconds=1.0,
             )
             if tool_entitlement_error is not None:
                 return tool_entitlement_error
 
-        allow_genesis_tools = True
-        if user_id and core_mesh_operator_allowed(user_id):
-            _, genesis_entitlement_error = check_entitlement(
-                authorization,
-                hub="smart_ai",
-                feature="automation",
-            )
-            allow_genesis_tools = genesis_entitlement_error is None
+        allow_genesis_tools = bool(
+            allow_automation_tools and user_id and core_mesh_operator_allowed(user_id)
+        )
 
         capability = detect_capability(message, intent=intent)
         image_request = capability == "image_generation"
@@ -399,6 +397,7 @@ def _ai_sync(
                 country=str(brain_payload.get("country") or "KE"),
                 language=str(brain_payload.get("language") or ""),
                 allow_genesis_tools=allow_genesis_tools,
+                allow_automation_tools=allow_automation_tools,
                 authorization=authorization,
             )
 
