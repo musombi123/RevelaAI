@@ -232,7 +232,15 @@ def requires_automation_entitlement(message: str, intent: str = "general") -> bo
     if not value:
         return False
     try:
-        if select_tool_for_message(value, intent=intent) is not None:
+        selected = select_tool_for_message(value, intent=intent)
+        if selected is not None:
+            operation = str(selected[0] if isinstance(selected, tuple) else selected)
+            selected_spec = next(
+                (item for item in ZERO_TOOL_CATALOG if isinstance(item, dict) and item.get("operation") == operation),
+                None,
+            )
+            if selected_spec and str(selected_spec.get("scope") or "").endswith(":read"):
+                return False
             return True
     except Exception:
         # A classifier failure must not broaden tool access.
@@ -542,7 +550,10 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
         if not tool_name or len(json.dumps(args, default=str).encode("utf-8")) > MAX_ARGUMENT_BYTES:
             raise ValueError("Tool arguments are invalid or exceed the size limit.")
 
-        entitlement_tools = set(ZERO_BY_NAME) | {
+        entitlement_tools = {
+            name for name, spec in ZERO_BY_NAME.items()
+            if not str(spec.get("scope") or "").endswith(":read")
+        } | {
             "revelaai_plan_tool",
             "revelaai_propose_evolution",
             "revelaai_request_mind_evolution",
