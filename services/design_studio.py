@@ -77,7 +77,7 @@ def _extract_copy(request: str, supplied: Any = None) -> list[str]:
         for label in ("title", "headline", "heading", "subtitle", "body", "footer", "date", "venue"):
             match = re.search(rf"\b{label}\s*[:=]\s*([^,;\n]+)", request, re.I)
             if match:
-                labelled.append(match.group(1).strip().strip('"\\''))
+                labelled.append(match.group(1).strip().strip(" \"'"))
         if labelled:
             return [line[:180] for line in labelled[:6] if line]
         raw = str(extract_text(request) or "").strip()
