@@ -25,3 +25,16 @@ def test_design_generation_exports_png_jpg_pdf_and_stable_public_urls(monkeypatc
     assert result["image_url"].endswith(".png")
     assert all(url.startswith("https://revelaai.example/ai/images/revelaai_") for url in result["downloads"].values())
     assert all((tmp_path / url.rsplit("/", 1)[-1]).is_file() for url in result["downloads"].values())
+
+
+def test_image_options_accept_supported_ratios_and_full_seed_range():
+    options = image_service.parse_image_options({
+        "aspect_ratio": "A4",
+        "output_format": "pdf",
+        "template": "whatsapp_status",
+        "seed": 4_000_000_000,
+    })
+    assert options["aspect_ratio"] == "a4"
+    assert options["output_format"] == "pdf"
+    assert options["template"] == "whatsapp_status"
+    assert options["seed"] == 4_000_000_000
