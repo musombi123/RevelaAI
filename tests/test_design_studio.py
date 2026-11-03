@@ -121,3 +121,23 @@ def test_long_design_copy_renders_inside_canvas_for_all_templates(monkeypatch):
         image = design_studio.render_design(brief)
         assert image.size == (1080, 1350)
         assert image.mode == "RGB"
+
+def test_illustration_prompt_adds_composition_lighting_and_text_exclusion():
+    from services.design_studio import enhance_illustration_prompt
+
+    prompt = enhance_illustration_prompt(
+        "A realistic baobab tree at sunrise",
+        {"kind": "illustration", "style": "cinematic realism", "layout": "low-angle wide composition", "palette": ["#123456", "#D4AF37"]},
+    )
+    assert "focal subject" in prompt
+    assert "motivated cinematic key light" in prompt
+    assert "cinematic realism" in prompt
+    assert "no lettering" in prompt
+
+
+def test_higher_quality_image_model_still_uses_existing_pollinations_provider():
+    from ai.ai_client import _normalize_pollinations_image_model, _provider_for
+
+    model = _normalize_pollinations_image_model("google/gemini-3-pro-image")
+    assert model == "google/gemini-3-pro-image"
+    assert _provider_for(model, has_text=False) == "pollinations"
