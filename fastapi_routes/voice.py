@@ -21,6 +21,8 @@ from starlette.concurrency import run_in_threadpool
 
 from ai.ai_client import generate_hf_speech, transcribe_hf_audio
 from ai.intent_router import classify_intent
+from ai.core_mesh import core_mesh_operator_allowed
+from ai.gemini_tool_gateway import requires_automation_entitlement
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
 from services.revenue_entitlements import check_entitlement
 from services.ai_service import detect_capability, process_message
@@ -120,6 +122,19 @@ def _voice_sync(
     previous_context = build_server_context(session)
     intent = classify_intent(heard)
     capability = detect_capability(heard, intent=intent)
+    allow_automation_tools = requires_automation_entitlement(heard, intent=intent)
+    if allow_automation_tools:
+        _, automation_error = check_entitlement(
+            authorization,
+            hub="smart_ai",
+            feature="automation",
+            timeout_seconds=1.0,
+        )
+        if automation_error is not None:
+            return automation_error
+    allow_genesis_tools = bool(
+        allow_automation_tools and subject and core_mesh_operator_allowed(subject)
+    )
     if capability == "image_generation":
         _, image_entitlement_error = check_entitlement(
             authorization,
@@ -180,6 +195,8 @@ def _voice_sync(
             intent=intent,
             session_id=session_id,
             user_id=subject,
+            allow_genesis_tools=allow_genesis_tools,
+            allow_automation_tools=allow_automation_tools,
             authorization=authorization,
         )
     except Exception:
