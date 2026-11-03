@@ -177,7 +177,9 @@ def _image_response(
         logger.exception("Image generation failed | request_id=%s", request_id)
         error_code = str(getattr(exc, "error_code", "") or "")
         message_text = (
-            "Image generation timed out. Please retry; your design request has not been lost."
+            "Image generation is not configured yet. Add the Pollinations API key to the RevelaAI server environment, then redeploy."
+            if error_code == "pollinations_api_key_missing"
+            else "The image provider took too long. Please retry; the design brief and exact copy remain available in this conversation."
             if "timeout" in error_code.lower() or "timeout" in str(exc).lower()
             else "The image service is temporarily unavailable. Please retry in a moment."
         )
