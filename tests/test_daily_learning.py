@@ -61,7 +61,8 @@ def test_daily_learning_covers_every_track_and_caps_each_at_three_sources(monkey
         }]
     }
     monkeypatch.setattr(
-        "ai.ai_client.ask_gemini",
+        daily_learning,
+        "ask_gemini",
         lambda **_kwargs: {
             "success": True,
             "model": "gemini-test",
@@ -95,7 +96,7 @@ def test_daily_learning_persists_gemini_failure_instead_of_losing_run_status(mon
     def fail_gemini(**_kwargs):
         raise RuntimeError("provider unavailable")
 
-    monkeypatch.setattr("ai.ai_client.ask_gemini", fail_gemini)
+    monkeypatch.setattr(daily_learning, "ask_gemini", fail_gemini)
     result = daily_learning.run_daily_learning_cycle(
         run_date=date(2026, 11, 3),
         force=True,
