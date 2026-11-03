@@ -102,13 +102,22 @@ def build_design_brief(
     """Ask the configured language model for layout direction, then lock copy."""
     options = options if isinstance(options, dict) else {}
     revision = str(options.get("revision") or "").strip()
-    template = _template(request, str(image_plan.get("kind") or ""), options.get("template"))
-    ratio = str(options.get("aspect_ratio") or image_plan.get("aspect_ratio") or "4:5").lower()
+    previous = options.get("previous_brief") if isinstance(options.get("previous_brief"), dict) else {}
+    template = str(previous.get("template") or _template(request, str(image_plan.get("kind") or ""), options.get("template")))
+    ratio = str(options.get("aspect_ratio") or previous.get("aspect_ratio") or image_plan.get("aspect_ratio") or "4:5").lower()
     if ratio == "a4":
         ratio = "a4"
     width, height = SIZES.get(ratio, (1080, 1350))
     supplied_copy = options.get("text") or options.get("copy")
-    exact_lines = _extract_copy(request, supplied_copy)
+    revision_copy = str(extract_text(revision) or "").strip() if revision else ""
+    if revision_copy:
+        exact_lines = _extract_copy(revision, revision_copy)
+    elif supplied_copy:
+        exact_lines = _extract_copy(request, supplied_copy)
+    elif previous.get("exact_copy"):
+        exact_lines = [str(line) for line in previous.get("exact_copy", []) if str(line).strip()][:6]
+    else:
+        exact_lines = _extract_copy(request)
     translation_requested = bool(re.search(r"\b(swahili|kiswahili|translate|translation)\b", revision, re.I))
     prompt = (
         "Create a production-ready graphic design brief as strict JSON only. "
@@ -136,6 +145,8 @@ def build_design_brief(
     palette_values = model_brief.get("palette") if isinstance(model_brief.get("palette"), list) else []
     palette = [_hex_color(item) for item in palette_values]
     palette = [item for item in palette if item][:4]
+    if not palette and previous.get("palette"):
+        palette = [_hex_color(item) for item in previous.get("palette", []) if _hex_color(item)]
     if not palette:
         palette = [_hex_color(item) for item in image_plan.get("palette", []) if _hex_color(item)]
     if not palette:
@@ -152,20 +163,20 @@ def build_design_brief(
         subtitle = str(model_brief.get("subtitle") or (exact_lines[1] if len(exact_lines) > 1 else ""))[:180]
         body = str(model_brief.get("body") or " ".join(exact_lines[2:]))[:420]
     else:
-        title = exact_lines[0] if exact_lines else ""
-        subtitle = exact_lines[1] if len(exact_lines) > 1 else ""
-        body = " ".join(exact_lines[2:])[:420]
+        title = exact_lines[0] if exact_lines else str(previous.get("title") or "")
+        subtitle = exact_lines[1] if len(exact_lines) > 1 else str(previous.get("subtitle") or "")
+        body = " ".join(exact_lines[2:])[:420] if len(exact_lines) > 2 else str(previous.get("body") or "")
     if revision and re.search(r"\b(title|headline).{0,18}\b(bigger|larger|prominent)\b", revision, re.I):
         title_scale = 1.55
     else:
         try:
-            title_scale = max(0.9, min(1.8, float(model_brief.get("hierarchy", {}).get("title_scale", 1.25))))
+            title_scale = max(0.9, min(1.8, float(previous.get("title_scale", model_brief.get("hierarchy", {}).get("title_scale", 1.25)))))
         except (TypeError, ValueError, AttributeError):
             title_scale = 1.25
 
     return {
         "template": template,
-        "layout": str(model_brief.get("layout") or "editorial grid with a strong headline and generous whitespace")[:240],
+        "layout": str(previous.get("layout") or model_brief.get("layout") or "editorial grid with a strong headline and generous whitespace")[:240],
         "palette": palette,
         "font_style": str(model_brief.get("font_style") or "sans")[:20],
         "motifs": [str(x)[:60] for x in model_brief.get("motifs", [])[:3]] if isinstance(model_brief.get("motifs"), list) else [],
@@ -173,7 +184,7 @@ def build_design_brief(
         "title": title,
         "subtitle": subtitle,
         "body": body,
-        "footer": str(model_brief.get("footer") or "")[:180],
+        "footer": str(model_brief.get("footer") or previous.get("footer") or "")[:180],
         "exact_copy": exact_lines,
         "aspect_ratio": ratio,
         "width": width,
