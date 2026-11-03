@@ -1402,6 +1402,7 @@ def process_message(
                 language=language,
             )
         )
+        mark_core_usage("orchestrator", "process_prompt", "success")
 
     except Exception as exc:
 
