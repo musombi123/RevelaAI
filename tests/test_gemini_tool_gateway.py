@@ -211,3 +211,72 @@ def test_tool_enabled_turn_does_not_fall_back_to_text_only_provider(monkeypatch)
     assert result["success"] is False
     assert result["error_code"] == "gemini_tool_runtime_unavailable"
     assert result["provider"] == "gemini"
+
+
+def test_read_only_tools_are_exposed_only_for_research_or_status_requests():
+    assert not gateway.requires_read_only_tool_declarations("What is a function call?")
+    assert gateway.requires_read_only_tool_declarations("Research current MCP server releases")
+    assert gateway.requires_read_only_tool_declarations("Show current core status")
+    assert gateway.requires_read_only_tool_declarations("What is the daily learning status?")
+
+    ordinary = _names()
+    research_turn = {
+        item["name"]
+        for item in gateway.gemini_tool_declarations()
+    }
+    assert "revelaai_research" in research_turn
+    assert "revelaai_get_learning_status" in research_turn
+    assert "revelaai_plan_tool" not in research_turn
+    assert "revelaai_research" in ordinary
+
+
+def test_hardware_lab_prototype_is_review_only_and_entitlement_gated(monkeypatch):
+    marks = []
+    monkeypatch.setattr(gateway, "_automation_entitlement", lambda _authorization: None)
+    monkeypatch.setattr(gateway, "_mark", lambda core, operation, status: marks.append((core, operation, status)))
+    monkeypatch.setattr(
+        "revelai.sci_core.hardware_lab.build_prototype",
+        lambda domain, spec: {
+            "domain": domain,
+            "spec": spec,
+            "status": "prototype_generated_review_required",
+            "executed": False,
+            "artifacts": {"circuit.md": "# Review only"},
+        },
+    )
+
+    result = gateway._dispatch_gemini_tool_impl(
+        "revelaai_build_civilian_prototype",
+        {"domain": "electronics", "specification": "Low-voltage crop moisture sensor"},
+        user_id="user-1",
+        authorization="Bearer granted",
+    )
+
+    assert result["status"] == "proposal_only"
+    assert result["executed"] is False
+    assert result["safety"]["firmware_compiled"] is False
+    assert result["safety"]["hardware_contacted"] is False
+    assert ("sci_core", "hardware_lab_prototype", "proposal_only") in marks
+
+
+def test_disaster_diagnostic_is_operator_only_and_excludes_live_throttle_simulation(monkeypatch):
+    monkeypatch.setattr(gateway, "_automation_entitlement", lambda _authorization: None)
+    monkeypatch.setattr(gateway, "_operator_allowed", lambda _user_id: False)
+    result = gateway._dispatch_gemini_tool_impl(
+        "revelaai_disaster_diagnostic",
+        {"kind": "memory_leak"},
+        user_id="ordinary-user",
+        authorization="Bearer granted",
+    )
+    assert result["status"] == "blocked"
+    assert result["reason"] == "core_mesh_operator_required"
+
+    monkeypatch.setattr(gateway, "_operator_allowed", lambda _user_id: True)
+    result = gateway._dispatch_gemini_tool_impl(
+        "revelaai_disaster_diagnostic",
+        {"kind": "api_overload"},
+        user_id="operator-1",
+        authorization="Bearer granted",
+    )
+    assert result["status"] == "blocked"
+    assert result["reason"] == "tool_execution_failed"
