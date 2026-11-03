@@ -360,6 +360,13 @@ def get_core_mesh_configuration_health() -> dict:
     mind_url = core_base_url("mind")
     genesis_health = _safe_fetch(genesis_url, "/v1/genesis/health")
     genesis_signing = genesis_health.get("signing_key_configured")
+    genesis_token = core_admin_token("genesis")
+    genesis_status_probe = (
+        _safe_fetch(genesis_url, "/v1/genesis/status", headers={"X-Genesis-Token": genesis_token})
+        if genesis_url and genesis_token else {"reason": "credential_or_url_missing"}
+    )
+    genesis_token_invalid = genesis_status_probe.get("reason") in {"upstream_http_401", "upstream_http_403"}
+    genesis_token_verified = bool(genesis_url and genesis_token and "reason" not in genesis_status_probe)
 
     checks = [
         {
@@ -389,8 +396,18 @@ def get_core_mesh_configuration_health() -> dict:
         {
             "name": "GENESIS_ADMIN_TOKEN (or GENESIS_TOKEN)",
             "service": "RevelaAI gateway + genesis-core-one",
-            "configured": bool(core_admin_token("genesis")),
-            "message": "The gateway has a Genesis proxy credential; the Render fromService link must point to the same token on genesis-core-one." if core_admin_token("genesis") else "Genesis status, registry and proposal requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one.",
+            "configured": bool(genesis_token),
+            "valid": False if genesis_token_invalid else (True if genesis_token_verified else None),
+            "unknown": bool(genesis_token and not genesis_token_verified and not genesis_token_invalid),
+            "message": (
+                "Genesis accepted the gateway token on its authenticated status route."
+                if genesis_token_verified else
+                "Genesis rejected the gateway token. Re-link the exact GENESIS_ADMIN_TOKEN value from genesis-core-one."
+                if genesis_token_invalid else
+                "The gateway has a token, but equality cannot be verified until Genesis routing is healthy. Use the Render fromService link."
+                if genesis_token else
+                "Genesis status, registry and proposal requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one."
+            ),
         },
         {
             "name": "GENESIS_SIGNING_KEY",
