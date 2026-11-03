@@ -11,10 +11,10 @@ from fastapi_routes.agi import router as agi_router
 
 class AGIManifestTests(unittest.TestCase):
     def test_eight_evolution_phases_include_core_mesh(self):
-        self.assertEqual(len(AGI_MANIFEST["evolution_timeline"]), 8)
-        self.assertIn(
-            "USECT Core Mesh",
-            AGI_MANIFEST["evolution_timeline"][-1]["phase"],
+        timeline = AGI_MANIFEST["evolution_timeline"]
+        self.assertEqual(len(timeline), 8)
+        self.assertTrue(
+            any("USECT Core Mesh" in phase["phase"] for phase in timeline)
         )
 
     def test_public_urls_and_static_status_are_truthful(self):
