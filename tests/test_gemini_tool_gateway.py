@@ -316,7 +316,8 @@ def test_shared_gemini_runtime_registers_voice_vision_and_all_core_adapters():
 
 def test_daily_learning_is_enabled_by_default_but_can_be_explicitly_disabled(monkeypatch):
     monkeypatch.delenv("REVELAAI_DAILY_LEARNING_ENABLED", raising=False)
-    assert gateway._core_status.__name__ == "_core_status"
-    assert gateway.CORE_ENGAGEMENT["daily_learning"]["module"] == "ai.daily_learning"
+    assert gateway._daily_learning_enabled() is True
     monkeypatch.setenv("REVELAAI_DAILY_LEARNING_ENABLED", "false")
-    assert __import__("os").getenv("REVELAAI_DAILY_LEARNING_ENABLED") == "false"
+    assert gateway._daily_learning_enabled() is False
+    monkeypatch.setenv("REVELAAI_DAILY_LEARNING_ENABLED", "1")
+    assert gateway._daily_learning_enabled() is True
