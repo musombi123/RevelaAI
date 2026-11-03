@@ -72,10 +72,10 @@ def _extract_copy(request: str, supplied: Any = None) -> list[str]:
     if not raw:
         quoted = re.findall(r'["“]([^"”]{1,180})["”]', request)
         if quoted:
-            return [re.sub(r"\\s+", " ", line).strip()[:180] for line in quoted[:6] if line.strip()]
+            return [re.sub(r"\s+", " ", line).strip()[:180] for line in quoted[:6] if line.strip()]
         labelled = []
         for label in ("title", "headline", "heading", "subtitle", "body", "footer", "date", "venue"):
-            match = re.search(rf"\\b{label}\\s*[:=]\\s*([^,;\\n]+)", request, re.I)
+            match = re.search(rf"\b{label}\s*[:=]\s*([^,;\n]+)", request, re.I)
             if match:
                 labelled.append(match.group(1).strip().strip('"\\''))
         if labelled:
