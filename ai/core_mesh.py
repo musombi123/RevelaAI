@@ -376,6 +376,12 @@ def get_core_mesh_configuration_health() -> dict:
             "message": "The private ZERO address is linked." if zero_url else "RevelaAI cannot locate the private ZERO service. Sync the Render Blueprint or set the internal service host:port.",
         },
         {
+            "name": "USECT_ZERO_ENABLED=true",
+            "service": "RevelaAI gateway",
+            "configured": usect_zero_is_enabled(),
+            "message": "The ZERO adapter is enabled." if usect_zero_is_enabled() else "Set USECT_ZERO_ENABLED=true on the RevelaAI gateway to activate the scoped ZERO adapter.",
+        },
+        {
             "name": "USECT_ZERO_BRAIN_TOKEN",
             "service": "RevelaAI gateway + usect-zero-core",
             "configured": bool(os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip() or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()),
