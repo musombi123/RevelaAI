@@ -237,6 +237,15 @@ def _voice_sync(
 
     provider = ai_result.get("provider", get_active_text_provider())
     model = ai_result.get("model", get_active_text_model())
+    tool_runtime = {}
+    if isinstance(ai_result.get("orchestrator"), dict):
+        tool_runtime = ai_result["orchestrator"].get("gemini_tool_runtime") or {}
+    reasoning_meta = {
+        "provider": provider,
+        "model": model,
+        "tool_runtime": tool_runtime,
+        "pipeline": "shared_gemini_first_chat_and_tool_gateway",
+    }
     memory_meta = {
         "enabled": True,
         "type": "conversation",
@@ -260,6 +269,7 @@ def _voice_sync(
                 "domain": ai_result.get("domain", "general"),
                 "provider": provider,
                 "model": model,
+                "reasoning": reasoning_meta,
                 "build_id": REVELAAI_BUILD_ID,
                 "memory": memory_meta,
             },
@@ -327,9 +337,10 @@ def _voice_sync(
         "audio_url": request_base_url.rstrip("/") + "/voice/audio/" + filename,
         "voice": {
             "input": {
-                "provider": "huggingface",
+                "provider": transcription.get("provider", "huggingface"),
                 "model": transcription.get("model"),
             },
+            "reasoning": reasoning_meta,
             "output": {
                 "provider": "huggingface",
                 "model": os.getenv("HF_TTS_MODEL", "hexgrad/Kokoro-82M"),
