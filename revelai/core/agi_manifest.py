@@ -27,6 +27,10 @@ CAPABILITY_SUMMARY = [
     "Core-Zero diagnostics, scoped key requests and human-gated operations",
     "Core-One Genesis invention planning and Core-Two proposal-only improvement workflows",
     "Runtime status reporting that distinguishes source presence from live health",
+    "Gemini-native shared tool calling across research, USECT-ZERO, signed Genesis and review-gated core adapters",
+    "Tool/app planning through Foundry with human review and no automatic code execution or deployment",
+    "Daily source-linked public tool and capability discovery with pending-review learning candidates",
+    "Vision chat and voice conversations routed through Gemini for reasoning, with specialist audio/vision adapters",
 ]
 
 AGI_MANIFEST: dict[str, Any] = {
@@ -39,7 +43,7 @@ AGI_MANIFEST: dict[str, Any] = {
             "scientifically verified AGI is not established"
         ),
         "version": (
-            "AGI-oriented v7.0 — Brain OS, Core Mesh, USECT-ZERO and Meta-Engineer"
+            "AGI-oriented v7.1 — Gemini Tool Gateway and Daily Capability Discovery"
         ),
         # Keep the long-standing keys, but point them at the current known URLs.
         "host": "https://revelaai.onrender.com",
@@ -152,6 +156,17 @@ AGI_MANIFEST: dict[str, Any] = {
                 "render.yaml declares private services and server-to-server environment-variable references; actual resource creation, routing and health must be verified in Render.",
             ],
         },
+        {
+            "phase": "Phase 8 — Gemini Tool Gateway and Daily Discovery",
+            "upgrades": [
+                "Gemini receives a shared typed catalogue for online research, tool/app planning, USECT-ZERO operations, core inspection and guarded evolution/device plans.",
+                "Every function request is validated and dispatched through its owning core; signed Genesis tools retain registry, signature, sandbox and approval checks.",
+                "Vision frames are analyzed by Gemini and their observations can continue through the Gemini tool-enabled chat pipeline; voice transcripts use the same reasoning pipeline.",
+                "A daily source-discovery cycle asks Gemini to synthesize fresh public-source evidence into pending-review tool and capability candidates.",
+                "Daily discovery is retrieval-augmented review, not model-weight training; it does not install tools, execute generated code, or mutate production.",
+                "Core engagement reporting distinguishes source presence, adapter wiring, this-process calls and live private-service probes.",
+            ],
+        },
     ],
     "capabilities": {
         "vision": {
@@ -233,6 +248,26 @@ AGI_MANIFEST: dict[str, Any] = {
         "core_mesh": {
             "description": "The Render Blueprint declares private Core-Zero, Core-One and Core-Two services with server-side service references.",
             "verification": "blueprint_declared; applying the Blueprint and checking live services are separate required steps",
+        },
+        "gemini_tool_gateway": {
+            "description": "Gemini-native function calling routes a bounded, typed capability catalogue through the owning Core adapters and server-side authorization.",
+            "verification": "implemented_in_source; live invocation and per-core reachability require runtime evidence",
+        },
+        "tool_factory": {
+            "description": "Foundry creates structured, review-only plans for new tools and applications from requirements; it does not execute generated code or deploy.",
+            "verification": "implemented_in_source; each plan requires human review and later independent validation",
+        },
+        "daily_capability_discovery": {
+            "description": "A scheduled Gemini research cycle collects fresh public web evidence and writes source-linked capability candidates for review.",
+            "verification": "scheduler_enabled_in_render_blueprint; successful daily execution and durable MongoDB persistence require runtime verification",
+        },
+        "vision_chat_tool_handoff": {
+            "description": "Gemini analyzes explicitly supplied image frames and can continue the image conversation through the shared tool-enabled reasoning pipeline.",
+            "verification": "source_present; camera permission, Gemini vision and chat tool dispatch must succeed for each request",
+        },
+        "voice_chat_tool_handoff": {
+            "description": "Speech transcription feeds the Gemini conversation and its shared tool gateway; speech synthesis remains a specialist audio adapter.",
+            "verification": "source_present; ASR/TTS provider configuration and Gemini chat availability are separate",
         },
     },
     "capability_summary": CAPABILITY_SUMMARY.copy(),
