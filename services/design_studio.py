@@ -525,9 +525,20 @@ def render_design(brief: dict[str, Any], background: Image.Image | None = None) 
 def enhance_illustration_prompt(request: str, image_plan: dict[str, Any]) -> str:
     """Add useful composition and lighting guidance without switching providers."""
     style = str(image_plan.get("style") or "cinematic editorial")
+    kind = str(image_plan.get("kind") or "illustration")
+    layout = str(image_plan.get("layout") or "clear focal subject with balanced negative space")
+    palette = image_plan.get("palette") if isinstance(image_plan.get("palette"), list) else []
+    palette_text = ", ".join(str(value) for value in palette[:4] if value) or "a coherent, limited colour palette"
     return (
-        f"{request}. Visual direction: {style}; deliberate subject placement and clear focal point; "
-        "professional composition, controlled depth of field, physically plausible lighting, "
-        "rich but coherent colour grading, detailed materials, clean silhouette, balanced negative space. "
-        "Create artwork only; do not render lettering, captions, watermarks, logos or UI text."
+        f"{request}. "
+        f"Art direction: {style}. Subject category: {kind}. Composition: {layout}; "
+        "establish one unmistakable focal subject, intentional foreground/midground/background separation, "
+        "strong silhouette readability, balanced negative space, and a visually clean frame. "
+        "Lighting: motivated cinematic key light, controlled fill, natural shadow direction, "
+        "subtle rim light where appropriate, realistic material response and no blown highlights. "
+        f"Colour: {palette_text}; coherent colour grading with controlled contrast. "
+        "Use refined texture, deliberate perspective, high detail where it improves the subject, "
+        "and a professional editorial finish. "
+        "Create artwork/background only; no lettering, captions, typography, watermarks, logos, UI, "
+        "fake signatures, borders or text-like symbols."
     )
