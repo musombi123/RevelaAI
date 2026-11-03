@@ -210,10 +210,10 @@ def _image_response(
             "provider": (
                 "revelaai-design-studio"
                 if asset["image_plan"].get("engine") == "design_renderer"
-                else "pollinations" if asset["image_plan"].get("engine") == "pollinations"
-                else "revelaai-svg"
+                else "revelaai-svg" if asset["image_plan"].get("engine") == "svg"
+                else "pollinations"
             ),
-            "model": get_image_provider_status().get("model") if asset["image_plan"].get("engine") == "pollinations" else None,
+            "model": get_image_provider_status().get("model") if asset["image_plan"].get("engine") not in {"design_renderer", "svg"} else None,
             "build_id": REVELAAI_BUILD_ID,
             "image_engine": asset["image_plan"].get("engine"),
             "engine_version": REVELAAI_IMAGE_ENGINE_VERSION,
