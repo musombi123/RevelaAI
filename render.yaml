@@ -32,6 +32,17 @@ services:
       # Model-provider secret remains server-side; the API base URL has a safe source default.
       - key: GEMINI_API_KEY
         sync: false
+      # Pollinations is the existing image provider. Its secret key stays on the server.
+      - key: POLLINATIONS_API_KEY
+        sync: false
+      # Higher-quality illustration/background model; designs still render exact copy locally.
+      - key: POLLINATIONS_IMAGE_MODEL
+        value: "google/gemini-3-pro-image"
+      # Same provider fallback, used only if the primary model fails.
+      - key: POLLINATIONS_IMAGE_FALLBACK_MODEL
+        value: "flux"
+      - key: POLLINATIONS_IMAGE_TIMEOUT
+        value: "180"
       - key: GEMINI_MODEL
         value: "gemini-3.8-flash"
       - key: GEMINI_FALLBACK_MODEL
