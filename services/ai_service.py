@@ -81,6 +81,7 @@ from ai.core_mesh import (
     propose_mind_evolution,
 )
 from ai.operator_tool_dispatch import dispatch_operator_tool
+from ai.gemini_tool_gateway import dispatch_gemini_tool, gemini_tool_declarations, is_gateway_tool
 from ai.tool_registry import (
     GenesisToolRegistryError,
     execute_active_tool,
@@ -1807,6 +1808,9 @@ def process_message(
     ))
     genesis_active_tools: list[dict[str, Any]] = []
     genesis_function_declarations: list[dict[str, Any]] = []
+    model_function_declarations: list[dict[str, Any]] = gemini_tool_declarations(
+        include_privileged=bool(user_id and core_mesh_operator_allowed(user_id))
+    )
     genesis_tool_execution: dict[str, Any] | None = None
     genesis_tools_enabled = (
         os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower()
@@ -1828,6 +1832,8 @@ def process_message(
                 ]
                 genesis_function_declarations = gemini_function_declarations(safe_tools)
                 if genesis_function_declarations:
+                    model_function_declarations.extend(genesis_function_declarations)
+                    model_function_declarations = model_function_declarations[:64]
                     model_system_prompt += (
                         "\n\nSIGNED GENESIS FUNCTION CALL POLICY:\n"
                         "You may request one Tier 0 signed Genesis tool through native function calling only when it is necessary for the operator's explicit task. "
@@ -1881,8 +1887,8 @@ def process_message(
             isinstance(current_core_mesh, dict)
             and current_core_mesh.get("mode") == "proposal_created"
         )
-        if genesis_function_declarations and not proposal_already_created:
-            model_call_kwargs["gemini_function_declarations"] = genesis_function_declarations
+        if model_function_declarations and not proposal_already_created:
+            model_call_kwargs["gemini_function_declarations"] = model_function_declarations
         result = ask_hf(**model_call_kwargs)
 
     except Exception as exc:
