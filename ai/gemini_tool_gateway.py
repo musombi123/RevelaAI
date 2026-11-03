@@ -16,7 +16,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
-from ai.usect_zero_tools import TOOL_CATALOG as ZERO_TOOL_CATALOG, execute_tool as execute_zero_tool
+from ai.usect_zero_tools import TOOL_CATALOG as ZERO_TOOL_CATALOG, execute_tool as execute_zero_tool, select_tool_for_message
 from ai.tool_registry import _gemini_schema_subset
 
 MAX_TOOL_CALLS_PER_TURN = 3
@@ -184,6 +184,39 @@ ZERO_DECLARATIONS = [
     if isinstance(item, dict) and isinstance(item.get("parameters"), dict)
 ]
 ZERO_BY_NAME = {item["name"]: item for item in ZERO_TOOL_CATALOG if isinstance(item, dict) and item.get("name")}
+
+
+_AUTOMATION_REQUEST_PATTERNS = (
+    re.compile(
+        r"\\b(?:build|create|design|develop|generate|make|implement|draft|plan)\\b.{0,90}"
+        r"\\b(?:tool|app|application|plugin|agent|module|workflow|automation|system|engine|capability|feature)\\b",
+        re.I | re.S,
+    ),
+    re.compile(
+        r"\\b(?:run|execute|invoke|use|inspect|scan|heal|assemble|compile|migrate|evolve|improve)\\b.{0,90}"
+        r"\\b(?:core|repository|repo|codebase|signed tool|genesis|usect|device|factory|seed|hardware|tool registry)\\b",
+        re.I | re.S,
+    ),
+    re.compile(
+        r"\\b(?:genesis|usect[- ]?(?:zero|one|two)|core[- ]?(?:zero|one|two))\\b.{0,90}"
+        r"\\b(?:tool|proposal|automation|evolution|scan|repair|build|create|run|execute)\\b",
+        re.I | re.S,
+    ),
+)
+
+
+def requires_automation_entitlement(message: str, intent: str = "general") -> bool:
+    """Identify explicit requests that need a privileged/core automation tool."""
+    value = str(message or "").strip()
+    if not value:
+        return False
+    try:
+        if select_tool_for_message(value, intent=intent) is not None:
+            return True
+    except Exception:
+        # A classifier failure must not broaden tool access.
+        return False
+    return any(pattern.search(value) for pattern in _AUTOMATION_REQUEST_PATTERNS)
 
 
 def gemini_tool_declarations(
@@ -374,6 +407,31 @@ def _core_status(include_live_probes: bool, user_id: str | None) -> dict[str, An
     except Exception as exc:
         extra["inspector"] = {"available": False, "error_type": type(exc).__name__}
 
+    try:
+        from revelai.sci_core.storage import collection
+        learning_rows = list(
+            collection("research")
+            .find({"kind": "daily_gemini_learning"})
+            .sort("created_at", -1)
+            .limit(1)
+        )
+        learning_latest = learning_rows[0] if learning_rows and isinstance(learning_rows[0], dict) else {}
+        learning_enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+        extra["daily_learning"] = {
+            "enabled": learning_enabled,
+            "schedule": "03:10 UTC daily",
+            "last_run_date": learning_latest.get("run_date"),
+            "last_status": learning_latest.get("status", "not_run"),
+            "source_count": learning_latest.get("source_count", len(learning_latest.get("sources") or [])),
+            "candidate_count": learning_latest.get("candidate_count", len(learning_latest.get("candidates") or [])),
+            "review_required": True,
+            "learning_mode": learning_latest.get("learning_mode", "retrieval_and_review_not_model_weight_training"),
+            "production_change_performed": False,
+        }
+        _mark("sci_core", "daily_learning_status", "success" if learning_enabled else "disabled")
+    except Exception as exc:
+        extra["daily_learning"] = {"enabled": False, "status": "unavailable", "error_type": type(exc).__name__}
+
     mesh = {"status": "not_probed", "cores": {}}
     if include_live_probes:
         try:
@@ -452,6 +510,7 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
             "revelaai_plan_device_migration",
             "revelaai_defensive_scan",
             "revelaai_inspect_meta_engineer",
+            "revelaai_draft_feature",
         }
         if tool_name in entitlement_tools:
             entitlement = _automation_entitlement(authorization)
@@ -681,4 +740,5 @@ def dispatch_gemini_tool(name: str, arguments: dict[str, Any], *, user_id: str |
 __all__ = [
     "CORE_ENGAGEMENT", "GENERAL_TOOL_DECLARATIONS", "dispatch_gemini_tool",
     "gemini_tool_declarations", "is_gateway_tool", "mark_core_usage",
+    "requires_automation_entitlement",
 ]
