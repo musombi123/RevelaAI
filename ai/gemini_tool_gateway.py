@@ -313,7 +313,7 @@ def _record_usage_and_audit(user_id: str, tool_name: str, status: str, latency_m
             _mark("core_meter", "record_usage", "degraded")
 
 
-def dispatch_gemini_tool(name: str, arguments: dict[str, Any], *, user_id: str | None, authorization: str = "") -> dict[str, Any]:
+def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id: str | None, authorization: str = "") -> dict[str, Any]:
     """Dispatch one Gemini function call through the named owning core."""
     started = time.monotonic()
     tool_name = str(name or "").strip()
@@ -421,13 +421,23 @@ def dispatch_gemini_tool(name: str, arguments: dict[str, Any], *, user_id: str |
     except Exception as exc:
         return {"tool": tool_name, "status": "blocked", "executed": False,
                 "reason": "tool_execution_failed", "error_type": type(exc).__name__}
-    finally:
-        status = "blocked"
-        # The returned status is derived after dispatch; no payloads or prompts are logged.
-        _record_usage_and_audit(
-            str(user_id or ""), tool_name, status,
-            int((time.monotonic() - started) * 1000),
-        )
+
+
+
+def dispatch_gemini_tool(name: str, arguments: dict[str, Any], *, user_id: str | None, authorization: str = "") -> dict[str, Any]:
+    """Dispatch, then meter and audit the actual outcome without logging payloads."""
+    started = time.monotonic()
+    outcome = _dispatch_gemini_tool_impl(
+        name, arguments, user_id=user_id, authorization=authorization
+    )
+    status = str(outcome.get("status") or "blocked")
+    result = outcome.get("result") if isinstance(outcome.get("result"), dict) else {}
+    object_id = str(result.get("build_id") or result.get("proposal_id") or result.get("plan_id") or "")
+    _record_usage_and_audit(
+        str(user_id or ""), str(name or ""), status,
+        int((time.monotonic() - started) * 1000), object_id=object_id
+    )
+    return outcome
 
 
 __all__ = [
