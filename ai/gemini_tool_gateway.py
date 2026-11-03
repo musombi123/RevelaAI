@@ -219,6 +219,22 @@ def requires_automation_entitlement(message: str, intent: str = "general") -> bo
     return any(pattern.search(value) for pattern in _AUTOMATION_REQUEST_PATTERNS)
 
 
+_READ_ONLY_TOOL_REQUEST_PATTERNS = (
+    re.compile(r"\\b(?:search online|browse online|look up|find sources|research|cite sources|provide sources|source links)\\b", re.I),
+    re.compile(r"\\b(?:latest|most recent|current state|current version|recent release|up to date)\\b", re.I),
+    re.compile(r"\\b(?:core status|core readiness|which cores|what cores|daily learning status|learning cycle status|verify seed)\\b", re.I),
+    re.compile(r"\\bseed_[a-f0-9]{24}\\b", re.I),
+)
+
+
+def requires_read_only_tool_declarations(message: str, *, allow_automation: bool = False) -> bool:
+    """Offer read-only Gemini functions only when the user request can use them."""
+    value = str(message or "").strip()
+    if allow_automation:
+        return True
+    return bool(value and any(pattern.search(value) for pattern in _READ_ONLY_TOOL_REQUEST_PATTERNS))
+
+
 def gemini_tool_declarations(
     *,
     include_privileged: bool = False,
@@ -741,4 +757,5 @@ __all__ = [
     "CORE_ENGAGEMENT", "GENERAL_TOOL_DECLARATIONS", "dispatch_gemini_tool",
     "gemini_tool_declarations", "is_gateway_tool", "mark_core_usage",
     "requires_automation_entitlement",
+    "requires_read_only_tool_declarations",
 ]
