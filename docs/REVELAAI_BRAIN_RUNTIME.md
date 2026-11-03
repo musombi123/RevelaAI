@@ -50,6 +50,13 @@ The production outer FastAPI app explicitly runs the mounted RevelaAI ASGI appli
 The provider order is normalized before use. If Gemini is configured, it is attempted first regardless of older aliases or an environment list that places MVI earlier. Hugging Face and MVI are fallbacks in the remaining configured order. An MVI rule-engine/template response is rejected rather than presented as generative model output.
 
 
+
+## Runtime capability intelligence
+
+Every global-brain handoff now receives a compact capability inventory generated from the deployed source tree and the same Gemini tool catalogues used by the gateway. It enumerates the six routing hubs, manifest capabilities, registered Gemini functions, and core components with exact module identifiers and source-presence checks. It also carries explicit evidence rules separating source presence, tool registration, request-level authorization, configuration, and live service health.
+
+This inventory is intentionally not a claim that every registered tool is executable by every user. Automation and operator-only functions remain gated by the existing entitlement and Core Mesh identity checks; signed Genesis tools are discovered through the remote signed registry when authorized. Third-party tools found during research, uninstalled packages, unconnected plugins, unprovisioned remote services, unenrolled devices, and proposals awaiting review are explicitly classified as not automatically owned capabilities. No credentials are included in the model context.
+
 ## Shared Gemini tool runtime, voice, vision and daily learning
 
 Every normal text request is offered the shared safe read-only Gemini function catalogue. This lets Gemini decide when current research, core status, learning status, seed verification or a bounded read-only USECT-ZERO operation is useful. It is not forced to call a tool on every request.
