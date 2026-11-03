@@ -81,7 +81,7 @@ from ai.core_mesh import (
     propose_mind_evolution,
 )
 from ai.operator_tool_dispatch import dispatch_operator_tool
-from ai.gemini_tool_gateway import dispatch_gemini_tool, gemini_tool_declarations, is_gateway_tool
+from ai.gemini_tool_gateway import dispatch_gemini_tool, gemini_tool_declarations, is_gateway_tool, mark_core_usage
 from ai.tool_registry import (
     GenesisToolRegistryError,
     execute_active_tool,
@@ -1318,6 +1318,15 @@ def process_message(
         authorization=authorization,
     )
     if operator_tool_result is not None:
+        operator_name = str(operator_tool_result.get("tool") or "")
+        if operator_name == "meta-engineer":
+            mark_core_usage("meta_engineer", "operator_tool_dispatch", str(operator_tool_result.get("status") or "executed"))
+        elif operator_name == "sci-defend":
+            mark_core_usage("sci_core", "operator_tool_dispatch", str(operator_tool_result.get("status") or "executed"))
+        elif operator_name == "genesis":
+            mark_core_usage("core_one_genesis", "operator_tool_dispatch", str(operator_tool_result.get("status") or "executed"))
+        elif operator_name == "infinite-mind":
+            mark_core_usage("core_two_infinite_mind", "operator_tool_dispatch", str(operator_tool_result.get("status") or "executed"))
         return operator_tool_result
 
     # =====================================================
@@ -1333,6 +1342,8 @@ def process_message(
         normalized_message,
         intent=intent,
     )
+    if tool_execution:
+        mark_core_usage("core_zero", str(tool_execution.get("operation") or "tool_dispatch"), str(tool_execution.get("status") or "unknown"))
 
     if tool_execution and tool_execution.get("status") == "unavailable":
         return {
@@ -1552,6 +1563,7 @@ def process_message(
                         country=country,
                         language=language,
                     )
+                    mark_core_usage("core_one_genesis", "invention_proposal", "proposal_only")
                     operation_kind = "invention_proposal"
                     core_label = "Genesis / USECT-ONE"
                 else:
@@ -1564,6 +1576,7 @@ def process_message(
                         normalized_message.strip(),
                         tool_name=tool_name,
                     )
+                    mark_core_usage("core_two_infinite_mind", "evolution_proposal", "proposal_only")
                     operation_kind = "core_one_improvement_proposal"
                     core_label = "Infinite Mind / USECT-TWO"
 
@@ -2050,6 +2063,7 @@ def process_message(
                 genesis_tool_execution = _execute_genesis_function_calls(
                     genesis_calls, genesis_active_tools, user_id
                 )
+                mark_core_usage("core_one_genesis", "signed_tool_invocation", str(genesis_tool_execution.get("status") or "unknown"))
             else:
                 genesis_tool_execution = {
                     "source": "gemini_native_function_call",
