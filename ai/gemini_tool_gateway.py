@@ -38,7 +38,7 @@ CORE_ENGAGEMENT = {
     "core_migrate": {"module": "core_migrate.service", "role": "enrolled-device inventory and dry-run migration plans", "tools": ["revelaai_plan_device_migration"]},
     "core_seed": {"module": "core_seed.seed_runner", "role": "owner-scoped offline child verification; never model-supplied licence keys", "tools": ["revelaai_verify_seed"]},
     "core_uncopyable": {"module": "core_uncopyable.recipe_lock", "role": "owner recipe and provenance trust status"},
-    "sci_core": {"module": "revelai.sci_core.research_engine", "role": "civilian research and defensive analysis", "tools": ["revelaai_research"]},
+    "sci_core": {"module": "revelai.sci_core.research_engine", "role": "civilian research, prototype drafts and defensive diagnostics", "tools": ["revelaai_research", "revelaai_build_civilian_prototype", "revelaai_disaster_diagnostic", "revelaai_defensive_scan"]},
     "brain_os": {"module": "revelai.core.brain_os", "role": "capability inventory and privacy-minimised outcomes"},
     "core_billing": {"module": "core_billing.service", "role": "license, entitlement and billing authorization control plane"},
     "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and review-only code scaffolding", "tools": ["revelaai_inspect_meta_engineer", "revelaai_draft_feature"]},
@@ -158,6 +158,27 @@ GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "revelaai_build_civilian_prototype",
+        "description": "Create a review-only civilian software or low-voltage electronics prototype package using Sci-Core Hardware Lab. Persists a prototype record and returns code/BOM/safety notes; generated firmware is not compiled or executed, no hardware is contacted or actuated, and electrical work requires qualified review.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "enum": ["software", "electronics"]},
+                "specification": {"type": "string", "description": "Civilian prototype specification, maximum 500 characters."},
+            },
+            "required": ["domain", "specification"],
+        },
+    },
+    {
+        "name": "revelaai_disaster_diagnostic",
+        "description": "Run a bounded operator-only diagnostic simulation for a database-connectivity failure or memory pressure. Returns an evidence record only; it does not restart workers, kill processes, fail over production databases or toggle the live API-overload throttle.",
+        "parameters": {
+            "type": "object",
+            "properties": {"kind": {"type": "string", "enum": ["db_down", "memory_leak"]}},
+            "required": ["kind"],
+        },
+    },
+    {
         "name": "revelaai_plan_device_migration",
         "description": "Create a dry-run migration plan against already enrolled devices and a supplied artifact hash. Never deploys or sends commands. Operator-only.",
         "parameters": {
@@ -248,10 +269,12 @@ def gemini_tool_declarations(
         "revelaai_plan_device_migration",
         "revelaai_defensive_scan",
         "revelaai_inspect_meta_engineer",
+        "revelaai_disaster_diagnostic",
     }
     automation_names = {
         "revelaai_plan_tool",
         "revelaai_draft_feature",
+        "revelaai_build_civilian_prototype",
         *privileged,
     }
     source_declarations = list(GENERAL_TOOL_DECLARATIONS) + list(ZERO_DECLARATIONS)
@@ -527,6 +550,8 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
             "revelaai_defensive_scan",
             "revelaai_inspect_meta_engineer",
             "revelaai_draft_feature",
+            "revelaai_build_civilian_prototype",
+            "revelaai_disaster_diagnostic",
         }
         if tool_name in entitlement_tools:
             entitlement = _automation_entitlement(authorization)
@@ -670,6 +695,55 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
                 "executed": bool(verification.get("ok")),
                 "result": _json_safe(verification),
                 "safety": {"child_execution_enabled": False, "activation_performed": False},
+            }
+
+        if tool_name == "revelaai_build_civilian_prototype":
+            if not user_id:
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "authentication_required"}
+            domain = str(args.get("domain") or "").strip().lower()
+            specification = str(args.get("specification") or "").strip()
+            if domain not in {"software", "electronics"}:
+                raise ValueError("domain must be software or electronics.")
+            if not specification or len(specification) > 500:
+                raise ValueError("specification is required and must be 500 characters or fewer.")
+            from revelai.sci_core.hardware_lab import build_prototype
+            result = build_prototype(domain, specification)
+            _mark("sci_core", "hardware_lab_prototype", "proposal_only")
+            return {
+                "tool": tool_name,
+                "status": "proposal_only",
+                "executed": False,
+                "result": _json_safe(result),
+                "safety": {
+                    "generated_code_execution": False,
+                    "firmware_compiled": False,
+                    "hardware_contacted": False,
+                    "physical_actuation": False,
+                    "human_review_required": True,
+                },
+            }
+
+        if tool_name == "revelaai_disaster_diagnostic":
+            if not _operator_allowed(user_id):
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "core_mesh_operator_required"}
+            kind = str(args.get("kind") or "").strip().lower()
+            if kind not in {"db_down", "memory_leak"}:
+                raise ValueError("Only db_down and memory_leak diagnostics are exposed through chat.")
+            from revelai.sci_core.disaster_manager import simulate
+            result = simulate(kind)
+            _mark("sci_core", "disaster_diagnostic", "success")
+            return {
+                "tool": tool_name,
+                "status": "executed",
+                "executed": True,
+                "result": _json_safe(result),
+                "safety": {
+                    "worker_restart": False,
+                    "process_kill": False,
+                    "production_database_failover": False,
+                    "api_throttle_mutation": False,
+                    "defensive_only": True,
+                },
             }
 
         if tool_name == "revelaai_get_learning_status":
