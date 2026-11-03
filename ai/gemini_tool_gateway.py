@@ -188,18 +188,18 @@ ZERO_BY_NAME = {item["name"]: item for item in ZERO_TOOL_CATALOG if isinstance(i
 
 _AUTOMATION_REQUEST_PATTERNS = (
     re.compile(
-        r"\\b(?:build|create|design|develop|generate|make|implement|draft|plan)\\b.{0,90}"
-        r"\\b(?:tool|app|application|plugin|agent|module|workflow|automation|system|engine|capability|feature)\\b",
+        r"\b(?:build|create|design|develop|generate|make|implement|draft|plan)\b.{0,90}"
+        r"\b(?:tool|app|application|plugin|agent|module|workflow|automation|system|engine|capability|feature)\b",
         re.I | re.S,
     ),
     re.compile(
-        r"\\b(?:run|execute|invoke|use|inspect|scan|heal|assemble|compile|migrate|evolve|improve)\\b.{0,90}"
-        r"\\b(?:core|repository|repo|codebase|signed tool|genesis|usect|device|factory|seed|hardware|tool registry)\\b",
+        r"\b(?:run|execute|invoke|use|inspect|scan|heal|assemble|compile|migrate|evolve|improve)\b.{0,90}"
+        r"\b(?:core|repository|repo|codebase|signed tool|genesis|usect|device|factory|seed|hardware|tool registry)\b",
         re.I | re.S,
     ),
     re.compile(
-        r"\\b(?:genesis|usect[- ]?(?:zero|one|two)|core[- ]?(?:zero|one|two))\\b.{0,90}"
-        r"\\b(?:tool|proposal|automation|evolution|scan|repair|build|create|run|execute)\\b",
+        r"\b(?:genesis|usect[- ]?(?:zero|one|two)|core[- ]?(?:zero|one|two))\b.{0,90}"
+        r"\b(?:tool|proposal|automation|evolution|scan|repair|build|create|run|execute)\b",
         re.I | re.S,
     ),
 )
