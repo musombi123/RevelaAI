@@ -56,5 +56,27 @@ class USECTZeroCredentialTests(unittest.TestCase):
         request_core.assert_not_called()
 
 
+    @patch("ai.usect_zero_tools.is_enabled", return_value=True)
+    @patch("ai.usect_zero_tools.request_core")
+    def test_canonical_brain_token_takes_precedence_over_legacy_alias(self, request_core, _enabled):
+        request_core.return_value = CoreReply(
+            status_code=200,
+            payload={"status": "ok"},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "USECT_ZERO_BRAIN_TOKEN": "canonical-core-linked-token",
+                "USECT_ZERO_BRAIN_API_KEY": "stale-legacy-token",
+            },
+            clear=True,
+        ):
+            result = zero_tools.execute_tool("diagnostics", {})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(request_core.call_args.kwargs["api_key"], "canonical-core-linked-token")
+        self.assertFalse(request_core.call_args.kwargs["admin"])
+
+
 if __name__ == "__main__":
     unittest.main()
