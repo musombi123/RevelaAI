@@ -313,7 +313,12 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
         )
         if isinstance(chat_result, dict):
             candidate = str(chat_result.get("response") or "").strip()
-            if candidate and not chat_result.get("action_required"):
+            if (
+                candidate
+                and not chat_result.get("action_required")
+                and not chat_result.get("error")
+                and not chat_result.get("error_code")
+            ):
                 chat_reply = candidate
                 mark_core_usage("brain_os", "vision_to_gemini_tool_chat", "success")
     except Exception as exc:
