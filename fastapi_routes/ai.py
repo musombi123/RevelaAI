@@ -25,7 +25,7 @@ from ai.hub_prompts import HUB_LABELS, get_identity_answer
 from ai.intent_router import classify_intent
 from ai.usect_zero_tools import select_tool_for_message
 from ai.core_mesh import core_mesh_operator_allowed
-from ai.gemini_tool_gateway import requires_automation_entitlement
+from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
 from ai.json_utils import enforce_base_schema, error_response, extract_json
 from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET, authenticate_identity
 from revelai.core.agi_manifest import get_self_description_answer
@@ -320,6 +320,7 @@ def _ai_sync(
             hub=brain_payload.get("hub") or "auto",
             payload=brain_payload,
         )
+        mark_core_usage("global_brain_adapter", "build_global_context", "success")
         previous_context = (previous_context + [brain_context])[-MAX_HISTORY:]
         if memory_user_oid is not None:
             personalization = _load_personalization_context(memory_user_oid)
