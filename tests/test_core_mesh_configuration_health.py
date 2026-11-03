@@ -35,3 +35,19 @@ def test_configuration_health_marks_unreachable_genesis_signing_state_unknown(mo
     genesis = next(item for item in report["items"] if item["name"] == "GENESIS_SIGNING_KEY")
     assert genesis["unknown"] is True
     assert "GENESIS_SIGNING_KEY" in report["unknown_variable_names"]
+
+
+def test_configuration_health_detects_a_genesis_token_rejected_by_the_core(monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
+    monkeypatch.setenv("GENESIS_BASE_URL", "http://genesis-core-one:8781")
+    monkeypatch.setenv("GENESIS_ADMIN_TOKEN", "test-only-not-a-real-secret")
+    monkeypatch.setattr(core_mesh, "_safe_fetch", lambda base, path, headers=None: (
+        {"status": "ok", "signing_key_configured": True}
+        if path == "/v1/genesis/health"
+        else {"reason": "upstream_http_401"}
+    ))
+    report = core_mesh.get_core_mesh_configuration_health()
+    genesis = next(item for item in report["items"] if item["name"].startswith("GENESIS_ADMIN_TOKEN"))
+    assert genesis["configured"] is True
+    assert genesis["valid"] is False
+    assert "rejected" in genesis["message"].lower()
