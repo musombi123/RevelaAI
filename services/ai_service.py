@@ -81,7 +81,7 @@ from ai.core_mesh import (
     propose_mind_evolution,
 )
 from ai.operator_tool_dispatch import dispatch_operator_tool
-from ai.gemini_tool_gateway import dispatch_gemini_tool, gemini_tool_declarations, is_gateway_tool, mark_core_usage
+from ai.gemini_tool_gateway import dispatch_gemini_tool, gemini_tool_declarations, is_gateway_tool, mark_core_usage, requires_read_only_tool_declarations
 from ai.tool_registry import (
     GenesisToolRegistryError,
     execute_active_tool,
@@ -1831,9 +1831,15 @@ def process_message(
     ))
     genesis_active_tools: list[dict[str, Any]] = []
     genesis_function_declarations: list[dict[str, Any]] = []
-    model_function_declarations: list[dict[str, Any]] = gemini_tool_declarations(
-        include_privileged=bool(user_id and core_mesh_operator_allowed(user_id) and allow_genesis_tools),
-        include_automation=bool(allow_automation_tools),
+    offers_tool_functions = bool(
+        allow_automation_tools or requires_read_only_tool_declarations(normalized_message)
+    )
+    model_function_declarations: list[dict[str, Any]] = (
+        gemini_tool_declarations(
+            include_privileged=bool(user_id and core_mesh_operator_allowed(user_id) and allow_genesis_tools),
+            include_automation=bool(allow_automation_tools),
+        )
+        if offers_tool_functions else []
     )
     genesis_tool_execution: dict[str, Any] | None = None
     genesis_tools_enabled = (
