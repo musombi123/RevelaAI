@@ -120,7 +120,10 @@ def run_daily_learning_cycle(run_date: date | None = None, force: bool = False):
             "learning_mode": "retrieval_and_review_not_model_weight_training",
             "code_executed": False, "production_change_performed": False,
             "review_required": True,
-            "error_code": _clean(response.get("error_code") or "gemini_daily_learning_failed", 100),
+            "error_code": _clean(
+                response.get("error_code") if isinstance(response, dict) else "gemini_daily_learning_failed",
+                100,
+            ),
         }
         store.insert_one(failed)
         return {"status": failed["status"], "run_date": day, "source_count": len(sources), "candidate_count": 0, "provider": "gemini"}
