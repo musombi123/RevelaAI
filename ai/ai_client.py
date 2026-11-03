@@ -3207,83 +3207,69 @@ def generate_hf_image(
 
     for candidate in candidates:
 
-        started = time.time()
-
-        provider = _provider_for(
-            candidate,
-            has_text=False,
-        )
-
-        try:
-
-            image = (
-                _pollinations_image_once(
+        provider = _provider_for(candidate, has_text=False)
+        for attempt in range(2):
+            started = time.time()
+            try:
+                image = _pollinations_image_once(
                     model=candidate,
                     prompt=prompt,
-                    negative_prompt=(
-                        negative_prompt
-                    ),
+                    negative_prompt=negative_prompt,
                     width=width,
                     height=height,
                     seed=seed,
                 )
-            )
+            except AIClientError as exc:
+                last_error = exc
+                transient = (
+                    exc.status_code in {None, 408, 500, 502, 503, 504}
+                    or exc.error_code in {
+                        "pollinations_timeout",
+                        "pollinations_connection_error",
+                        "pollinations_request_error",
+                        "pollinations_empty_image",
+                    }
+                )
+                print(
+                    "POLLINATIONS IMAGE FAILED | "
+                    f"model={candidate} | provider={provider} | "
+                    f"status={exc.status_code} | error_code={exc.error_code} | "
+                    f"attempt={attempt + 1} | time={time.time() - started:.2f}s"
+                )
+                if attempt == 0 and transient:
+                    time.sleep(1.0)
+                    continue
+                break
+            except Exception as exc:
+                last_error = exc
+                print(
+                    "POLLINATIONS IMAGE FAILED | "
+                    f"model={candidate} | provider={provider} | "
+                    f"error={type(exc).__name__} | attempt={attempt + 1} | "
+                    f"time={time.time() - started:.2f}s"
+                )
+                if attempt == 0:
+                    time.sleep(1.0)
+                    continue
+                break
 
-        except AIClientError as exc:
-
-            last_error = exc
+            if image is None:
+                last_error = AIClientError(
+                    "Pollinations returned no image.",
+                    provider="pollinations",
+                    error_code="pollinations_empty_image",
+                )
+                if attempt == 0:
+                    time.sleep(1.0)
+                    continue
+                break
 
             print(
-                "POLLINATIONS IMAGE FAILED | "
-                f"model={candidate} | "
-                f"provider={provider} | "
-                f"status={exc.status_code} | "
-                f"error_code={exc.error_code} | "
-                f"time={time.time() - started:.2f}s"
+                "POLLINATIONS IMAGE SUCCESS | "
+                f"model={candidate} | provider={provider} | "
+                f"size={width}x{height} | time={time.time() - started:.2f}s"
             )
-
-            # -------------------------------------------------
-            # Do not blindly repeat a request for auth/billing
-            # failures. Those conditions will not be repaired
-            # by retrying another model.
-            # -------------------------------------------------
-
-            # Authentication/permission failures must fall through to the outer provider chain.
-            continue
-
-        except Exception as exc:
-
-            last_error = exc
-
-            print(
-                "POLLINATIONS IMAGE FAILED | "
-                f"model={candidate} | "
-                f"provider={provider} | "
-                f"error={type(exc).__name__} | "
-                f"time={time.time() - started:.2f}s"
-            )
-
-            continue
-
-        if image is None:
-
-            last_error = AIClientError(
-                "Pollinations returned no image.",
-                provider="pollinations",
-                error_code="pollinations_empty_image",
-            )
-
-            continue
-
-        print(
-            "POLLINATIONS IMAGE SUCCESS | "
-            f"model={candidate} | "
-            f"provider={provider} | "
-            f"size={width}x{height} | "
-            f"time={time.time() - started:.2f}s"
-        )
-
-        return image
+            return image
 
     if isinstance(
         last_error,
