@@ -177,3 +177,37 @@ def test_gateway_tool_registry_includes_the_new_general_capabilities():
     assert gateway.is_gateway_tool("revelaai_draft_feature")
     assert gateway.is_gateway_tool("revelaai_verify_seed")
     assert gateway.is_gateway_tool("revelaai_get_learning_status")
+
+
+def test_tool_enabled_turn_does_not_fall_back_to_text_only_provider(monkeypatch):
+    from ai import ai_client
+
+    monkeypatch.setattr(ai_client, "get_text_provider_order", lambda: ["gemini", "hf", "mvi"])
+    monkeypatch.setattr(ai_client, "_provider_enabled", lambda _provider: True)
+
+    def fail_gemini(**_kwargs):
+        raise ai_client.AIClientError(
+            "Gemini function calling is temporarily unavailable.",
+            provider="gemini",
+            error_code="gemini_timeout",
+        )
+
+    def should_not_call_fallback(**_kwargs):
+        raise AssertionError("Tool-enabled requests must not fall back to text-only providers.")
+
+    monkeypatch.setattr(ai_client, "_ask_gemini_text", fail_gemini)
+    monkeypatch.setattr(ai_client, "_ask_hf_text", should_not_call_fallback)
+    monkeypatch.setattr(ai_client, "_request_mvi", should_not_call_fallback)
+
+    result = ai_client.ask_hf(
+        text="Create a tool and return a reviewed proposal.",
+        gemini_function_declarations=[{
+            "name": "revelaai_plan_tool",
+            "description": "Plan a new tool.",
+            "parameters": {"type": "object", "properties": {}},
+        }],
+    )
+
+    assert result["success"] is False
+    assert result["error_code"] == "gemini_tool_runtime_unavailable"
+    assert result["provider"] == "gemini"
