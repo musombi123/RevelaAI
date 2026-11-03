@@ -284,6 +284,7 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     ).strip()[:128]
     try:
         from services.ai_service import process_message
+        from ai.global_brain_adapter import build_global_context
         from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
         from ai.core_mesh import core_mesh_operator_allowed
 
@@ -307,9 +308,15 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
         allow_genesis_tools = bool(
             allow_automation_tools and core_mesh_operator_allowed(str(user_id))
         )
+        brain_context, _interaction = build_global_context(
+            message=followup_message,
+            hub=payload.get("hub") or "auto",
+            payload={"visionDescription": reply, "vision": True},
+        )
+        mark_core_usage("global_brain_adapter", "vision_chat_context", "success")
         chat_result = process_message(
             message=followup_message,
-            context=[],
+            context=[brain_context],
             intent="file_analysis",
             session_id=vision_session_id or None,
             user_id=str(user_id),
