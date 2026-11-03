@@ -352,6 +352,91 @@ def _dashboard_snapshot() -> dict:
     }
 
 
+
+def get_core_mesh_configuration_health() -> dict:
+    """Return admin-safe configuration checks; never return secret values."""
+    zero_url = core_base_url("zero")
+    genesis_url = core_base_url("genesis")
+    mind_url = core_base_url("mind")
+    genesis_health = _safe_fetch(genesis_url, "/v1/genesis/health")
+    genesis_signing = genesis_health.get("signing_key_configured")
+
+    checks = [
+        {
+            "name": "USECT_ZERO_URL / USECT_ZERO_BASE_URL",
+            "service": "RevelaAI gateway",
+            "configured": bool(zero_url),
+            "message": "The private ZERO address is linked." if zero_url else "RevelaAI cannot locate the private ZERO service. Sync the Render Blueprint or set the internal service host:port.",
+        },
+        {
+            "name": "USECT_ZERO_BRAIN_TOKEN",
+            "service": "RevelaAI gateway + usect-zero-core",
+            "configured": bool(os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip() or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()),
+            "message": "The gateway has the scoped ZERO brain credential." if (os.getenv("USECT_ZERO_BRAIN_TOKEN", "").strip() or os.getenv("USECT_ZERO_BRAIN_API_KEY", "").strip()) else "User-side AI calls to scoped ZERO tools will be unavailable. Link the same generated token from usect-zero-core.",
+        },
+        {
+            "name": "USECT_ZERO_ADMIN_TOKEN",
+            "service": "RevelaAI gateway + usect-zero-core",
+            "configured": bool(core_admin_token("zero")),
+            "message": "The gateway has the ZERO admin credential." if core_admin_token("zero") else "ZERO administrative actions will fail. Link the same generated token from usect-zero-core.",
+        },
+        {
+            "name": "GENESIS_BASE_URL",
+            "service": "RevelaAI gateway",
+            "configured": bool(genesis_url),
+            "message": "The private Genesis address is linked." if genesis_url else "RevelaAI cannot locate Genesis. Sync the Render Blueprint or set the internal Genesis host:port.",
+        },
+        {
+            "name": "GENESIS_ADMIN_TOKEN (or GENESIS_TOKEN)",
+            "service": "RevelaAI gateway + genesis-core-one",
+            "configured": bool(core_admin_token("genesis")),
+            "message": "The gateway has a Genesis proxy credential; the Render fromService link must point to the same token on genesis-core-one." if core_admin_token("genesis") else "Genesis status, registry and proposal requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one.",
+        },
+        {
+            "name": "GENESIS_SIGNING_KEY",
+            "service": "genesis-core-one",
+            "configured": genesis_signing is True,
+            "unknown": genesis_signing is None,
+            "message": "Genesis reports its signing key configured." if genesis_signing is True else ("Genesis health could not be read, so signing-key status is unknown." if genesis_signing is None else "Set a strong GENESIS_SIGNING_KEY on genesis-core-one. Keep it only on that service."),
+        },
+        {
+            "name": "GENESIS_ORCHESTRATOR_TOOLS_ENABLED=true",
+            "service": "RevelaAI gateway",
+            "configured": os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"},
+            "message": "Genesis tool orchestration is enabled." if os.getenv("GENESIS_ORCHESTRATOR_TOOLS_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"} else "Set GENESIS_ORCHESTRATOR_TOOLS_ENABLED=true to expose the signed Genesis tool catalogue to its authorized orchestration path.",
+        },
+        {
+            "name": "MIND_BASE_URL",
+            "service": "RevelaAI gateway",
+            "configured": bool(mind_url),
+            "message": "The private Infinite Mind address is linked." if mind_url else "RevelaAI cannot locate Infinite Mind. Sync the Render Blueprint or set its internal host:port.",
+        },
+        {
+            "name": "MIND_ADMIN_TOKEN",
+            "service": "RevelaAI gateway + infinite-mind-core",
+            "configured": bool(core_admin_token("mind")),
+            "message": "The gateway has the Mind mutation credential; the Render fromService link must point to the same token on infinite-mind-core." if core_admin_token("mind") else "Mind evolution requests cannot authenticate. Link MIND_ADMIN_TOKEN from infinite-mind-core.",
+        },
+        {
+            "name": "CORE_MESH_ADMIN_USER_IDS (or META_ENGINEER_ADMIN_USER_IDS)",
+            "service": "RevelaAI gateway",
+            "configured": bool((os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip()),
+            "message": "An operator allowlist is configured." if (os.getenv("CORE_MESH_ADMIN_USER_IDS") or os.getenv("META_ENGINEER_ADMIN_USER_IDS") or "").strip() else "Add the canonical RevelaCode user ID(s) allowed to operate Core Mesh. Do not use a browser-side role flag.",
+        },
+    ]
+    missing = [item["name"] for item in checks if not item["configured"]]
+    unknown = [item["name"] for item in checks if item.get("unknown")]
+    return {
+        "status": "ready" if not missing and not unknown else "needs_configuration",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "secrets_returned": False,
+        "missing_variable_names": missing,
+        "unknown_variable_names": unknown,
+        "items": checks,
+        "note": "Presence checks never expose secret values. Remote health confirms service responses; it does not prove token equality unless Render fromService links are used.",
+    }
+
+
 def get_core_mesh_dashboard(*, force_refresh: bool = False) -> dict:
     """Return a short-lived cached, credential-free status snapshot."""
     global _cache_value, _cache_time
