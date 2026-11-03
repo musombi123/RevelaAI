@@ -159,6 +159,7 @@ def generate_image_asset(
         brief = {"template": "diagram", "brief_source": "existing_safe_svg_designer", "exact_copy": [plan.get("text")] if plan.get("text") else []}
     elif is_design:
         brief = build_design_brief(planning_request, plan, {**options, "revision": revision})
+        brief["width"], brief["height"] = width, height
         background = None
         if options.get("use_ai_background") or re.search(r"\b(photo background|photographic background|realistic background|image background)\b", planning_request, re.I):
             background_prompt = brief.get("background_prompt") or enhance_illustration_prompt(planning_request, plan)
@@ -203,8 +204,6 @@ def generate_image_asset(
     image_url = f"{base_url}/ai/images/{svg_name or filenames.get('png') or filenames.get('svg')}"
     if not downloads and filenames:
         downloads = _asset_urls(base_url, filenames)
-    if options.get("output_format") in downloads:
-        image_url = downloads[options["output_format"]]
     return {
         "filename": svg_name or filenames.get("png") or filenames.get("svg"),
         "image_url": image_url,
