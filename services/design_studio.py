@@ -178,6 +178,7 @@ def build_design_brief(
         "aspect_ratio": ratio,
         "width": width,
         "height": height,
+        "title_scale": title_scale,
         "safe_margin": 0.085,
         "editable_fields": ["title", "subtitle", "body", "footer", "palette", "font_style"],
         "brief_source": "configured_text_model" if model_brief else "deterministic_safe_fallback",
