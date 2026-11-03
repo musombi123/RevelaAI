@@ -518,7 +518,7 @@ def render_design(brief: dict[str, Any], background: Image.Image | None = None) 
         y += 28
         y = _draw_wrapped(draw,body,(margin*1.3,y),body_font,muted,width-margin*2.6,10,"left",6)
     if footer:
-        _draw_wrapped(draw,footer,(width//2,bottom-margin),(width-margin*2),tiny_font,muted,width-margin*2,8,"center",2)
+        _draw_wrapped(draw,footer,(width//2,bottom-margin),tiny_font,muted,width-margin*2,8,"center",2)
     return image
 
 
