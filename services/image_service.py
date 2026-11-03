@@ -141,8 +141,9 @@ def generate_image_asset(
     planning_request = base_request + (f"\nRevision request: {revision}" if revision else "")
     plan = build_image_prompt(planning_request)
     ratio = str(options.get("aspect_ratio") or plan.get("aspect_ratio") or "1:1").lower()
+    ratio = {"2:3": "4:5", "3:2": "16:9", "3:1": "16:9"}.get(ratio, ratio)
     if ratio not in {"1:1", "4:5", "9:16", "16:9", "a4"}:
-        ratio = "1:1"
+        ratio = "4:5" if plan.get("kind") in {"poster", "social", "banner"} else "1:1"
     ratio_sizes = {"1:1": (1080, 1080), "4:5": (1080, 1350), "9:16": (1080, 1920), "16:9": (1920, 1080), "a4": (1240, 1754)}
     width = options.get("width") or ratio_sizes[ratio][0]
     height = options.get("height") or ratio_sizes[ratio][1]
@@ -167,7 +168,8 @@ def generate_image_asset(
         width, height = int(plan.get("width") or width), int(plan.get("height") or height)
         brief = {"template": "diagram", "brief_source": "existing_safe_svg_designer", "exact_copy": [plan.get("text")] if plan.get("text") else []}
     elif is_design:
-        brief = build_design_brief(planning_request, plan, {**options, "revision": revision})
+        brief = build_design_brief(planning_request, plan, {**options, "aspect_ratio": ratio, "revision": revision})
+        brief["aspect_ratio"] = ratio
         brief["width"], brief["height"] = width, height
         background = None
         if options.get("use_ai_background") or re.search(r"\b(photo background|photographic background|realistic background|image background)\b", planning_request, re.I):
