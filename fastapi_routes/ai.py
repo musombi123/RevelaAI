@@ -162,6 +162,8 @@ def _image_response(
     request_id: str,
     base_url: str,
 ):
+    if image_options.get("revision") and isinstance(session.get("last_design_brief"), dict):
+        image_options = {**image_options, "previous_brief": session["last_design_brief"]}
     try:
         asset = generate_image_asset(
             message,
@@ -181,15 +183,19 @@ def _image_response(
         )
         return _error("IMAGE_GENERATION_FAILED", message_text, 502, request_id)
 
-    # Keep the latest design request in the same conversation session so
-    # follow-up edits such as "make the title bigger" revise that design.
-    session["last_design_request"] = str(image_options.get("base_request") or message)[:1800]
-    session["last_design_options"] = {
-        key: image_options[key]
-        for key in ("aspect_ratio", "width", "height", "output_format", "template", "text", "use_ai_background")
-        if key in image_options
-    }
-    session["last_design_brief"] = asset.get("design_brief")
+    # Keep design-only state in the same conversation so short natural-language
+    # edits revise the previous poster/flyer/logo instead of starting from scratch.
+    if asset["image_plan"].get("engine") == "design_renderer":
+        session["last_design_request"] = str(image_options.get("base_request") or message)[:1800]
+        session["last_design_options"] = {
+            key: image_options[key]
+            for key in ("aspect_ratio", "width", "height", "output_format", "template", "text", "use_ai_background")
+            if key in image_options
+        }
+        session["last_design_brief"] = asset.get("design_brief")
+    else:
+        for key in ("last_design_request", "last_design_options", "last_design_brief"):
+            session.pop(key, None)
     save_image_conversation(session_id, session, message, success=True)
     response = enforce_base_schema(
         query=message,
