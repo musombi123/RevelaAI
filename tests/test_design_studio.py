@@ -49,3 +49,29 @@ def test_revision_can_change_palette_and_title_hierarchy(monkeypatch):
     )
     assert brief["palette"][0] == design_studio.COLORS["green"]
     assert brief["title_scale"] == 1.55
+
+
+def test_simple_revision_preserves_existing_template_copy_and_layout(monkeypatch):
+    monkeypatch.setattr(design_studio, "ask_hf", lambda *args, **kwargs: {"success": False})
+    previous = {
+        "template": "flyer",
+        "aspect_ratio": "4:5",
+        "palette": ["#123456", "#ABCDEF"],
+        "title": "Original event title",
+        "subtitle": "Original subtitle",
+        "body": "Original details",
+        "footer": "Original footer",
+        "layout": "left-aligned editorial layout",
+        "exact_copy": ["Original event title", "Original subtitle", "Original details"],
+        "title_scale": 1.1,
+    }
+    brief = design_studio.build_design_brief(
+        "Create a flyer saying Original event title",
+        _plan(),
+        {"revision": "change colour to green", "previous_brief": previous},
+    )
+    assert brief["template"] == "flyer"
+    assert brief["title"] == "Original event title"
+    assert brief["subtitle"] == "Original subtitle"
+    assert brief["layout"] == "left-aligned editorial layout"
+    assert brief["palette"][0] == design_studio.COLORS["green"]
