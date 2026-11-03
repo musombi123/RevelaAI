@@ -100,10 +100,27 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     if auth_error:
         return auth_error
 
+    requested_hub = str(payload.get("hub") or "smart_ai").strip().lower()
+    if requested_hub == "shamba":
+        entitlement_hub = "shamba"
+        entitlement_feature = "advanced_analytics"
+    elif requested_hub in {"smart_ai", "smartai"}:
+        entitlement_hub = "smart_ai"
+        entitlement_feature = "vision_analysis"
+    else:
+        return JSONResponse(
+            {
+                "status": "error",
+                "code": "unsupported_vision_hub",
+                "message": "Live Vision supports Shamba diagnostics or the Smart AI vision workspace.",
+            },
+            status_code=400,
+        )
+
     _, entitlement_error = check_entitlement(
         headers.get("authorization", ""),
-        hub="smart_ai",
-        feature="vision_analysis",
+        hub=entitlement_hub,
+        feature=entitlement_feature,
     )
     if entitlement_error is not None:
         return entitlement_error
@@ -255,6 +272,8 @@ def _analyze_sync(payload: dict[str, Any], headers: Mapping[str, str]):
             "reply": reply,
             "provider": "gemini",
             "model": GEMINI_MODEL,
+            "hub": entitlement_hub,
+            "entitlementFeature": entitlement_feature,
             "visionUsed": True,
             "mediaRetained": False,
         },
