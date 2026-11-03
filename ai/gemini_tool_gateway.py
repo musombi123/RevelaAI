@@ -36,12 +36,12 @@ CORE_ENGAGEMENT = {
     "core_inspector": {"module": "core_inspector.inspector", "role": "source, test and route inventory", "tools": ["revelaai_get_core_status"]},
     "core_meter": {"module": "core_meter.meter", "role": "per-tool usage and latency metering"},
     "core_migrate": {"module": "core_migrate.service", "role": "enrolled-device inventory and dry-run migration plans", "tools": ["revelaai_plan_device_migration"]},
-    "core_seed": {"module": "core_seed.seed_runner", "role": "licensed offline factory seeding; never model-supplied licence keys"},
+    "core_seed": {"module": "core_seed.seed_runner", "role": "owner-scoped offline child verification; never model-supplied licence keys", "tools": ["revelaai_verify_seed"]},
     "core_uncopyable": {"module": "core_uncopyable.recipe_lock", "role": "owner recipe and provenance trust status"},
     "sci_core": {"module": "revelai.sci_core.research_engine", "role": "civilian research and defensive analysis", "tools": ["revelaai_research"]},
     "brain_os": {"module": "revelai.core.brain_os", "role": "capability inventory and privacy-minimised outcomes"},
     "core_billing": {"module": "core_billing.service", "role": "license, entitlement and billing authorization control plane"},
-    "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and guarded engineering proposals", "tools": ["revelaai_inspect_meta_engineer", "operator_tool_dispatch"]},
+    "meta_engineer": {"module": "meta_engineer.introspector", "role": "read-only architecture inspection and review-only code scaffolding", "tools": ["revelaai_inspect_meta_engineer", "revelaai_draft_feature"]},
 }
 
 GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
@@ -86,7 +86,7 @@ GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
     },
     {
         "name": "revelaai_propose_evolution",
-        "description": "Submit a bounded Core-Two/Core-Evolve improvement proposal for an allowlisted operator. Requires explicit metric baselines and targets. Creates a proposal only; no source code is executed, merged, or deployed.",
+        "description": "Submit a bounded Core-Evolve improvement proposal for an allowlisted operator. Requires explicit metric baselines and targets. Creates a proposal only; no source code is executed, merged, or deployed.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -130,6 +130,34 @@ GENERAL_TOOL_DECLARATIONS: list[dict[str, Any]] = [
         "parameters": {"type": "object", "properties": {}},
     },
     {
+        "name": "revelaai_draft_feature",
+        "description": "Use Meta-Engineer's deterministic generator to draft a backend, frontend, database or full-stack feature scaffold from a bounded specification. Returns review-only code artifacts; it does not write into the repository, execute source, register routes, merge or deploy. Use after planning a new tool/app when actual scaffold files are useful.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "specification": {"type": "string", "description": "Feature/tool requirements, maximum 1,000 characters."},
+                "target": {"type": "string", "enum": ["backend", "frontend", "database", "fullstack"]},
+            },
+            "required": ["specification", "target"],
+        },
+    },
+    {
+        "name": "revelaai_verify_seed",
+        "description": "Verify an existing offline-seeded factory child using its signed licence and content hash. The result is returned only to the authenticated child owner. It never seeds, activates or executes the child.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "seed_id": {"type": "string", "description": "Existing seed identifier, for example seed_ followed by 24 lowercase hexadecimal characters."},
+            },
+            "required": ["seed_id"],
+        },
+    },
+    {
+        "name": "revelaai_get_learning_status",
+        "description": "Read the latest scheduled Gemini capability-discovery cycle, including its date, source count and pending review candidates. It does not trigger a paid or on-demand research run.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
         "name": "revelaai_plan_device_migration",
         "description": "Create a dry-run migration plan against already enrolled devices and a supplied artifact hash. Never deploys or sends commands. Operator-only.",
         "parameters": {
@@ -158,35 +186,55 @@ ZERO_DECLARATIONS = [
 ZERO_BY_NAME = {item["name"]: item for item in ZERO_TOOL_CATALOG if isinstance(item, dict) and item.get("name")}
 
 
-def gemini_tool_declarations(*, include_privileged: bool = True, active_genesis: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """Return a deterministic, Gemini-compatible typed tool list."""
+def gemini_tool_declarations(
+    *,
+    include_privileged: bool = False,
+    include_automation: bool = False,
+    active_genesis: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return only the Gemini tools enabled by this authenticated turn's grants."""
+    privileged = {
+        "revelaai_propose_evolution",
+        "revelaai_request_mind_evolution",
+        "revelaai_plan_device_migration",
+        "revelaai_defensive_scan",
+        "revelaai_inspect_meta_engineer",
+    }
+    automation_names = {
+        "revelaai_plan_tool",
+        "revelaai_draft_feature",
+        *privileged,
+    }
     source_declarations = list(GENERAL_TOOL_DECLARATIONS) + list(ZERO_DECLARATIONS)
-    if not include_privileged:
-        privileged = {
-            "revelaai_propose_evolution",
-            "revelaai_request_mind_evolution",
-            "revelaai_plan_device_migration",
-            "revelaai_defensive_scan",
-            "revelaai_inspect_meta_engineer",
-        }
-        source_declarations = [item for item in source_declarations if item["name"] not in privileged]
-
     declarations: list[dict[str, Any]] = []
     for item in source_declarations:
+        name = str(item.get("name") or "")
+        # USECT-ZERO declarations carry a scope in their source catalogue.
+        # Read-only diagnostics remain discoverable; proposal/mutation scopes
+        # require the explicit automation entitlement.
+        zero_spec = ZERO_BY_NAME.get(name)
+        zero_requires_automation = bool(
+            zero_spec and not str(zero_spec.get("scope") or "").endswith(":read")
+        )
+        if (name in privileged and not include_privileged):
+            continue
+        if ((name in automation_names or zero_requires_automation) and not include_automation):
+            continue
         parameters = _gemini_schema_subset(item.get("parameters"))
         if not isinstance(parameters, dict) or parameters.get("type") != "object":
             continue
         declarations.append({
-            "name": str(item["name"]),
+            "name": name,
             "description": str(item.get("description") or "")[:1000],
             "parameters": parameters,
         })
 
     # Signed Genesis declarations are generated only after remote signature,
-    # artifact hash, sandbox evidence and operator checks.
-    for item in (active_genesis or [])[:32]:
-        if isinstance(item, dict) and item.get("name") and isinstance(item.get("parameters"), dict):
-            declarations.append(item)
+    # artifact hash, sandbox evidence and operator authorization.
+    if include_privileged:
+        for item in (active_genesis or [])[:32]:
+            if isinstance(item, dict) and item.get("name") and isinstance(item.get("parameters"), dict):
+                declarations.append(item)
     names = [item["name"] for item in declarations]
     if len(names) != len(set(names)):
         raise ValueError("Gemini tool catalogue contains duplicate function names.")
@@ -473,7 +521,6 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
             })
             proposal = EvolutionEngine().propose(request)
             _mark("core_evolve", "propose", "proposal_only")
-            _mark("core_two_infinite_mind", "evolution_proposal", "proposal_only")
             return {"tool": tool_name, "status": "proposal_only", "executed": False,
                     "result": _json_safe(proposal.model_dump(mode="json")),
                     "safety": {"candidate_source_execution": False, "human_approval_required": True, "automatic_merge": False}}
@@ -503,6 +550,77 @@ def _dispatch_gemini_tool_impl(name: str, arguments: dict[str, Any], *, user_id:
             return {"tool": tool_name, "status": "executed", "executed": True,
                     "result": _json_safe(architecture),
                     "safety": {"read_only": True, "candidate_source_execution": False, "automatic_merge": False}}
+
+        if tool_name == "revelaai_draft_feature":
+            if not user_id:
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "authentication_required"}
+            specification = str(args.get("specification") or "").strip()
+            target = str(args.get("target") or "").strip().lower()
+            if not specification or len(specification) > 1000:
+                raise ValueError("specification is required and must be 1,000 characters or fewer.")
+            if target not in {"backend", "frontend", "database", "fullstack"}:
+                raise ValueError("target must be backend, frontend, database or fullstack.")
+            from meta_engineer.generator import generate_feature
+            proposal = generate_feature(specification, target=target)
+            _mark("meta_engineer", "draft_feature_scaffold", "proposal_only")
+            return {
+                "tool": tool_name,
+                "status": "proposal_only",
+                "executed": False,
+                "result": _json_safe(proposal),
+                "safety": {
+                    "source_written_to_repository": False,
+                    "generated_code_execution": False,
+                    "route_registration": False,
+                    "automatic_merge": False,
+                    "production_deployment": False,
+                    "human_review_required": True,
+                },
+            }
+
+        if tool_name == "revelaai_verify_seed":
+            if not user_id:
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "authentication_required"}
+            seed_id = str(args.get("seed_id") or "").strip()
+            if not re.fullmatch(r"seed_[a-f0-9]{24}", seed_id):
+                raise ValueError("seed_id must use the seed_ plus 24 lowercase hexadecimal identifier format.")
+            from core_seed.seed_runner import SeedRunner
+            verification = SeedRunner().verify_child_offline(seed_id)
+            if str(verification.get("owner_user_id") or "") != str(user_id):
+                return {"tool": tool_name, "status": "blocked", "executed": False, "reason": "seed_owner_mismatch"}
+            _mark("core_seed", "verify_owned_child", "success" if verification.get("ok") else "blocked")
+            return {
+                "tool": tool_name,
+                "status": "executed" if verification.get("ok") else "blocked",
+                "executed": bool(verification.get("ok")),
+                "result": _json_safe(verification),
+                "safety": {"child_execution_enabled": False, "activation_performed": False},
+            }
+
+        if tool_name == "revelaai_get_learning_status":
+            from revelai.sci_core.storage import collection
+            records = list(
+                collection("research")
+                .find({"kind": "daily_gemini_learning"})
+                .sort("created_at", -1)
+                .limit(1)
+            )
+            latest = records[0] if records and isinstance(records[0], dict) else {}
+            enabled = os.getenv("REVELAAI_DAILY_LEARNING_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+            result = {
+                "enabled": enabled,
+                "schedule": "daily at 03:10 UTC",
+                "last_run_date": latest.get("run_date"),
+                "last_status": latest.get("status", "not_run"),
+                "source_count": latest.get("source_count", len(latest.get("sources") or [])),
+                "candidate_count": latest.get("candidate_count", len(latest.get("candidates") or [])),
+                "review_required": True,
+                "learning_mode": latest.get("learning_mode", "retrieval_and_review_not_model_weight_training"),
+                "production_change_performed": False,
+            }
+            _mark("sci_core", "daily_learning_status", "success" if enabled else "disabled")
+            _mark("brain_os", "daily_learning_status", "success")
+            return {"tool": tool_name, "status": "executed", "executed": True, "result": _json_safe(result)}
 
         if tool_name == "revelaai_plan_device_migration":
             if not _operator_allowed(user_id):
