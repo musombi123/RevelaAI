@@ -179,7 +179,7 @@ def _image_response(
         message_text = (
             "Image generation is not configured yet. Add the Pollinations API key to the RevelaAI server environment, then redeploy."
             if error_code == "pollinations_api_key_missing"
-            else "The image provider took too long. Please retry; the design brief and exact copy remain available in this conversation."
+            else "The image provider took too long. Please retry using the same prompt; no partial image was returned."
             if "timeout" in error_code.lower() or "timeout" in str(exc).lower()
             else "The image service is temporarily unavailable. Please retry in a moment."
         )
