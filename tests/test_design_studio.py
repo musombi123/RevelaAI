@@ -75,3 +75,49 @@ def test_simple_revision_preserves_existing_template_copy_and_layout(monkeypatch
     assert brief["subtitle"] == "Original subtitle"
     assert brief["layout"] == "left-aligned editorial layout"
     assert brief["palette"][0] == design_studio.COLORS["green"]
+
+def test_structured_brief_preserves_explicit_editable_fields_and_icon_direction(monkeypatch):
+    monkeypatch.setattr(design_studio, "ask_hf", lambda *args, **kwargs: {
+        "success": True,
+        "response": '{"layout":"asymmetric editorial split","palette":["#112233","#D4AF37"],"hierarchy":{"title_scale":1.4},"font_style":"display","icons":["star","leaf"],"motifs":["editorial lines"]}',
+    })
+    brief = design_studio.build_design_brief(
+        "Design a launch flyer",
+        _plan(),
+        {
+            "template": "flyer",
+            "aspect_ratio": "4:5",
+            "title": "REVELACODE LAUNCH",
+            "subtitle": "Code. Innovate. Transform.",
+            "body": "Join us for the launch.",
+            "footer": "Mombasa · Kenya",
+        },
+    )
+    assert brief["title"] == "REVELACODE LAUNCH"
+    assert brief["subtitle"] == "Code. Innovate. Transform."
+    assert brief["body"] == "Join us for the launch."
+    assert brief["footer"] == "Mombasa · Kenya"
+    assert brief["layout"] == "asymmetric editorial split"
+    assert brief["font_style"] == "display"
+    assert brief["icons"] == ["star", "leaf"]
+    assert brief["aspect_ratio"] == "4:5"
+
+
+def test_long_design_copy_renders_inside_canvas_for_all_templates(monkeypatch):
+    monkeypatch.setattr(design_studio, "ask_hf", lambda *args, **kwargs: {"success": False})
+    for template in sorted(design_studio.TEMPLATES):
+        brief = design_studio.build_design_brief(
+            "Create a professional design",
+            _plan(),
+            {
+                "template": template,
+                "aspect_ratio": "4:5",
+                "title": "A carefully designed headline that needs to remain readable on mobile devices",
+                "subtitle": "A clear supporting message",
+                "body": "A concise description with the essential details, presented in a clean hierarchy with enough whitespace.",
+                "footer": "Contact the team for more information",
+            },
+        )
+        image = design_studio.render_design(brief)
+        assert image.size == (1080, 1350)
+        assert image.mode == "RGB"
