@@ -79,7 +79,7 @@ def test_daily_learning_covers_every_track_and_caps_each_at_three_sources(monkey
     assert result["source_count"] == 24
     assert result["candidate_count"] == 1
     assert len(search_queries) == len(daily_learning.TRACKS) == 8
-    stored = store.documents[-1]
+    stored = next(item for item in store.documents if item.get("kind") == "daily_gemini_learning")
     assert stored["learning_mode"] == "retrieval_and_review_not_model_weight_training"
     assert stored["review_required"] is True
     assert stored["production_change_performed"] is False
