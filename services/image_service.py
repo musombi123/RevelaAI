@@ -57,10 +57,19 @@ def parse_image_options(source: Any) -> dict[str, Any]:
         if ratio not in {"1:1", "4:5", "9:16", "16:9", "a4"}:
             raise ValueError("Choose a supported canvas: 1:1, 4:5, 9:16, 16:9 or A4.")
         options["aspect_ratio"] = ratio
-    for field in ("width", "height", "seed"):
+    for field in ("width", "height"):
         value = _optional_int(source.get(field), field)
         if value is not None:
             options[field] = value
+    seed_value = source.get("seed")
+    if seed_value is not None and str(seed_value).strip():
+        try:
+            seed = int(seed_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Image seed must be an integer.") from exc
+        if seed < 0 or seed > 4_294_967_295:
+            raise ValueError("Image seed must be between 0 and 4,294,967,295.")
+        options["seed"] = seed
     output_format = str(source.get("output_format") or "png").strip().lower()
     if output_format not in {"png", "jpg", "jpeg", "pdf"}:
         raise ValueError("Image output format must be PNG, JPG or PDF.")
