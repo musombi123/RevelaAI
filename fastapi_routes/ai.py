@@ -295,12 +295,7 @@ def _ai_sync(
         }
         raw_client_context = payload.get("context", "") or ""
         try:
-            image_options = parse_image_options({
-                "aspect_ratio": payload.get("aspect_ratio"),
-                "width": payload.get("width"),
-                "height": payload.get("height"),
-                "seed": payload.get("seed"),
-            })
+            image_options = parse_image_options(payload)
         except ValueError as exc:
             return _error("INVALID_IMAGE_OPTIONS", str(exc), 400, request_id)
         try:
