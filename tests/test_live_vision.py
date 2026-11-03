@@ -115,6 +115,42 @@ def test_vision_sends_ephemeral_frame_to_gemini(client, monkeypatch, valid_image
     assert payload["mediaRetained"] is False
 
 
+
+def test_shamba_vision_uses_shamba_advanced_analytics_entitlement(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "authenticate_identity", _authenticate_as("verified-user"))
+    requested = {}
+    def check_shamba_entitlement(*args, **kwargs):
+        requested.update(kwargs)
+        return {"success": True, "allowed": True, "tier": "trial"}, None
+
+    monkeypatch.setattr(vision_routes, "check_entitlement", check_shamba_entitlement)
+    monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", False)
+    valid_image_payload["hub"] = "shamba"
+
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert requested == {"hub": "shamba", "feature": "advanced_analytics"}
+    assert response.status_code == 503
+    assert response.json()["code"] == "vision_provider_not_configured"
+
+
+def test_vision_rejects_unsupported_hub_before_entitlement(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "authenticate_identity", _authenticate_as("verified-user"))
+    monkeypatch.setattr(
+        vision_routes,
+        "check_entitlement",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("Unsupported hubs must not reach entitlement checks")
+        ),
+    )
+    valid_image_payload["hub"] = "biashara"
+
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "unsupported_vision_hub"
+
+
 def test_vision_reports_missing_provider_configuration(client, monkeypatch, valid_image_payload):
     monkeypatch.setattr(vision_routes, "authenticate_identity", _authenticate_as("verified-user"))
     monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
