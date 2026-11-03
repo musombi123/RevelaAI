@@ -147,6 +147,16 @@ IMAGE_ACTION_TERMS = (
     "make a flyer",
     "design a flyer",
     "generate a flyer",
+    "create an invitation",
+    "design an invitation",
+    "create a business card",
+    "design a business card",
+    "create an instagram post",
+    "design an instagram post",
+    "create a whatsapp status",
+    "design a whatsapp status",
+    "create a certificate",
+    "design a certificate",
     "create a thumbnail",
     "make a thumbnail",
     "design a thumbnail",
@@ -177,6 +187,12 @@ IMAGE_OBJECT_TERMS = (
     "artwork",
     "social media design",
     "social post",
+    "instagram post",
+    "instagram story",
+    "whatsapp status",
+    "business card",
+    "invitation",
+    "certificate",
     "cover image",
     "book cover",
     "event card",
@@ -192,7 +208,8 @@ IMAGE_ACTION_RE = re.compile(
     r")\b.*\b(?:"
     r"image|picture|photo|art|artwork|illustration|"
     r"logo|poster|banner|flyer|graphic|thumbnail|"
-    r"infographic|diagram|cover"
+    r"infographic|diagram|cover|business card|instagram post|"
+    r"instagram story|whatsapp status|invitation|certificate|social post"
     r")\b",
     re.IGNORECASE,
 )
