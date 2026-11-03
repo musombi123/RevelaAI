@@ -121,6 +121,14 @@ def _voice_sync(
 
     session = get_session(session_id)
     previous_context = build_server_context(session)
+    from ai.global_brain_adapter import build_global_context
+    brain_context, _interaction = build_global_context(
+        message=heard,
+        hub="auto",
+        payload={"voiceTranscript": heard},
+    )
+    previous_context = (previous_context + [brain_context])[-MAX_HISTORY:]
+    mark_core_usage("global_brain_adapter", "voice_transcript_context", "success")
     intent = classify_intent(heard)
     capability = detect_capability(heard, intent=intent)
     allow_automation_tools = requires_automation_entitlement(heard, intent=intent)
