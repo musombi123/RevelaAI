@@ -10,8 +10,8 @@ from fastapi_routes.agi import router as agi_router
 
 
 class AGIManifestTests(unittest.TestCase):
-    def test_seven_evolution_phases_include_core_mesh(self):
-        self.assertEqual(len(AGI_MANIFEST["evolution_timeline"]), 7)
+    def test_eight_evolution_phases_include_core_mesh(self):
+        self.assertEqual(len(AGI_MANIFEST["evolution_timeline"]), 8)
         self.assertIn(
             "USECT Core Mesh",
             AGI_MANIFEST["evolution_timeline"][-1]["phase"],
