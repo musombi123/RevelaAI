@@ -113,6 +113,7 @@ def process_uploaded_document(
             )
             or ""
         ).strip()
+        extracted_text = _screen_untrusted_text(extracted_text, safe_name)
 
         if not extracted_text:
 
