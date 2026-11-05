@@ -40,7 +40,7 @@ from services.expert_medicine import analyze_medical_query
 from services.image_service import generate_image_asset, parse_image_options
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
-from services.user_preferences import build_user_preferences_context
+from services.user_preferences import build_user_preferences_context, is_user_memory_enabled
 from services.runtime_config import (
     IMAGE_DIR, MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
     get_active_text_provider,
@@ -281,6 +281,8 @@ def _ai_sync(
                 if memory_entitlement_error is not None:
                     memory_user_oid = None
                     logger.info("Long-term memory entitlement is unavailable; AI continues without saved memory")
+                if not is_user_memory_enabled(settings_user_id):
+                    memory_user_oid = None
         except Exception:
             memory_user_oid = None
             logger.warning("Smart memory identity verification failed; continuing without saved memory", exc_info=True)
