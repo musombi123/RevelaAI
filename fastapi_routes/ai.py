@@ -40,6 +40,7 @@ from services.expert_medicine import analyze_medical_query
 from services.image_service import generate_image_asset, parse_image_options
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
+from services.user_preferences import build_user_preferences_context
 from services.runtime_config import (
     IMAGE_DIR, MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
     get_active_text_provider,
@@ -260,6 +261,7 @@ def _ai_sync(
     session = get_session(session_id)
 
     memory_user_oid = None
+    settings_user_id = None
     if user_id:
         try:
             memory_user_oid, verified_id, auth_error = authenticate_identity(
@@ -268,6 +270,8 @@ def _ai_sync(
             if auth_error or verified_id != user_id:
                 memory_user_oid = None
                 logger.info("Smart memory identity verification unavailable; AI continues without saved memory")
+            else:
+                settings_user_id = verified_id
             else:
                 _, memory_entitlement_error = check_entitlement(
                     authorization,
@@ -366,6 +370,9 @@ def _ai_sync(
             personalization = _load_personalization_context(memory_user_oid)
             if personalization:
                 previous_context = (previous_context + [personalization])[-MAX_HISTORY:]
+        preferences_context = build_user_preferences_context(settings_user_id)
+        if preferences_context:
+            previous_context = (previous_context + [preferences_context])[-MAX_HISTORY:]
 
         intent = classify_intent(message)
         # Tool creation and Core operations use the same automation grant
