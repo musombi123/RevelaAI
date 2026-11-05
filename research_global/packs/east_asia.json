@@ -1,1 +1,51 @@
-{"id":"east_asia","label":"East Asia","countries":["CN","JP","KR"],"languages":["zh","ja","en"],"currency":"CNY","adapters":["arxiv","crossref","openalex","europe_pmc","gdelt","searxng","world_bank"],"official_sources":[{"name":"China National Bureau of Statistics","country":"CN","category":"statistics","url":"https://www.stats.gov.cn/english/"},{"name":"National Diet Library","country":"JP","category":"law","url":"https://www.ndl.go.jp/"},{"name":"Statistics Bureau of Japan","country":"JP","category":"statistics","url":"https://www.stat.go.jp/english/"}],"rss_sources":[]}
+{
+  "id": "east_asia",
+  "label": "East Asia",
+  "countries": [
+    "CN",
+    "JP",
+    "KR"
+  ],
+  "languages": [
+    "zh",
+    "ja",
+    "en"
+  ],
+  "currency": "CNY",
+  "adapters": [
+    "arxiv",
+    "crossref",
+    "openalex",
+    "europe_pmc",
+    "gdelt",
+    "searxng",
+    "world_bank"
+  ],
+  "official_sources": [
+    {
+      "name": "China National Bureau of Statistics",
+      "country": "CN",
+      "category": "statistics",
+      "url": "https://www.stats.gov.cn/english/"
+    },
+    {
+      "name": "National Diet Library",
+      "country": "JP",
+      "category": "law",
+      "url": "https://www.ndl.go.jp/"
+    },
+    {
+      "name": "Statistics Bureau of Japan",
+      "country": "JP",
+      "category": "statistics",
+      "url": "https://www.stat.go.jp/english/"
+    }
+  ],
+  "rss_sources": [],
+  "currencies": {
+    "CN": "CNY",
+    "JP": "JPY",
+    "KR": "KRW",
+    "TW": "TWD"
+  }
+}
