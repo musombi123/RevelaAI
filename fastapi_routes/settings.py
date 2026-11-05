@@ -21,9 +21,9 @@ ALLOWED_SECTIONS = {
     "accessibility", "plan_usage", "models_mode",
 }
 _BLOCKED_INSTRUCTION_PATTERNS = (
-    re.compile(r"ignore\\s+(?:all\\s+)?(?:previous|prior|system|developer)\\s+instructions", re.I),
-    re.compile(r"(?:disable|bypass|override|ignore)\\s+(?:safety|sci\\s*defender|meta\\s*(?:lab\\s*)?engine|plan\\s*limits|tool\\s*entitlements)", re.I),
-    re.compile(r"reveal\\s+(?:the\\s+)?(?:system\\s+prompt|secrets|api\\s*keys|credentials)", re.I),
+    re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|system|developer)\s+instructions", re.I),
+    re.compile(r"(?:disable|bypass|override|ignore)\s+(?:safety|sci\s*defender|meta\s*(?:lab\s*)?engine|plan\s*limits|tool\s*entitlements)", re.I),
+    re.compile(r"reveal\s+(?:the\s+)?(?:system\s+prompt|secrets|api\s*keys|credentials)", re.I),
 )
 
 class SettingsInput(BaseModel):
@@ -64,7 +64,7 @@ def _screen_custom_instructions(settings: dict[str, Any]) -> None:
     behavior = settings.get("ai_behavior")
     if not isinstance(behavior, dict):
         return
-    text_value = "\\n".join(str(behavior.get(key) or "") for key in ("about_me", "custom_instructions"))
+    text_value = "\n".join(str(behavior.get(key) or "") for key in ("about_me", "custom_instructions"))
     if not text_value.strip():
         return
     if any(pattern.search(text_value) for pattern in _BLOCKED_INSTRUCTION_PATTERNS):
