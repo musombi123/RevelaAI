@@ -1,0 +1,23 @@
+{
+  "id":"africa",
+  "label":"Africa",
+  "countries":["KE","ZA","NG","GH","UG","TZ","RW","ET","EG","MA","SN"],
+  "languages":["en","sw","fr","ar","pt"],
+  "currency":null,
+  "adapters":["arxiv","crossref","openalex","europe_pmc","gdelt","world_bank"],
+  "official_sources":[
+    {"name":"African Development Bank Data Portal","country":"GLOBAL","category":"economy","url":"https://dataportal.opendataforafrica.org/"},
+    {"name":"African Union","country":"GLOBAL","category":"government","url":"https://au.int/"},
+    {"name":"African Legal Information Institute","country":"GLOBAL","category":"law","url":"https://africanlii.org/"},
+    {"name":"Statistics South Africa","country":"ZA","category":"statistics","url":"https://www.statssa.gov.za/"},
+    {"name":"South African Government","country":"ZA","category":"law","url":"https://www.gov.za/"},
+    {"name":"National Bureau of Statistics Nigeria","country":"NG","category":"statistics","url":"https://www.nigerianstat.gov.ng/"},
+    {"name":"Ghana Statistical Service","country":"GH","category":"statistics","url":"https://statsghana.gov.gh/"},
+    {"name":"Bank of Tanzania","country":"TZ","category":"finance","url":"https://www.bot.go.tz/"},
+    {"name":"Uganda Bureau of Statistics","country":"UG","category":"statistics","url":"https://www.ubos.org/"},
+    {"name":"Ethiopian Statistical Service","country":"ET","category":"statistics","url":"https://www.statsethiopia.gov.et/"},
+    {"name":"Bank Al-Maghrib","country":"MA","category":"finance","url":"https://www.bkam.ma/"},
+    {"name":"Senegal National Agency of Statistics and Demography","country":"SN","category":"statistics","url":"https://www.ansd.sn/"}
+  ],
+  "rss_sources":[]
+}
