@@ -163,7 +163,7 @@ class SandboxInput(BaseModel):
 
 
 @router.get("/catalog")
-async def productivity_catalog(request: Request):
+def productivity_catalog(request: Request):
     _, user_id = _identity(request)
     tier = _plan_tier(_entitlement(request))
     limits = _caps(tier)
@@ -181,12 +181,12 @@ async def productivity_catalog(request: Request):
 
 
 @router.get("/regions")
-async def research_regions():
+def research_regions():
     return {"regions":list_regions()}
 
 
 @router.get("/admin/tools")
-async def admin_productivity_tools(request: Request):
+def admin_productivity_tools(request: Request):
     actor, error = require_platform_admin(request.headers.get("Authorization", ""))
     if error:
         return error
@@ -206,7 +206,7 @@ class AdminToolControlInput(BaseModel):
 
 
 @router.patch("/admin/tools/{tool_id}")
-async def admin_set_productivity_tool(tool_id: str, body: AdminToolControlInput, request: Request):
+def admin_set_productivity_tool(tool_id: str, body: AdminToolControlInput, request: Request):
     actor, error = require_platform_admin(request.headers.get("Authorization", ""))
     if error:
         return error
@@ -228,7 +228,7 @@ async def admin_set_productivity_tool(tool_id: str, body: AdminToolControlInput,
 
 
 @router.post("/research")
-async def global_research(body: ResearchInput, request: Request):
+def global_research(body: ResearchInput, request: Request):
     user_oid,user_id=_identity(request,body.model_dump())
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,"research_global",tier)
@@ -237,21 +237,27 @@ async def global_research(body: ResearchInput, request: Request):
     started=time.monotonic()
     try:
         result=search_global(**body.model_dump())
-        _record(user_id,"research_global",body.country or "KE",started,True)
+        # Screen untrusted retrieved title/snippet/URL content before any
+        # downstream chat model can receive it through the workspace.
+        result_safety=guard_productivity_tool(
+            "research_global_results",
+            {"sources": result.get("sources", [])},
+        )
+        _record(user_id,"research_global",body.country or "GLOBAL",started,True)
     except ValueError as exc:
         raise HTTPException(status_code=422,detail=str(exc)) from exc
     except Exception as exc:
-        _record(user_id,"research_global",body.country or "KE",started,False)
+        _record(user_id,"research_global",body.country or "GLOBAL",started,False)
         LOG.warning("Global research failed | type=%s",type(exc).__name__)
         raise HTTPException(status_code=503,detail="Global research providers are temporarily unavailable.") from exc
-    result["safety"]=safety
+    result["safety"]={"request":safety,"retrieved_sources":result_safety}
     result["tier"]=tier
     result["quota_remaining"]=max(0,_caps(tier)["research_global"]-_usage_today(user_id,"research_global"))
     return result
 
 
 @router.post("/generate")
-async def generate_workspace_artifact(body: GenerateInput, request: Request):
+def generate_workspace_artifact(body: GenerateInput, request: Request):
     _oid,user_id=_identity(request,{"kind":body.kind})
     tool_id="spreadsheet" if body.kind=="csv" else body.kind
     tier=_plan_tier(_entitlement(request))
@@ -279,7 +285,7 @@ async def generate_workspace_artifact(body: GenerateInput, request: Request):
 
 
 @router.get("/files/{file_id}")
-async def download_productivity_file(file_id: str, expires: int, sig: str):
+def download_productivity_file(file_id: str, expires: int, sig: str):
     try:
         path,meta=read_signed_file(file_id,expires,sig)
     except PermissionError as exc:
@@ -290,7 +296,7 @@ async def download_productivity_file(file_id: str, expires: int, sig: str):
 
 
 @router.post("/sandbox")
-async def run_sandbox(body: SandboxInput, request: Request):
+def run_sandbox(body: SandboxInput, request: Request):
     _oid,user_id=_identity(request,{"tool":"sandbox_python"})
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,"sandbox_python",tier)
@@ -309,9 +315,9 @@ async def run_sandbox(body: SandboxInput, request: Request):
         if response.status_code!=200:
             raise RuntimeError("sandbox rejected the job")
         result=response.json()
-        _record(user_id,"sandbox_python","KE",started,True)
+        _record(user_id,"sandbox_python",request.headers.get("X-Country","GLOBAL"),started,True)
         return {"status":"success","result":result,"safety":safety,"tier":tier}
     except Exception as exc:
-        _record(user_id,"sandbox_python","KE",started,False)
+        _record(user_id,"sandbox_python",request.headers.get("X-Country","GLOBAL"),started,False)
         LOG.warning("Sandbox request failed | type=%s",type(exc).__name__)
         raise HTTPException(status_code=503,detail="The isolated execution service is unavailable. The job was not completed.") from exc
