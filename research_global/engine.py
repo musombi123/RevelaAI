@@ -37,7 +37,7 @@ def detect_language(text: str, locale: str = "en") -> str:
 def country_from_locale(locale: str) -> str:
     for part in str(locale or "").replace("_","-").split("-")[1:]:
         if len(part)==2 and part.isalpha(): return part.upper()
-    return "KE"
+    return "GLOBAL"
 
 @lru_cache(maxsize=64)
 def _pack(name: str) -> dict:
@@ -150,7 +150,7 @@ def _duckduckgo(q,n,lang):
         out.append(_item("DuckDuckGo",link.get_text(" ",strip=True),link.get("href",""),snippet.get_text(" ",strip=True) if snippet else "",language=lang))
     return out
 
-ADAPTERS={"arxiv":_arxiv,"crossref":_crossref,"openalex":_openalex,"europe_pmc":_europe_pmc,"gdelt":_gdelt,"searxng":_searxng,"serpapi":_serpapi,"duckduckgo":_duckduckgo}
+ADAPTERS={"arxiv":_arxiv,"crossref":_crossref,"openalex":_openalex,"europe_pmc":_europe_pmc,"gdelt":_gdelt,"world_bank":_world_bank,"searxng":_searxng,"serpapi":_serpapi,"duckduckgo":_duckduckgo}
 
 def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",source_country:str="",language:str="",limit:int=8,conflicting_views:bool=False)->dict[str,Any]:
     q=str(query or "").strip()
@@ -158,7 +158,8 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     response_lang=(language or "").split("-")[0].lower()
     if response_lang not in SUPPORTED_LANGUAGES: response_lang=detect_language(q,locale)
     query_lang=detect_language(q,locale)
-    selected=resolve_region(region,locale,country)
+    target_country=str(source_country or "").upper() or str(country or "").upper() or country_from_locale(locale)
+    selected=resolve_region(region,locale,target_country)
     pack=_pack(selected); global_pack=_pack("global")
     catalogue=list(global_pack.get("official_sources",[]))+list(pack.get("official_sources",[]))
     filter_country=str(source_country or "").upper()
@@ -169,8 +170,8 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
         fn=ADAPTERS.get(name)
         if not fn: continue
         try:
-            if name=="world_bank": found=fn(q,n,query_lang,filter_country or country or country_from_locale(locale))
-            elif name=="serpapi": found=fn(q,n,query_lang,filter_country or country or country_from_locale(locale))
+            if name=="world_bank": found=fn(q,n,query_lang,target_country)
+            elif name=="serpapi": found=fn(q,n,query_lang,target_country)
             else: found=fn(q,n,query_lang)
             rows.extend(found)
         except (requests.RequestException,ValueError,KeyError,TypeError) as exc:
@@ -196,4 +197,4 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     grouped={}
     if conflicting_views:
         for x in results: grouped.setdefault(x.get("region","global"),[]).append(x)
-    return {"query":q,"query_language":query_lang,"response_language":response_lang,"region":selected,"country":country or country_from_locale(locale),"source_country_filter":filter_country or None,"official_source_catalogue":catalogue[:80],"sources":results,"source_count":len(results),"conflicting_views_requested":bool(conflicting_views),"conflicting_views":grouped,"conflict_note":"Regional grouping helps compare claims; it does not prove contradiction. Check definitions, dates and primary evidence." if conflicting_views else None,"partial":bool(errors),"provider_errors":errors,"translation_note":"Evidence retains its source language. Ask the chat model to translate and summarize it in response_language."}
+    return {"query":q,"query_language":query_lang,"response_language":response_lang,"region":selected,"country":target_country,"source_country_filter":filter_country or None,"official_source_catalogue":catalogue[:80],"sources":results,"source_count":len(results),"conflicting_views_requested":bool(conflicting_views),"conflicting_views":grouped,"conflict_note":"Regional grouping helps compare claims; it does not prove contradiction. Check definitions, dates and primary evidence." if conflicting_views else None,"partial":bool(errors),"provider_errors":errors,"translation_note":"Evidence retains its source language. Ask the chat model to translate and summarize it in response_language."}
