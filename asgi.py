@@ -270,6 +270,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 
 @app.on_event("startup")
+def initialize_productivity_persistence() -> None:
+    """Create additive usage/control tables before productivity routes serve requests."""
+    try:
+        from revela_platform.database import initialize_database
+        initialize_database()
+    except Exception as exc:
+        logger.warning("Productivity persistence initialization unavailable | error_type=%s", type(exc).__name__)
+
+
+@app.on_event("startup")
 async def start_daily_learning_scheduler() -> None:
     """Start the opt-in daily Gemini source-discovery task in the single ASGI worker."""
     global _daily_learning_task
