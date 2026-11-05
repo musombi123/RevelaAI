@@ -22,6 +22,7 @@ from services.memory_store import _record_messages, memories
 from fastapi_routes.auth import authenticate_identity
 from fastapi_routes.platform_hubs import load_authoritative_user_context
 from services.revenue_entitlements import check_entitlement
+from services.user_preferences import build_user_preferences_context
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 logger = logging.getLogger("revelaai.chat")
@@ -161,6 +162,9 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     personalization = _load_personalization_context(user_oid)
     if personalization:
         context = context[-11:] + [personalization]
+    preferences_context = build_user_preferences_context(user_id)
+    if preferences_context:
+        context = context[-11:] + [preferences_context]
 
     try:
         identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
