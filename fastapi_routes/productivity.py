@@ -6,6 +6,7 @@ import os
 from datetime import datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -160,6 +161,12 @@ class ResearchInput(BaseModel):
     source_country: str = Field(default="",max_length=2)
     limit: int = Field(default=8,ge=1,le=20)
     conflicting_views: bool = False
+    preferred_regions: list[str] = Field(default_factory=list,max_length=8)
+    preferred_languages: list[str] = Field(default_factory=list,max_length=8)
+    trusted_sources: list[str] = Field(default_factory=list,max_length=30)
+    blocked_domains: list[str] = Field(default_factory=list,max_length=50)
+    citation_style: str = Field(default="APA",pattern="^(APA|MLA|Chicago|IEEE|Harvard)$")
+    freshness: str = Field(default="any",pattern="^(any|year|month|week)$")
 
 
 class GenerateInput(BaseModel):
@@ -252,7 +259,25 @@ def global_research(body: ResearchInput, request: Request):
     import time
     started=time.monotonic()
     try:
-        result=search_global(**body.model_dump())
+        search_args=body.model_dump(exclude={"preferred_regions","preferred_languages","trusted_sources","blocked_domains","citation_style","freshness"})
+        if not body.region and body.preferred_regions:
+            search_args["region"]=body.preferred_regions[0]
+        if not body.language and body.preferred_languages:
+            search_args["language"]=body.preferred_languages[0]
+        result=search_global(**search_args)
+        sources=result.get("sources", []) if isinstance(result.get("sources"), list) else []
+        blocked={str(value).strip().lower().removeprefix("www.") for value in body.blocked_domains if str(value).strip()}
+        trusted={str(value).strip().lower().removeprefix("www.") for value in body.trusted_sources if str(value).strip()}
+        def source_domain(source):
+            try:
+                return (urlsplit(str(source.get("url") or "")).hostname or "").lower().removeprefix("www.")
+            except Exception:
+                return ""
+        sources=[source for source in sources if not any(source_domain(source)==domain or source_domain(source).endswith("."+domain) for domain in blocked)]
+        if trusted:
+            sources.sort(key=lambda source: 0 if any(source_domain(source)==domain or source_domain(source).endswith("."+domain) for domain in trusted) else 1)
+        result["sources"]=sources
+        result["research_preferences"]={"citation_style":body.citation_style,"freshness":body.freshness,"preferred_regions":body.preferred_regions,"preferred_languages":body.preferred_languages,"trusted_sources":sorted(trusted)}
         # Screen untrusted retrieved title/snippet/URL content before any
         # downstream chat model can receive it through the workspace.
         result_safety=guard_productivity_tool(
