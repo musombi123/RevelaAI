@@ -88,6 +88,16 @@ class UsageEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
+class ProductivityToolControl(Base):
+    """Persistent platform-admin on/off control for a registered productivity tool."""
+    __tablename__ = "revela_productivity_tool_controls"
+    tool_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    updated_by: Mapped[str] = mapped_column(String(160), default="")
+    note: Mapped[str] = mapped_column(String(500), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class CheckoutIntent(Base):
     __tablename__ = "revela_checkout_intents"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
