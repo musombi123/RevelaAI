@@ -2008,7 +2008,7 @@ def process_message(
         fallback_result: dict[str, Any] = {}
         if model_function_declarations:
             fallback_policy = model_system_prompt + (
-                "\\n\\nREDUCED TEXT-ONLY FALLBACK MODE:\\n"
+                "\n\nREDUCED TEXT-ONLY FALLBACK MODE:\n"
                 "The native Gemini tool runtime did not complete this turn. No tool was executed. "
                 "Do not claim to have searched, browsed, generated a file, changed data, called an API, "
                 "or performed any external action. Do not invent citations or current facts. "
