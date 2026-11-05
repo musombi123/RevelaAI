@@ -274,6 +274,21 @@ def global_research(body: ResearchInput, request: Request):
             except Exception:
                 return ""
         sources=[source for source in sources if not any(source_domain(source)==domain or source_domain(source).endswith("."+domain) for domain in blocked)]
+        freshness_days={"year":365,"month":30,"week":7}.get(body.freshness)
+        if freshness_days:
+            cutoff=datetime.now(timezone.utc)-__import__("datetime").timedelta(days=freshness_days)
+            def is_fresh(source):
+                raw_date=source.get("published_at") or source.get("date") or source.get("published")
+                if not raw_date:
+                    return True
+                try:
+                    parsed=datetime.fromisoformat(str(raw_date).replace("Z","+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed=parsed.replace(tzinfo=timezone.utc)
+                    return parsed >= cutoff
+                except (TypeError,ValueError):
+                    return True
+            sources=[source for source in sources if is_fresh(source)]
         if trusted:
             sources.sort(key=lambda source: 0 if any(source_domain(source)==domain or source_domain(source).endswith("."+domain) for domain in trusted) else 1)
         result["sources"]=sources
