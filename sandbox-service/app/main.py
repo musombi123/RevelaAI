@@ -6,6 +6,7 @@ from typing import Any
 import docker
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
+from threading import BoundedSemaphore
 
 app=FastAPI(title="RevelaAI isolated execution service",docs_url=None,redoc_url=None)
 JOBS=Path(os.getenv("SANDBOX_CONTAINER_JOBS_DIR","/jobs")).resolve()
@@ -15,6 +16,8 @@ IMAGE=os.getenv("SANDBOX_RUNNER_IMAGE","revelaai-python-sandbox:phase1")
 RUNTIME=os.getenv("SANDBOX_DOCKER_RUNTIME","runsc")
 MAX_INPUT=8*1024*1024
 MAX_OUTPUT=12*1024*1024
+MAX_CONCURRENT_JOBS=max(1,min(int(os.getenv("SANDBOX_MAX_CONCURRENT_JOBS","2")),4))
+_JOB_SLOTS=BoundedSemaphore(MAX_CONCURRENT_JOBS)
 
 class ExecuteInput(BaseModel):
     code:str=Field(min_length=1,max_length=30000)
@@ -57,6 +60,8 @@ async def execute(request:Request):
             raise HTTPException(503,"The approved sandbox runner image has not been installed.")
     except HTTPException: raise
     except Exception: raise HTTPException(503,"Isolated execution host is unavailable.") from None
+    if not _JOB_SLOTS.acquire(blocking=False):
+        raise HTTPException(503,"Sandbox is busy. Retry after an active job finishes.")
     job=uuid.uuid4().hex
     # The controller writes through its /jobs bind mount. Docker receives the
     # corresponding host path because volume sources are resolved by dockerd.
@@ -105,13 +110,13 @@ async def execute(request:Request):
         exit_code=int(status.get("StatusCode",1))
         result_file=output_dir/"result.json"
         result={}
-        if result_file.is_file():
+        if result_file.is_file() and not result_file.is_symlink():
             try: result=json.loads(result_file.read_text(encoding="utf-8"))
             except ValueError: result={"status":"invalid_result"}
         exported=[]
         output_total=0
         for path in output_dir.iterdir():
-            if not path.is_file() or path.name=="result.json": continue
+            if path.is_symlink() or not path.is_file() or path.name=="result.json": continue
             size=path.stat().st_size; output_total+=size
             if output_total>MAX_OUTPUT: break
             exported.append({"name":path.name,"size_bytes":size,"content_base64":base64.b64encode(path.read_bytes()).decode("ascii")})
@@ -126,3 +131,4 @@ async def execute(request:Request):
                 except Exception: pass
         except Exception: pass
         shutil.rmtree(container_root,ignore_errors=True)
+        _JOB_SLOTS.release()
