@@ -2307,7 +2307,7 @@ def process_message(
         "tool_execution": genesis_tool_execution or tool_execution or gemini_text_fallback,
         "fallback_used": bool(result.get("fallback_used") or result.get("text_only_fallback")),
         "text_only_fallback": bool(result.get("text_only_fallback")),
-        "model_tier": "reduced" if result.get("text_only_fallback") else "full",
+        "model_tier": "reduced" if result.get("text_only_fallback") else "backup" if result.get("fallback_used") else "full",
     }
 
 
