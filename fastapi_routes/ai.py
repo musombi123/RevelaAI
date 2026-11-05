@@ -272,7 +272,6 @@ def _ai_sync(
                 logger.info("Smart memory identity verification unavailable; AI continues without saved memory")
             else:
                 settings_user_id = verified_id
-            else:
                 _, memory_entitlement_error = check_entitlement(
                     authorization,
                     hub="smart_ai",
