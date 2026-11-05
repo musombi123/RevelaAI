@@ -20,6 +20,7 @@ from services.productivity_service import (
     read_signed_file,
 )
 from research_global.engine import list_regions, search_global
+from services.runtime_config import get_active_text_provider, get_active_text_model
 from core_meter.meter import record_usage
 from revela_platform.database import SessionLocal, UsageEvent, ProductivityToolControl
 
@@ -168,6 +169,7 @@ async def productivity_catalog(request: Request):
     limits = _caps(tier)
     return {
         "status":"success","tier":tier,"daily_limits":limits,
+        "model":{"provider":get_active_text_provider(),"model":get_active_text_model(),"status":"configured_not_health_checked"},
         "tools":[{**tool,"enabled":_tool_enabled(tool["id"]),
                   "locked":not _tool_enabled(tool["id"]) or (not tool["free"] and tier=="free"),
                   "daily_limit":limits.get(tool["id"],0),
