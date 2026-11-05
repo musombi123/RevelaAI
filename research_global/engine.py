@@ -128,7 +128,29 @@ def _searxng(q,n,lang):
     r=requests.get(base+"/search",params={"q":q,"format":"json","language":lang,"categories":"general,news,science"},timeout=TIMEOUT);r.raise_for_status()
     return [_item(x.get("engine","SearXNG"),x.get("title"),x.get("url"),x.get("content"),language=lang) for x in r.json().get("results",[])[:n]]
 
-ADAPTERS={"arxiv":_arxiv,"crossref":_crossref,"openalex":_openalex,"europe_pmc":_europe_pmc,"gdelt":_gdelt,"searxng":_searxng}
+def _serpapi(q,n,lang,country):
+    key=(os.getenv("SERPAPI_API_KEY") or os.getenv("SERPAPI_KEY") or "").strip()
+    if not key: return []
+    news=any(word in q.lower() for word in ("news","latest","breaking","headline"))
+    params={"engine":"google_news" if news else "google","q":q,"api_key":key,"hl":lang,"num":min(n,10)}
+    if country and country.upper() not in {"GLOBAL","WLD"}: params["gl"]=country.lower()
+    r=requests.get("https://serpapi.com/search",params=params,timeout=TIMEOUT);r.raise_for_status()
+    payload=r.json()
+    rows=payload.get("news_results",[]) if news else payload.get("organic_results",[])
+    code=country.upper() if re.fullmatch(r"[A-Z]{2}",country or "") else "GLOBAL"
+    return [_item("SerpAPI / Google News" if news else "SerpAPI / Google",x.get("title"),x.get("link") or x.get("url"),x.get("snippet") or x.get("date"),country=code,region=_region_for_country(code),language=lang,published=x.get("date")) for x in rows[:n]]
+
+def _duckduckgo(q,n,lang):
+    from bs4 import BeautifulSoup
+    r=requests.get("https://html.duckduckgo.com/html/",params={"q":q},headers={"User-Agent":"Mozilla/5.0 RevelaAI research"},timeout=TIMEOUT);r.raise_for_status()
+    soup=BeautifulSoup(r.text,"html.parser"); out=[]
+    for item in soup.select(".result")[:n]:
+        link=item.select_one(".result__a"); snippet=item.select_one(".result__snippet")
+        if not link: continue
+        out.append(_item("DuckDuckGo",link.get_text(" ",strip=True),link.get("href",""),snippet.get_text(" ",strip=True) if snippet else "",language=lang))
+    return out
+
+ADAPTERS={"arxiv":_arxiv,"crossref":_crossref,"openalex":_openalex,"europe_pmc":_europe_pmc,"gdelt":_gdelt,"searxng":_searxng,"serpapi":_serpapi,"duckduckgo":_duckduckgo}
 
 def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",source_country:str="",language:str="",limit:int=8,conflicting_views:bool=False)->dict[str,Any]:
     q=str(query or "").strip()
@@ -142,11 +164,13 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     filter_country=str(source_country or "").upper()
     if filter_country: catalogue=[x for x in catalogue if str(x.get("country","GLOBAL")).upper() in {filter_country,"GLOBAL"}]
     n=max(1,min(int(limit),20)); rows=[]; errors=[]
-    for name in (pack.get("adapters") or list(ADAPTERS)):
+    adapter_order=list(dict.fromkeys(list(pack.get("adapters") or [])+["serpapi","duckduckgo"]))
+    for name in adapter_order:
         fn=ADAPTERS.get(name)
         if not fn: continue
         try:
             if name=="world_bank": found=fn(q,n,query_lang,filter_country or country or country_from_locale(locale))
+            elif name=="serpapi": found=fn(q,n,query_lang,filter_country or country or country_from_locale(locale))
             else: found=fn(q,n,query_lang)
             rows.extend(found)
         except (requests.RequestException,ValueError,KeyError,TypeError) as exc:
