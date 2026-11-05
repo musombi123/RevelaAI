@@ -94,9 +94,23 @@ def _europe_pmc(q,n,lang):
     r=requests.get("https://www.ebi.ac.uk/europepmc/webservices/rest/search",params={"query":q,"format":"json","pageSize":min(n,10),"resultType":"core"},timeout=TIMEOUT);r.raise_for_status()
     return [_item("Europe PMC / PubMed",x.get("title"),"https://europepmc.org/article/MED/"+str(x.get("id","")),x.get("abstractText") or x.get("authorString"),language=lang,published=x.get("firstPublicationDate")) for x in r.json().get("resultList",{}).get("result",[])]
 
+def _region_for_country(country: str) -> str:
+    value=str(country or "").strip().upper()
+    if value in {"KE","ZA","NG","GH","UG","TZ","RW","ET","EG"}: return "africa"
+    if value in {"US","CA","MX"}: return "north_america"
+    if value in {"GB","DE","FR","ES","IT","NL","EU","CH","SE","NO"}: return "europe"
+    if value in {"IN","PK","BD","LK","NP"}: return "south_asia"
+    if value in {"CN","JP","KR","TW"}: return "east_asia"
+    return "global"
+
+def _country_code(name: str) -> str:
+    value=str(name or "").strip().upper()
+    aliases={"UNITED STATES":"US","UNITED KINGDOM":"GB","KENYA":"KE","GERMANY":"DE","FRANCE":"FR","SPAIN":"ES","INDIA":"IN","CHINA":"CN","JAPAN":"JP","SOUTH KOREA":"KR","CANADA":"CA"}
+    return aliases.get(value,value if re.fullmatch(r"[A-Z]{2}",value) else "GLOBAL")
+
 def _gdelt(q,n,lang):
     r=requests.get("https://api.gdeltproject.org/api/v2/doc/doc",params={"query":q,"mode":"ArtList","format":"json","maxrecords":min(n,10),"sort":"HybridRel","timespan":"90d"},timeout=TIMEOUT);r.raise_for_status()
-    return [_item(x.get("domain","GDELT"),x.get("title"),x.get("url"),x.get("seendate"),country=str(x.get("sourceCountry") or "GLOBAL").upper(),language=x.get("language") or lang,published=x.get("seendate")) for x in r.json().get("articles",[])]
+    return [_item(x.get("domain","GDELT"),x.get("title"),x.get("url"),x.get("seendate"),country=_country_code(x.get("sourceCountry") or "GLOBAL"),region=_region_for_country(_country_code(x.get("sourceCountry") or "GLOBAL")),language=x.get("language") or lang,published=x.get("seendate")) for x in r.json().get("articles",[])]
 
 def _world_bank(q,n,lang,country):
     indicators={"gdp":"NY.GDP.MKTP.CD","gross domestic product":"NY.GDP.MKTP.CD","inflation":"FP.CPI.TOTL.ZG","population":"SP.POP.TOTL","unemployment":"SL.UEM.TOTL.ZS","debt":"GC.DOD.TOTL.GD.ZS"}
@@ -150,7 +164,10 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     for x in rows:
         url=str(x.get("url") or "")
         if url.startswith("http") and url not in unique: unique[url]=x
-    results=list(unique.values())[:n*3]
+    results=list(unique.values())
+    if filter_country:
+        results=[x for x in results if str(x.get("country","GLOBAL")).upper() in {filter_country,"GLOBAL"}]
+    results=results[:n*3]
     grouped={}
     if conflicting_views:
         for x in results: grouped.setdefault(x.get("region","global"),[]).append(x)
