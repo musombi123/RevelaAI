@@ -1,0 +1,15 @@
+numpy>=2.0,<3
+pandas>=2.2,<4
+polars>=1.0,<2
+scipy>=1.13,<2
+sympy>=1.13,<2
+statsmodels>=0.14,<1
+matplotlib>=3.9,<4
+plotly>=5.24,<7
+scikit-learn>=1.5,<2
+duckdb>=1.1,<2
+qiskit>=2.0,<3
+qutip>=5.0,<6
+openpyxl>=3.1,<4
+python-docx>=1.1,<2
+python-pptx>=1.0,<2

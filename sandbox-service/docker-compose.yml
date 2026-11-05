@@ -1,0 +1,23 @@
+services:
+  sandbox-controller:
+    build:
+      context: .
+      dockerfile: Dockerfile.controller
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      SANDBOX_SHARED_SECRET: ${SANDBOX_SHARED_SECRET:?Set a strong random shared key}
+      SANDBOX_RUNNER_IMAGE: revelaai-python-sandbox:phase1
+      SANDBOX_DOCKER_RUNTIME: runsc
+      SANDBOX_HOST_JOBS_DIR: /srv/revelaai-sandbox-jobs
+      SANDBOX_CONTAINER_JOBS_DIR: /jobs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /srv/revelaai-sandbox-jobs:/jobs
+    networks:
+      - sandbox-private
+
+networks:
+  sandbox-private:
+    internal: true
