@@ -54,16 +54,54 @@ def list_regions() -> list[dict]:
         out.append({"id":path.stem,"label":p.get("label",path.stem),"countries":p.get("countries",[]),"languages":p.get("languages",[]),"currency":p.get("currency"),"source_count":len(p.get("official_sources",[]))})
     return out
 
+def _country_code(name: str) -> str:
+    value=str(name or "").strip().upper()
+    aliases={
+        "UNITED STATES":"US","UNITED STATES OF AMERICA":"US","USA":"US","UNITED KINGDOM":"GB","UK":"GB",
+        "KENYA":"KE","GERMANY":"DE","FRANCE":"FR","SPAIN":"ES","INDIA":"IN","CHINA":"CN","JAPAN":"JP",
+        "SOUTH KOREA":"KR","CANADA":"CA","AUSTRALIA":"AU","BRAZIL":"BR","MEXICO":"MX","NIGERIA":"NG",
+        "SOUTH AFRICA":"ZA","GHANA":"GH","UGANDA":"UG","TANZANIA":"TZ","RWANDA":"RW","ETHIOPIA":"ET",
+        "EGYPT":"EG","MOROCCO":"MA","SENEGAL":"SN","PAKISTAN":"PK","BANGLADESH":"BD","SRI LANKA":"LK",
+        "NEPAL":"NP","ITALY":"IT","NETHERLANDS":"NL","SWITZERLAND":"CH","SWEDEN":"SE","NORWAY":"NO",
+        "PORTUGAL":"PT","POLAND":"PL","UKRAINE":"UA","RUSSIA":"RU","TURKEY":"TR","SAUDI ARABIA":"SA",
+        "UNITED ARAB EMIRATES":"AE","ISRAEL":"IL","IRAN":"IR","INDONESIA":"ID","THAILAND":"TH",
+        "VIETNAM":"VN","MALAYSIA":"MY","SINGAPORE":"SG","NEW ZEALAND":"NZ","ARGENTINA":"AR",
+        "CHILE":"CL","COLOMBIA":"CO","PERU":"PE"
+    }
+    return aliases.get(value,value if re.fullmatch(r"[A-Z]{2}",value) else "GLOBAL")
+
+
+def _country_from_query(query: str) -> str:
+    value=str(query or "").upper()
+    names=("UNITED STATES OF AMERICA","UNITED ARAB EMIRATES","SOUTH AFRICA","SOUTH KOREA",
+           "UNITED KINGDOM","SAUDI ARABIA","NEW ZEALAND","SRI LANKA","NETHERLANDS",
+           "BANGLADESH","SWITZERLAND","AUSTRALIA","GERMANY","FRANCE","SPAIN","INDIA","CHINA",
+           "JAPAN","CANADA","BRAZIL","MEXICO","NIGERIA","KENYA","GHANA","UGANDA","TANZANIA",
+           "RWANDA","ETHIOPIA","EGYPT","MOROCCO","SENEGAL","PAKISTAN","NEPAL","ITALY","RUSSIA",
+           "UKRAINE","TURKEY","ISRAEL","IRAN","INDONESIA","THAILAND","VIETNAM","MALAYSIA",
+           "SINGAPORE","PORTUGAL","POLAND","ARGENTINA","CHILE","COLOMBIA","PERU")
+    for name in names:
+        if re.search(r"(?<![A-Z])"+re.escape(name)+r"(?![A-Z])",value):
+            return _country_code(name)
+    return ""
+
+
+def _region_for_country(country: str) -> str:
+    code=str(country or "").upper()
+    if code in {"KE"}: return "ke"
+    if code in {"ZA","NG","GH","UG","TZ","RW","ET","EG","MA","SN"}: return "africa"
+    if code in {"US","CA","MX"}: return "north_america"
+    if code in {"GB","EU","DE","FR","ES","IT","NL","CH","SE","NO","PT","PL","UA"}: return "europe"
+    if code in {"IN","PK","BD","LK","NP"}: return "south_asia"
+    if code in {"CN","JP","KR","TW"}: return "east_asia"
+    return "global"
+
+
 def resolve_region(region: str, locale: str, country: str) -> str:
     wanted=re.sub(r"[^a-z0-9_-]","",str(region or "").lower())
     if wanted and _pack(wanted): return wanted
     c=(country or country_from_locale(locale)).upper()
-    if c=="KE": return "ke"
-    if c in {"US","CA","MX"}: return "north_america"
-    if c in {"GB","EU","DE","FR","ES","IT","NL"}: return "europe"
-    if c in {"IN","PK","BD","LK"}: return "south_asia"
-    if c in {"CN","JP","KR"}: return "east_asia"
-    return "global"
+    return _region_for_country(c)
 
 def _item(source,title,url,snippet,**meta):
     return {"source":str(source)[:100],"title":str(title)[:500],"url":str(url)[:2000],"snippet":re.sub(r"\s+"," ",str(snippet or "")).strip()[:1800],"country":meta.get("country","GLOBAL"),"region":meta.get("region","global"),"language":meta.get("language","en"),"published_at":meta.get("published"),"retrieved":True}
@@ -158,7 +196,7 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     response_lang=(language or "").split("-")[0].lower()
     if response_lang not in SUPPORTED_LANGUAGES: response_lang=detect_language(q,locale)
     query_lang=detect_language(q,locale)
-    target_country=str(source_country or "").upper() or str(country or "").upper() or country_from_locale(locale)
+    target_country=str(source_country or "").upper() or str(country or "").upper() or _country_from_query(q) or country_from_locale(locale)
     selected=resolve_region(region,locale,target_country)
     pack=_pack(selected); global_pack=_pack("global")
     catalogue=list(global_pack.get("official_sources",[]))+list(pack.get("official_sources",[]))
