@@ -88,9 +88,13 @@ def _tool_enabled(tool_id: str) -> bool:
         return False
     raw = os.getenv("REVELAAI_TOOL_" + tool_id.upper() + "_ENABLED")
     if raw is not None:
-        return raw.strip().lower() in {"1", "true", "yes", "on"}
-    item = next((x for x in TOOL_CATALOG if x["id"] == tool_id), None)
-    return bool(item and item.get("phase") == 1)
+        configured = raw.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        item = next((x for x in TOOL_CATALOG if x["id"] == tool_id), None)
+        configured = bool(item and item.get("phase") == 1)
+    if tool_id == "sandbox_python" and not os.getenv("SANDBOX_SERVICE_URL", "").strip():
+        return False
+    return configured
 
 
 def _caps(tier: str) -> dict[str, int]:
