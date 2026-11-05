@@ -164,7 +164,7 @@ def create_spreadsheet(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]
             clean = []
             for value in values:
                 if isinstance(value, str) and value.startswith("="):
-                    if len(value) > 250 or not re.fullmatch(r"=[A-Z0-9_().,+*/ -]+", value.upper()) or re.search(r"\[[^]]+\]|!|WEBSERVICE|HYPERLINK|DDE|INDIRECT|OFFSET", value, re.I):
+                    if len(value) > 250 or not re.fullmatch(r"=[A-Z0-9_.$():,+*/ -]+", value.upper()) or re.search(r"\[[^]]+\]|!|WEBSERVICE|HYPERLINK|DDE|INDIRECT|OFFSET", value, re.I):
                         raise ValueError("Only simple, local spreadsheet formulas are allowed.")
                 clean.append(value if isinstance(value, (str, int, float, bool)) or value is None else str(value)[:1000])
             ws.append(clean)
