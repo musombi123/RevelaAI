@@ -98,6 +98,15 @@ class ProductivityToolControl(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class UserPreferenceRecord(Base):
+    """Versioned per-user RevelaAI preferences; custom instructions remain server-side."""
+    __tablename__ = "revela_user_preferences"
+    user_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    settings_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class CheckoutIntent(Base):
     __tablename__ = "revela_checkout_intents"
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
