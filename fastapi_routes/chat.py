@@ -22,7 +22,7 @@ from services.memory_store import _record_messages, memories
 from fastapi_routes.auth import authenticate_identity
 from fastapi_routes.platform_hubs import load_authoritative_user_context
 from services.revenue_entitlements import check_entitlement
-from services.user_preferences import build_user_preferences_context
+from services.user_preferences import build_user_preferences_context, is_user_memory_enabled
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 logger = logging.getLogger("revelaai.chat")
@@ -104,6 +104,8 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     if memory_entitlement_error is not None:
         # Keep text responses available even if trial/memory billing is inactive.
         # Only persistent saved-memory access is disabled for the free tier.
+        user_oid = None
+    if not is_user_memory_enabled(user_id):
         user_oid = None
 
     requested_user = str(payload.get("userId") or "").strip()
