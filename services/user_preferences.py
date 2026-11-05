@@ -50,3 +50,19 @@ def build_user_preferences_context(user_id: str | None) -> dict[str, str] | None
             + json.dumps(allowed, ensure_ascii=False)
         ),
     }
+
+
+def is_user_memory_enabled(user_id: str | None) -> bool:
+    """Respect the user's explicit memory pause/disable controls."""
+    if not user_id:
+        return False
+    try:
+        with SessionLocal() as session:
+            record = session.get(UserPreferenceRecord, str(user_id))
+            settings = record.settings_json if record and isinstance(record.settings_json, dict) else {}
+        memory = settings.get("memory") if isinstance(settings.get("memory"), dict) else {}
+        return memory.get("enabled", True) is not False and memory.get("paused", False) is not True
+    except Exception:
+        # A preferences-store outage must not silently enable persistent memory.
+        LOG.warning("Memory preference unavailable; persistence disabled for this turn", exc_info=True)
+        return False
