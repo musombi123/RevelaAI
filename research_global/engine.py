@@ -52,7 +52,7 @@ def list_regions() -> list[dict]:
     out=[]
     for path in sorted((ROOT/"packs").glob("*.json")):
         p=_pack(path.stem)
-        out.append({"id":path.stem,"label":p.get("label",path.stem),"countries":p.get("countries",[]),"languages":p.get("languages",[]),"currency":p.get("currency"),"source_count":len(p.get("official_sources",[]))})
+        out.append({"id":path.stem,"label":p.get("label",path.stem),"countries":p.get("countries",[]),"languages":p.get("languages",[]),"currency":p.get("currency"),"currencies":p.get("currencies",{}),"source_count":len(p.get("official_sources",[]))})
     return out
 
 def _country_code(name: str) -> str:
@@ -203,6 +203,8 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     target_country=str(source_country or "").upper() or str(country or "").upper() or _country_from_query(q) or country_from_locale(locale)
     selected=resolve_region(region,locale,target_country)
     pack=_pack(selected); global_pack=_pack("global")
+    regional_currency=(pack.get("currencies") or {}).get(target_country) or pack.get("currency")
+    regional_languages=pack.get("languages") or global_pack.get("languages") or list(SUPPORTED_LANGUAGES)
     catalogue=list(global_pack.get("official_sources",[]))+list(pack.get("official_sources",[]))
     filter_country=str(source_country or "").upper()
     if filter_country: catalogue=[x for x in catalogue if str(x.get("country","GLOBAL")).upper() in {filter_country,"GLOBAL"}]
@@ -241,4 +243,4 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     grouped={}
     if conflicting_views:
         for x in results: grouped.setdefault(x.get("region","global"),[]).append(x)
-    return {"query":q,"query_language":query_lang,"response_language":response_lang,"region":selected,"country":target_country,"source_country_filter":filter_country or None,"official_source_catalogue":catalogue[:80],"sources":results,"source_count":len(results),"conflicting_views_requested":bool(conflicting_views),"conflicting_views":grouped,"conflict_note":"Regional grouping helps compare claims; it does not prove contradiction. Check definitions, dates and primary evidence." if conflicting_views else None,"partial":bool(errors),"provider_errors":errors,"translation_note":"The search adapters use the detected query language and regional search settings. Retrieved evidence keeps its original language; the existing chat model can translate and synthesize it in response_language."}
+    return {"query":q,"query_language":query_lang,"response_language":response_lang,"region":selected,"country":target_country,"currency":regional_currency,"regional_languages":regional_languages,"source_country_filter":filter_country or None,"official_source_catalogue":catalogue[:80],"sources":results,"source_count":len(results),"conflicting_views_requested":bool(conflicting_views),"conflicting_views":grouped,"conflict_note":"Regional grouping helps compare claims; it does not prove contradiction. Check definitions, dates and primary evidence." if conflicting_views else None,"partial":bool(errors),"provider_errors":errors,"translation_note":"The search adapters use the detected query language and regional search settings. Retrieved evidence keeps its original language; the existing chat model can translate and synthesize it in response_language."}
