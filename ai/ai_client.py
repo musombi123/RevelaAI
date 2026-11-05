@@ -4363,10 +4363,21 @@ def ask_hf(
                     }
                 )
                 if tool_call_turn:
+                    cause_code = exc.error_code or "gemini_error"
+                    cause_status = exc.status_code
+                    diagnostic = cause_code + (
+                        f" (HTTP {cause_status})" if cause_status else ""
+                    )
                     return {
                         "success": False,
-                        "response": "Gemini could not complete this tool-enabled turn. The requested tool was not executed, and no fallback model was allowed to simulate it.",
+                        "response": (
+                            "Gemini could not complete this tool-enabled turn "
+                            f"({diagnostic}). The requested tool was not executed. "
+                            "No alternate model was allowed to simulate tool execution."
+                        ),
                         "error_code": "gemini_tool_runtime_unavailable",
+                        "provider_error_code": cause_code,
+                        "provider_status_code": cause_status,
                         "provider": "gemini",
                         "model": GEMINI_MODEL,
                         "providers_attempted": ["gemini"],
