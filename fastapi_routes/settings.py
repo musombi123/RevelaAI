@@ -20,6 +20,21 @@ ALLOWED_SECTIONS = {
     "office_accounting", "voice", "memory", "notifications", "privacy",
     "accessibility", "plan_usage", "models_mode",
 }
+SECTION_FIELDS = {
+    "appearance": {"theme","accent","custom_accent","chat_background","font","font_size","density","message_width","style","code_theme","reduce_motion","high_contrast"},
+    "language_region": {"interface_language","ai_reply_language","country","timezone","date_format","number_format","currency","units","week_start"},
+    "ai_behavior": {"response_style","tone","reading_level","role_preset","about_me","custom_instructions","show_step_by_step","always_show_sources","ask_deep_search","default_tools"},
+    "search_research": {"default_mode","preferred_regions","preferred_languages","trusted_sources","blocked_domains","citation_style","freshness"},
+    "images": {"aspect_ratio","style","auto_enhance","save_format","watermark"},
+    "office_accounting": {"document_language","template","page_size","default_font","brand_colours","brand_logo","company_name","company_address","vat_region","vat_rate","financial_year_start","currency","number_format","export_format"},
+    "voice": {"voice","speed","language","auto_read","mode"},
+    "memory": {"enabled","paused"},
+    "notifications": {"email_jobs","in_app_jobs","daily_limits","plan_expiry","support_replies","product_news","quiet_start","quiet_end"},
+    "privacy": {"history_enabled","auto_delete_days","shared_links","third_party_connections"},
+    "accessibility": {"screen_reader","large_targets","voice_captions","colour_blind_charts","keyboard_shortcuts"},
+    "plan_usage": set(),
+    "models_mode": {"quality","allow_backup"},
+}
 _BLOCKED_INSTRUCTION_PATTERNS = (
     re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|system|developer)\s+instructions", re.I),
     re.compile(r"(?:disable|bypass|override|ignore)\s+(?:safety|sci\s*defender|meta\s*(?:lab\s*)?engine|plan\s*limits|tool\s*entitlements)", re.I),
@@ -37,6 +52,19 @@ class SettingsInput(BaseModel):
         unknown = set(value) - ALLOWED_SECTIONS
         if unknown:
             raise ValueError("Unknown settings section: " + ", ".join(sorted(unknown)))
+        for section, values in value.items():
+            if not isinstance(values, dict):
+                raise ValueError(f"{section} must be an object.")
+            unknown_fields = set(values) - SECTION_FIELDS[section]
+            if unknown_fields:
+                raise ValueError(f"Unknown fields in {section}: " + ", ".join(sorted(unknown_fields)))
+            for field_name, item in values.items():
+                if isinstance(item, str) and len(item) > 1500:
+                    raise ValueError(f"{section}.{field_name} exceeds 1500 characters.")
+                if isinstance(item, list) and (len(item) > 100 or not all(isinstance(part, (str, int, float, bool)) for part in item)):
+                    raise ValueError(f"{section}.{field_name} must be a list of simple values.")
+                if item is not None and not isinstance(item, (str, int, float, bool, list)):
+                    raise ValueError(f"{section}.{field_name} has an unsupported value type.")
         encoded = json.dumps(value, ensure_ascii=False, default=str)
         if len(encoded.encode("utf-8")) > 48_000:
             raise ValueError("Settings payload is too large.")
