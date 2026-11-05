@@ -18,4 +18,12 @@ except BaseException as exc:
     result={"status":"error","error_type":type(exc).__name__,"message":str(exc)[:1000],"traceback":traceback.format_exc(limit=8)[-4000:]}
 for path in output.iterdir():
     if path.is_file() and path.name!="result.json": result["files"].append({"name":path.name,"size_bytes":path.stat().st_size})
-(output/"result.json").write_text(json.dumps(result,ensure_ascii=False),encoding="utf-8")
+result_path=output/"result.json"
+# User code can create arbitrary entries in /output. Remove a planted link
+# before creating the controller-readable result manifest.
+try:
+    if result_path.is_symlink() or result_path.exists():
+        result_path.unlink()
+except OSError:
+    pass
+result_path.write_text(json.dumps(result,ensure_ascii=False),encoding="utf-8")
