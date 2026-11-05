@@ -21,6 +21,7 @@ LANG_WORDS = {
  "ja":{"の","に","は","を","研究","経済"},
  "zh":{"的","和","在","是","研究","经济"},
  "hi":{"का","की","के","और","में","शोध","अर्थव्यवस्था"},
+ "ko":{"의","에","은","는","연구","경제"},
 }
 SUPPORTED_LANGUAGES = tuple(LANG_WORDS)
 
@@ -163,7 +164,10 @@ def _world_bank(q,n,lang,country):
 def _searxng(q,n,lang):
     base=os.getenv("SEARXNG_BASE_URL","").strip().rstrip("/")
     if not base: return []
-    r=requests.get(base+"/search",params={"q":q,"format":"json","language":lang,"categories":"general,news,science"},timeout=TIMEOUT);r.raise_for_status()
+    engines={"zh":"baidu,bing","ru":"yandex,google","ko":"naver,google","ja":"google,bing","hi":"google,bing"}
+    params={"q":q,"format":"json","language":lang,"categories":"general,news,science"}
+    if lang in engines: params["engines"]=engines[lang]
+    r=requests.get(base+"/search",params=params,timeout=TIMEOUT);r.raise_for_status()
     return [_item(x.get("engine","SearXNG"),x.get("title"),x.get("url"),x.get("content"),language=lang) for x in r.json().get("results",[])[:n]]
 
 def _serpapi(q,n,lang,country):
@@ -220,7 +224,9 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
             r=requests.get(feed["url"],timeout=TIMEOUT,headers={"User-Agent":"RevelaAI/1.0"});r.raise_for_status()
             for x in feedparser.parse(r.content).entries:
                 title=str(x.get("title") or ""); summary=str(x.get("summary") or "")
-                if q.casefold() not in (title+" "+summary).casefold(): continue
+                query_terms=[term for term in re.findall(r"[\\wÀ-ÿ']+",q.casefold()) if len(term)>2 and term not in {"the","and","for","with","what","when","where","how","latest","about","from","this","that","are","was","were","kwa","ya","na","habari","tafiti"}]
+                searchable=(title+" "+summary).casefold()
+                if query_terms and not any(term in searchable for term in query_terms): continue
                 rows.append(_item(feed.get("name","RSS"),title,x.get("link",feed["url"]),summary,country=feed.get("country","GLOBAL"),region=feed.get("region",selected),language=feed.get("language",query_lang),published=x.get("published")))
                 if len(rows)>=n*3: break
         except (requests.RequestException,ValueError,KeyError): errors.append({"provider":"rss","reason":"unavailable"})
@@ -235,4 +241,4 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
     grouped={}
     if conflicting_views:
         for x in results: grouped.setdefault(x.get("region","global"),[]).append(x)
-    return {"query":q,"query_language":query_lang,"response_language":response_lang,"region":selected,"country":target_country,"source_country_filter":filter_country or None,"official_source_catalogue":catalogue[:80],"sources":results,"source_count":len(results),"conflicting_views_requested":bool(conflicting_views),"conflicting_views":grouped,"conflict_note":"Regional grouping helps compare claims; it does not prove contradiction. Check definitions, dates and primary evidence." if conflicting_views else None,"partial":bool(errors),"provider_errors":errors,"translation_note":"Evidence retains its source language. Ask the chat model to translate and summarize it in response_language."}
+    return {"query":q,"query_language":query_lang,"response_language":response_lang,"region":selected,"country":target_country,"source_country_filter":filter_country or None,"official_source_catalogue":catalogue[:80],"sources":results,"source_count":len(results),"conflicting_views_requested":bool(conflicting_views),"conflicting_views":grouped,"conflict_note":"Regional grouping helps compare claims; it does not prove contradiction. Check definitions, dates and primary evidence." if conflicting_views else None,"partial":bool(errors),"provider_errors":errors,"translation_note":"The search adapters use the detected query language and regional search settings. Retrieved evidence keeps its original language; the existing chat model can translate and synthesize it in response_language."}
