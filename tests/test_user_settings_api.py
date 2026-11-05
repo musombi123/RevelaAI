@@ -24,3 +24,8 @@ def test_custom_instructions_cannot_override_protected_rules():
 def test_settings_version_is_explicitly_bounded():
     with pytest.raises(ValidationError):
         SettingsInput.model_validate({"version": 2, "settings": {}})
+
+
+def test_settings_schema_rejects_unknown_nested_fields():
+    with pytest.raises(ValidationError):
+        SettingsInput.model_validate({"version": 1, "settings": {"ai_behavior": {"grant_admin": True}}})
