@@ -1,6 +1,13 @@
 """Runs only inside a non-root gVisor worker container."""
-import json,sys,traceback
+import json,sys,traceback,resource
 from pathlib import Path
+# Bound individual writes, file handles, processes and address space.
+resource.setrlimit(resource.RLIMIT_FSIZE,(5*1024*1024,5*1024*1024))
+resource.setrlimit(resource.RLIMIT_NOFILE,(64,64))
+try: resource.setrlimit(resource.RLIMIT_NPROC,(32,32))
+except (ValueError,AttributeError): pass
+try: resource.setrlimit(resource.RLIMIT_AS,(640*1024*1024,640*1024*1024))
+except (ValueError,AttributeError): pass
 source=Path(sys.argv[1]); output=Path("/output")
 result={"status":"ok","files":[]}
 try:
