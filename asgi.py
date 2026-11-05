@@ -34,6 +34,7 @@ from fastapi_routes.living_brain import router as living_brain_router
 from fastapi_routes.memory import router as memory_router
 from fastapi_routes.meta_engineer import router as meta_engineer_router
 from fastapi_routes.research import router as research_router
+from fastapi_routes.productivity import router as productivity_router
 from fastapi_routes.security_academy import router as security_academy_router
 from fastapi_routes.sci_core import router as sci_core_router
 from fastapi_routes.stream import router as stream_router
@@ -363,6 +364,7 @@ app.include_router(memory_router)
 app.include_router(meta_engineer_router)
 app.include_router(chat_router)
 app.include_router(research_router)
+app.include_router(productivity_router)
 app.include_router(security_academy_router)
 app.include_router(users_router)
 app.include_router(explain_router)
