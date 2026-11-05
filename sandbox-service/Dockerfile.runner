@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements-runner.txt && \
     mkdir -p /opt/revelaai && chown -R 65532:65532 /opt/revelaai
 COPY --chown=65532:65532 runner.py /opt/revelaai/runner.py
 USER 65532:65532
-ENTRYPOINT ["python","-I","-B","/opt/revelaai/runner.py"]
+CMD ["python","-I","-B","/opt/revelaai/runner.py"]
