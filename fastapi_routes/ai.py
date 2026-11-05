@@ -577,8 +577,12 @@ def _ai_sync(
             "unknown_learning": unknown_public,
             "ai_model": ai_result.get("model"),
             "provider": ai_result.get("provider", get_active_text_provider()),
+            "fallback": bool(ai_result.get("fallback_used") or ai_result.get("text_only_fallback")),
+            "text_only_fallback": bool(ai_result.get("text_only_fallback")),
+            "model_tier": ai_result.get("model_tier", "full"),
+            "tool_execution": ai_result.get("tool_execution"),
             "memory": {
-                "enabled": True,
+                "enabled": bool(memory_user_oid),
                 "type": "conversation",
                 "source": memory_source,
                 "context_messages": len(previous_context),
