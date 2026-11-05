@@ -70,6 +70,20 @@ def test_admin_verification_forwards_existing_revelacode_session_and_uses_bounde
     assert not hasattr(admin_auth, "JWT_SECRET")
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"success": True, "authenticated": True, "authorized": True, "userId": ADMIN_ID, "role": "super_admin"},
+        {"success": True, "authenticated": True, "authorized": True, "userId": ADMIN_ID, "role": "user", "roles": ["user", "super_admin"]},
+    ],
+)
+def test_super_admin_role_is_accepted_for_usect_admin_tools(monkeypatch, payload):
+    (actor, error), _observed = call_verifier(monkeypatch, FakeResponse(200, payload))
+
+    assert actor == ADMIN_ID
+    assert error is None
+
+
 def test_admin_verification_fails_closed_and_logs_upstream_reason(monkeypatch, caplog):
     caplog.set_level(logging.WARNING)
     upstream = FakeResponse(
