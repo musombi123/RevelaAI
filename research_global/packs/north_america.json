@@ -1,1 +1,62 @@
-{"id":"north_america","label":"North America","countries":["US","CA","MX"],"languages":["en","es","fr"],"currency":"USD","adapters":["arxiv","crossref","openalex","europe_pmc","gdelt","searxng","world_bank"],"official_sources":[{"name":"US Census Bureau","country":"US","category":"statistics","url":"https://www.census.gov/data.html"},{"name":"FRED","country":"US","category":"economy","url":"https://fred.stlouisfed.org/"},{"name":"SEC EDGAR","country":"US","category":"finance","url":"https://www.sec.gov/edgar/search/"},{"name":"Congress.gov","country":"US","category":"law","url":"https://www.congress.gov/"},{"name":"Government of Canada Open Data","country":"CA","category":"statistics","url":"https://open.canada.ca/data/en"}],"rss_sources":[]}
+{
+  "id": "north_america",
+  "label": "North America",
+  "countries": [
+    "US",
+    "CA",
+    "MX"
+  ],
+  "languages": [
+    "en",
+    "es",
+    "fr"
+  ],
+  "currency": "USD",
+  "adapters": [
+    "arxiv",
+    "crossref",
+    "openalex",
+    "europe_pmc",
+    "gdelt",
+    "searxng",
+    "world_bank"
+  ],
+  "official_sources": [
+    {
+      "name": "US Census Bureau",
+      "country": "US",
+      "category": "statistics",
+      "url": "https://www.census.gov/data.html"
+    },
+    {
+      "name": "FRED",
+      "country": "US",
+      "category": "economy",
+      "url": "https://fred.stlouisfed.org/"
+    },
+    {
+      "name": "SEC EDGAR",
+      "country": "US",
+      "category": "finance",
+      "url": "https://www.sec.gov/edgar/search/"
+    },
+    {
+      "name": "Congress.gov",
+      "country": "US",
+      "category": "law",
+      "url": "https://www.congress.gov/"
+    },
+    {
+      "name": "Government of Canada Open Data",
+      "country": "CA",
+      "category": "statistics",
+      "url": "https://open.canada.ca/data/en"
+    }
+  ],
+  "rss_sources": [],
+  "currencies": {
+    "US": "USD",
+    "CA": "CAD",
+    "MX": "MXN"
+  }
+}
