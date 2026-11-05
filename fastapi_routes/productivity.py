@@ -49,8 +49,7 @@ def _identity(request: Request, payload: dict[str, Any] | None = None) -> tuple[
         request.headers.get("Authorization", ""), headers, payload or {},
     )
     if error:
-        detail = getattr(error, "body", None) or "A valid RevelaCode login is required."
-        raise HTTPException(status_code=401, detail=detail)
+        raise HTTPException(status_code=401, detail="A valid RevelaCode login is required.")
     return str(oid or ""), str(user_id or "")
 
 
@@ -185,7 +184,7 @@ async def global_research(body: ResearchInput, request: Request):
 @router.post("/generate")
 async def generate_workspace_artifact(body: GenerateInput, request: Request):
     _oid,user_id=_identity(request,{"kind":body.kind})
-    tool_id=body.kind
+    tool_id="spreadsheet" if body.kind=="csv" else body.kind
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,tool_id,tier)
     safety=guard_productivity_tool(tool_id,body.payload)
