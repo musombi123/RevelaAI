@@ -2000,66 +2000,70 @@ def process_message(
     # MODEL FAILURE
     # =====================================================
 
-    if not result.get(
-        "success",
-        False,
-    ):
-
-        return {
-            "response": (
-                result.get(
-                    "response",
-                    "",
+    gemini_text_fallback: dict[str, Any] | None = None
+    if not result.get("success", False):
+        # A failed native tool-enabled turn must never be simulated by another
+        # provider. We may, however, ask the configured provider chain for a
+        # clearly labelled text-only explanation with every tool declaration removed.
+        fallback_result: dict[str, Any] = {}
+        if model_function_declarations:
+            fallback_policy = model_system_prompt + (
+                "\\n\\nREDUCED TEXT-ONLY FALLBACK MODE:\\n"
+                "The native Gemini tool runtime did not complete this turn. No tool was executed. "
+                "Do not claim to have searched, browsed, generated a file, changed data, called an API, "
+                "or performed any external action. Do not invent citations or current facts. "
+                "If the user's request requires a tool or fresh external evidence, state that it remains "
+                "unexecuted and provide only safe conceptual context or ask the user to retry when tools recover. "
+                "You are not authorized to simulate tool output."
+            )
+            try:
+                fallback_result = ask_hf(
+                    text=normalized_message,
+                    system_prompt=fallback_policy,
+                    session_id=session_id,
+                    context=conversation_context,
                 )
-                or "RevelaAI could not generate a response."
-            ),
-
-            "confidence": "low",
-
-            "intent": orchestrator_data.get(
-                "intent",
-                intent,
-            ),
-
-            "domain": orchestrator_data.get(
-                "domain",
-                "general",
-            ),
-
-            "emotion": orchestrator_data.get(
-                "emotion",
-                "unknown",
-            ),
-
-            "session_id": result.get(
-                "session_id",
-                session_id,
-            ),
-
-            "user_id": user_id,
-
-            "capability": "text",
-
-            "provider": result.get(
-                "provider",
-                "gemini",
-            ),
-
-            "model": result.get(
-                "model",
-            ),
-
-            "orchestrator": orchestrator_data,
-
-            "error": result.get(
-                "error",
-            ),
-
-            "error_code": result.get(
-                "error_code",
-                "model_request_failed",
-            ),
-        }
+            except Exception:
+                fallback_result = {}
+        if isinstance(fallback_result, dict) and fallback_result.get("success") is True and str(fallback_result.get("response") or "").strip():
+            result = fallback_result
+            result.pop("tool_calls", None)
+            result["text_only_fallback"] = True
+            result["fallback_used"] = True
+            gemini_text_fallback = {
+                "name": "gemini_native_tool_runtime",
+                "operation": "text_only_fallback",
+                "status": "not_executed",
+                "executed": False,
+                "fallback": True,
+                "message": "Native tool execution did not complete. A text-only explanation was returned; no tool output was simulated.",
+            }
+            orchestrator_data["gemini_tool_runtime"] = {
+                "mode": "text_only_fallback",
+                "status": "tool_execution_not_attempted",
+                "provider": str(result.get("provider") or "unknown"),
+                "requested_calls": 0,
+                "dispatched_calls": 0,
+            }
+            mark_core_usage("gemini_reasoning", "text_only_fallback", str(result.get("provider") or "unknown"))
+        else:
+            return {
+                "response": result.get("response") or "RevelaAI could not generate a response.",
+                "confidence": "low",
+                "intent": orchestrator_data.get("intent", intent),
+                "domain": orchestrator_data.get("domain", "general"),
+                "emotion": orchestrator_data.get("emotion", "unknown"),
+                "session_id": result.get("session_id", session_id),
+                "user_id": user_id,
+                "capability": "text",
+                "provider": result.get("provider", "gemini"),
+                "model": result.get("model"),
+                "orchestrator": orchestrator_data,
+                "error": result.get("error"),
+                "error_code": result.get("error_code", "model_request_failed"),
+                "fallback_used": False,
+                "text_only_fallback": False,
+            }
 
     # Gemini function calls are requests, never authorization. Route each
     # registered call through its owning core; unknown names fail closed.
@@ -2300,7 +2304,10 @@ def process_message(
 
         "orchestrator": orchestrator_data,
 
-        "tool_execution": genesis_tool_execution or tool_execution,
+        "tool_execution": genesis_tool_execution or tool_execution or gemini_text_fallback,
+        "fallback_used": bool(result.get("fallback_used") or result.get("text_only_fallback")),
+        "text_only_fallback": bool(result.get("text_only_fallback")),
+        "model_tier": "reduced" if result.get("text_only_fallback") else "full",
     }
 
 
