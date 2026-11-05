@@ -1,1 +1,185 @@
-{"id":"global","label":"Global sources","countries":["GLOBAL"],"languages":["en","fr","es","ar","pt","zh","hi","de","ru","ja","sw"],"currency":null,"adapters":["arxiv","crossref","openalex","europe_pmc","gdelt","searxng","world_bank"],"official_sources":[{"name":"World Bank Open Data","country":"GLOBAL","category":"statistics","url":"https://data.worldbank.org/"},{"name":"IMF Data","country":"GLOBAL","category":"economy","url":"https://www.imf.org/en/Data"},{"name":"UN Data","country":"GLOBAL","category":"statistics","url":"https://data.un.org/"},{"name":"OECD Data","country":"GLOBAL","category":"economy","url":"https://data.oecd.org/"},{"name":"African Development Bank Data","country":"GLOBAL","category":"economy","url":"https://dataportal.opendataforafrica.org/"},{"name":"arXiv","country":"GLOBAL","category":"science","url":"https://arxiv.org/"},{"name":"PubMed / Europe PMC","country":"GLOBAL","category":"science","url":"https://europepmc.org/"},{"name":"OpenAlex","country":"GLOBAL","category":"science","url":"https://openalex.org/"},{"name":"Semantic Scholar","country":"GLOBAL","category":"science","url":"https://www.semanticscholar.org/"},{"name":"Crossref","country":"GLOBAL","category":"science","url":"https://www.crossref.org/"},{"name":"CORE","country":"GLOBAL","category":"science","url":"https://core.ac.uk/"},{"name":"NASA ADS","country":"GLOBAL","category":"science","url":"https://ui.adsabs.harvard.edu/"},{"name":"INSPIRE-HEP","country":"GLOBAL","category":"science","url":"https://inspirehep.net/"},{"name":"GDELT","country":"GLOBAL","category":"news","url":"https://www.gdeltproject.org/"},{"name":"WIPO PATENTSCOPE","country":"GLOBAL","category":"patents","url":"https://patentscope.wipo.int/"},{"name":"EPO Espacenet","country":"GLOBAL","category":"patents","url":"https://worldwide.espacenet.com/"},{"name":"Google Patents","country":"GLOBAL","category":"patents","url":"https://patents.google.com/"}],"rss_sources":[]}
+{
+  "id": "global",
+  "label": "Global sources",
+  "countries": [
+    "GLOBAL"
+  ],
+  "languages": [
+    "en",
+    "fr",
+    "es",
+    "ar",
+    "pt",
+    "zh",
+    "hi",
+    "de",
+    "ru",
+    "ja",
+    "sw"
+  ],
+  "currency": null,
+  "adapters": [
+    "arxiv",
+    "crossref",
+    "openalex",
+    "europe_pmc",
+    "gdelt",
+    "searxng",
+    "world_bank"
+  ],
+  "official_sources": [
+    {
+      "name": "World Bank Open Data",
+      "country": "GLOBAL",
+      "category": "statistics",
+      "url": "https://data.worldbank.org/"
+    },
+    {
+      "name": "IMF Data",
+      "country": "GLOBAL",
+      "category": "economy",
+      "url": "https://www.imf.org/en/Data"
+    },
+    {
+      "name": "UN Data",
+      "country": "GLOBAL",
+      "category": "statistics",
+      "url": "https://data.un.org/"
+    },
+    {
+      "name": "OECD Data",
+      "country": "GLOBAL",
+      "category": "economy",
+      "url": "https://data.oecd.org/"
+    },
+    {
+      "name": "African Development Bank Data",
+      "country": "GLOBAL",
+      "category": "economy",
+      "url": "https://dataportal.opendataforafrica.org/"
+    },
+    {
+      "name": "arXiv",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://arxiv.org/"
+    },
+    {
+      "name": "PubMed / Europe PMC",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://europepmc.org/"
+    },
+    {
+      "name": "OpenAlex",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://openalex.org/"
+    },
+    {
+      "name": "Semantic Scholar",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://www.semanticscholar.org/"
+    },
+    {
+      "name": "Crossref",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://www.crossref.org/"
+    },
+    {
+      "name": "CORE",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://core.ac.uk/"
+    },
+    {
+      "name": "NASA ADS",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://ui.adsabs.harvard.edu/"
+    },
+    {
+      "name": "INSPIRE-HEP",
+      "country": "GLOBAL",
+      "category": "science",
+      "url": "https://inspirehep.net/"
+    },
+    {
+      "name": "GDELT",
+      "country": "GLOBAL",
+      "category": "news",
+      "url": "https://www.gdeltproject.org/"
+    },
+    {
+      "name": "WIPO PATENTSCOPE",
+      "country": "GLOBAL",
+      "category": "patents",
+      "url": "https://patentscope.wipo.int/"
+    },
+    {
+      "name": "EPO Espacenet",
+      "country": "GLOBAL",
+      "category": "patents",
+      "url": "https://worldwide.espacenet.com/"
+    },
+    {
+      "name": "Google Patents",
+      "country": "GLOBAL",
+      "category": "patents",
+      "url": "https://patents.google.com/"
+    }
+  ],
+  "rss_sources": [
+    {
+      "name": "BBC News",
+      "url": "https://feeds.bbci.co.uk/news/rss.xml",
+      "country": "GB",
+      "region": "europe",
+      "language": "en"
+    },
+    {
+      "name": "Al Jazeera",
+      "url": "https://www.aljazeera.com/xml/rss/all.xml",
+      "country": "GLOBAL",
+      "region": "global",
+      "language": "en"
+    },
+    {
+      "name": "DW English",
+      "url": "https://rss.dw.com/rdf/rss-en-all",
+      "country": "DE",
+      "region": "europe",
+      "language": "en"
+    },
+    {
+      "name": "DW Arabic",
+      "url": "https://rss.dw.com/rdf/rss-ar-all",
+      "country": "DE",
+      "region": "europe",
+      "language": "ar"
+    },
+    {
+      "name": "Le Monde",
+      "url": "https://www.lemonde.fr/rss/une.xml",
+      "country": "FR",
+      "region": "europe",
+      "language": "fr"
+    },
+    {
+      "name": "El País",
+      "url": "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada",
+      "country": "ES",
+      "region": "europe",
+      "language": "es"
+    },
+    {
+      "name": "NHK World",
+      "url": "https://www3.nhk.or.jp/rss/news/cat0.xml",
+      "country": "JP",
+      "region": "east_asia",
+      "language": "ja"
+    }
+  ]
+}
