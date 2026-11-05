@@ -175,7 +175,8 @@ def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",so
             rows.extend(found)
         except (requests.RequestException,ValueError,KeyError,TypeError) as exc:
             errors.append({"provider":name,"reason":type(exc).__name__})
-    for feed in pack.get("rss_sources",[])[:12]:
+    rss_catalogue=list(global_pack.get("rss_sources",[]))+list(pack.get("rss_sources",[]))
+    for feed in rss_catalogue[:20]:
         try:
             r=requests.get(feed["url"],timeout=TIMEOUT,headers={"User-Agent":"RevelaAI/1.0"});r.raise_for_status()
             for x in feedparser.parse(r.content).entries:
