@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from fastapi_routes.auth import authenticate_identity
+from fastapi_routes.admin_auth import require_platform_admin
 from services.revenue_entitlements import check_entitlement
 from services.productivity_guard import ProductivitySafetyError, guard_productivity_tool
 from services.productivity_service import (
@@ -20,7 +21,7 @@ from services.productivity_service import (
 )
 from research_global.engine import list_regions, search_global
 from core_meter.meter import record_usage
-from revela_platform.database import SessionLocal, UsageEvent
+from revela_platform.database import SessionLocal, UsageEvent, ProductivityToolControl
 
 router = APIRouter(prefix="/api/productivity", tags=["Productivity"])
 LOG = logging.getLogger("revelaai.productivity")
@@ -75,6 +76,23 @@ def _plan_tier(entitlement: dict[str, Any]) -> str:
     return "plus" if tier in {"paid","trial"} or plan_code == "ai_plus" else "free"
 
 
+def _tool_enabled(tool_id: str) -> bool:
+    # A database value set by a platform administrator overrides the default.
+    try:
+        with SessionLocal() as session:
+            row = session.get(ProductivityToolControl, tool_id)
+            if row is not None:
+                return bool(row.enabled)
+    except Exception:
+        LOG.exception("Could not read tool control; applying fail-closed state")
+        return False
+    raw = os.getenv("REVELAAI_TOOL_" + tool_id.upper() + "_ENABLED")
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    item = next((x for x in TOOL_CATALOG if x["id"] == tool_id), None)
+    return bool(item and item.get("phase") == 1)
+
+
 def _caps(tier: str) -> dict[str, int]:
     return dict(PRO_CAPS if tier == "pro" else PLUS_CAPS if tier == "plus" else FREE_CAPS)
 
@@ -93,6 +111,8 @@ def _usage_today(user_id: str, tool_id: str) -> int:
 
 
 def _enforce_limit(user_id: str, tool_id: str, tier: str) -> int:
+    if not _tool_enabled(tool_id):
+        raise HTTPException(status_code=503, detail="This tool is currently disabled by a platform administrator.")
     limits = _caps(tier)
     limit = int(limits.get(tool_id, 0))
     used = _usage_today(user_id, tool_id)
@@ -144,9 +164,10 @@ async def productivity_catalog(request: Request):
     limits = _caps(tier)
     return {
         "status":"success","tier":tier,"daily_limits":limits,
-        "tools":[{**tool,"locked":not tool["free"] and tier=="free",
+        "tools":[{**tool,"enabled":_tool_enabled(tool["id"]),
+                  "locked":not _tool_enabled(tool["id"]) or (not tool["free"] and tier=="free"),
                   "daily_limit":limits.get(tool["id"],0),
-                  "phase_status":"available" if tool["phase"]==1 else "planned"}
+                  "phase_status":"available" if tool["phase"]==1 and _tool_enabled(tool["id"]) else "planned"}
                  for tool in TOOL_CATALOG],
         "regions":list_regions(),
         "safety":{"meta_engineer":"required","sci_defender":"required"},
@@ -156,6 +177,48 @@ async def productivity_catalog(request: Request):
 @router.get("/regions")
 async def research_regions():
     return {"regions":list_regions()}
+
+
+@router.get("/admin/tools")
+async def admin_productivity_tools(request: Request):
+    actor, error = require_platform_admin(request.headers.get("Authorization", ""))
+    if error:
+        return error
+    with SessionLocal() as session:
+        rows = session.execute(select(ProductivityToolControl)).scalars().all()
+        saved = {row.tool_id: row for row in rows}
+        return {"tools":[{"id":tool["id"],"phase":tool["phase"],
+                          "enabled":saved[tool["id"]].enabled if tool["id"] in saved else _tool_enabled(tool["id"]),
+                          "updated_by":saved[tool["id"]].updated_by if tool["id"] in saved else None,
+                          "updated_at":saved[tool["id"]].updated_at.isoformat() if tool["id"] in saved and saved[tool["id"]].updated_at else None}
+                         for tool in TOOL_CATALOG]}
+
+
+class AdminToolControlInput(BaseModel):
+    enabled: bool
+    note: str = Field(default="",max_length=500)
+
+
+@router.patch("/admin/tools/{tool_id}")
+async def admin_set_productivity_tool(tool_id: str, body: AdminToolControlInput, request: Request):
+    actor, error = require_platform_admin(request.headers.get("Authorization", ""))
+    if error:
+        return error
+    if not any(item["id"] == tool_id for item in TOOL_CATALOG):
+        raise HTTPException(status_code=404,detail="Unknown productivity tool.")
+    from datetime import datetime, timezone
+    with SessionLocal() as session:
+        row = session.get(ProductivityToolControl, tool_id)
+        if row is None:
+            row = ProductivityToolControl(tool_id=tool_id,enabled=body.enabled,updated_by=str(actor),note=body.note)
+            session.add(row)
+        else:
+            row.enabled=body.enabled
+            row.updated_by=str(actor)
+            row.note=body.note
+            row.updated_at=datetime.now(timezone.utc)
+        session.commit()
+    return {"tool_id":tool_id,"enabled":body.enabled,"updated_by":str(actor)}
 
 
 @router.post("/research")
