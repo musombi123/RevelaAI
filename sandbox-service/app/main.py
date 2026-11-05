@@ -58,15 +58,15 @@ async def execute(request:Request):
     except HTTPException: raise
     except Exception: raise HTTPException(503,"Isolated execution host is unavailable.") from None
     job=uuid.uuid4().hex
+    # The controller writes through its /jobs bind mount. Docker receives the
+    # corresponding host path because volume sources are resolved by dockerd.
     host_root=HOST_JOBS/job
     container_root=JOBS/job
     input_dir=container_root/"input"; output_dir=container_root/"output"
+    host_input=host_root/"input"; host_output=host_root/"output"
     try:
         input_dir.mkdir(parents=True,exist_ok=False); output_dir.mkdir(parents=True,exist_ok=True)
-        host_input=host_root/"input"; host_output=host_root/"output"
-        (host_input).mkdir(parents=True,exist_ok=True); (host_output).mkdir(parents=True,exist_ok=True)
-        # Host and controller paths refer to the same bind-mounted volume.
-        (host_input/"main.py").write_text(body.code,encoding="utf-8")
+        (input_dir/"main.py").write_text(body.code,encoding="utf-8")
         total=len(body.code.encode("utf-8"))
         for item in body.files:
             name=str(item.get("name") or "")
@@ -76,9 +76,9 @@ async def execute(request:Request):
             except Exception: raise HTTPException(400,"Invalid base64 file payload.") from None
             total+=len(content)
             if total>MAX_INPUT: raise HTTPException(413,"Job input exceeds the allowed size.")
-            (host_input/name).write_bytes(content)
-        for path in host_input.iterdir(): path.chmod(0o444)
-        host_output.chmod(0o777)
+            (input_dir/name).write_bytes(content)
+        for path in input_dir.iterdir(): path.chmod(0o444)
+        output_dir.chmod(0o777)
         timeout=body.timeout_seconds
         container=client.containers.run(
             IMAGE,
@@ -103,14 +103,14 @@ async def execute(request:Request):
             raise HTTPException(408,"Execution exceeded its time limit.") from None
         logs=(container.logs(stdout=True,stderr=True) or b"")[:200_000].decode("utf-8",errors="replace")
         exit_code=int(status.get("StatusCode",1))
-        result_file=host_output/"result.json"
+        result_file=output_dir/"result.json"
         result={}
         if result_file.is_file():
             try: result=json.loads(result_file.read_text(encoding="utf-8"))
             except ValueError: result={"status":"invalid_result"}
         exported=[]
         output_total=0
-        for path in host_output.iterdir():
+        for path in output_dir.iterdir():
             if not path.is_file() or path.name=="result.json": continue
             size=path.stat().st_size; output_total+=size
             if output_total>MAX_OUTPUT: break
@@ -125,5 +125,4 @@ async def execute(request:Request):
                 try: container_obj.remove(force=True)
                 except Exception: pass
         except Exception: pass
-        shutil.rmtree(host_root,ignore_errors=True)
         shutil.rmtree(container_root,ignore_errors=True)
