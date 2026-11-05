@@ -1,1 +1,69 @@
-{"id":"ke","label":"Kenya regional pack","countries":["KE"],"languages":["en","sw"],"currency":"KES","adapters":["arxiv","crossref","openalex","europe_pmc","gdelt","searxng","world_bank"],"official_sources":[{"name":"Kenya Law","country":"KE","category":"law","url":"https://new.kenyalaw.org/"},{"name":"Kenya Gazette","country":"KE","category":"government","url":"https://new.kenyalaw.org/gazettes/"},{"name":"Kenya National Bureau of Statistics","country":"KE","category":"statistics","url":"https://www.knbs.or.ke/"},{"name":"Central Bank of Kenya","country":"KE","category":"finance","url":"https://www.centralbank.go.ke/"},{"name":"Nairobi Securities Exchange","country":"KE","category":"finance","url":"https://www.nse.co.ke/"},{"name":"Kenya Revenue Authority","country":"KE","category":"tax","url":"https://www.kra.go.ke/"},{"name":"NACOSTI","country":"KE","category":"science","url":"https://www.nacosti.go.ke/"}],"rss_sources":[]}
+{
+  "id": "ke",
+  "label": "Kenya regional pack",
+  "countries": [
+    "KE"
+  ],
+  "languages": [
+    "en",
+    "sw"
+  ],
+  "currency": "KES",
+  "adapters": [
+    "arxiv",
+    "crossref",
+    "openalex",
+    "europe_pmc",
+    "gdelt",
+    "searxng",
+    "world_bank"
+  ],
+  "official_sources": [
+    {
+      "name": "Kenya Law",
+      "country": "KE",
+      "category": "law",
+      "url": "https://new.kenyalaw.org/"
+    },
+    {
+      "name": "Kenya Gazette",
+      "country": "KE",
+      "category": "government",
+      "url": "https://new.kenyalaw.org/gazettes/"
+    },
+    {
+      "name": "Kenya National Bureau of Statistics",
+      "country": "KE",
+      "category": "statistics",
+      "url": "https://www.knbs.or.ke/"
+    },
+    {
+      "name": "Central Bank of Kenya",
+      "country": "KE",
+      "category": "finance",
+      "url": "https://www.centralbank.go.ke/"
+    },
+    {
+      "name": "Nairobi Securities Exchange",
+      "country": "KE",
+      "category": "finance",
+      "url": "https://www.nse.co.ke/"
+    },
+    {
+      "name": "Kenya Revenue Authority",
+      "country": "KE",
+      "category": "tax",
+      "url": "https://www.kra.go.ke/"
+    },
+    {
+      "name": "NACOSTI",
+      "country": "KE",
+      "category": "science",
+      "url": "https://www.nacosti.go.ke/"
+    }
+  ],
+  "rss_sources": [],
+  "currencies": {
+    "KE": "KES"
+  }
+}
