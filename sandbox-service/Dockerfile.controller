@@ -4,6 +4,6 @@ WORKDIR /srv
 COPY requirements-controller.txt .
 RUN pip install --no-cache-dir -r requirements-controller.txt
 COPY app ./app
-RUN useradd --system --uid 10001 --create-home sandboxapi && mkdir -p /jobs && chown -R sandboxapi:sandboxapi /srv /jobs
+RUN mkdir -p /jobs
 EXPOSE 8080
 CMD ["uvicorn","app.main:app","--host","0.0.0.0","--port","8080","--workers","1"]
