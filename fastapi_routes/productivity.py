@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, time, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -103,8 +104,10 @@ def _caps(tier: str) -> dict[str, int]:
 
 
 def _usage_today(user_id: str, tool_id: str) -> int:
-    now = datetime.now(timezone.utc)
-    start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    # Product quotas reset at midnight in the user's platform timezone (Nairobi).
+    local_now = datetime.now(ZoneInfo("Africa/Nairobi"))
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = local_midnight.astimezone(timezone.utc)
     with SessionLocal() as session:
         return int(session.scalar(
             select(func.count(UsageEvent.id)).where(
@@ -170,11 +173,16 @@ def productivity_catalog(request: Request):
     return {
         "status":"success","tier":tier,"daily_limits":limits,
         "model":{"provider":get_active_text_provider(),"model":get_active_text_model(),"status":"configured_not_health_checked"},
-        "tools":[{**tool,"enabled":_tool_enabled(tool["id"]),
+        "tools":[{**tool,
+                  "enabled":_tool_enabled(tool["id"]),
                   "locked":not _tool_enabled(tool["id"]) or (not tool["free"] and tier=="free"),
                   "daily_limit":limits.get(tool["id"],0),
+                  "daily_used":_usage_today(user_id, tool["id"]),
+                  "remaining":max(0, limits.get(tool["id"],0)-_usage_today(user_id, tool["id"])),
                   "phase_status":"available" if tool["phase"]==1 and _tool_enabled(tool["id"]) else "planned"}
                  for tool in TOOL_CATALOG],
+        "quota_timezone":"Africa/Nairobi",
+        "quota_reset":"00:00 Africa/Nairobi",
         "regions":list_regions(),
         "safety":{"meta_engineer":"required","sci_defender":"required"},
     }
