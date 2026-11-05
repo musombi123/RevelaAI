@@ -1,1 +1,52 @@
-{"id":"south_asia","label":"South Asia","countries":["IN","PK","BD","LK"],"languages":["en","hi"],"currency":"INR","adapters":["arxiv","crossref","openalex","europe_pmc","gdelt","searxng","world_bank"],"official_sources":[{"name":"India Data Portal","country":"IN","category":"statistics","url":"https://data.gov.in/"},{"name":"India Code","country":"IN","category":"law","url":"https://www.indiacode.nic.in/"},{"name":"Reserve Bank of India","country":"IN","category":"finance","url":"https://www.rbi.org.in/"}],"rss_sources":[]}
+{
+  "id": "south_asia",
+  "label": "South Asia",
+  "countries": [
+    "IN",
+    "PK",
+    "BD",
+    "LK"
+  ],
+  "languages": [
+    "en",
+    "hi"
+  ],
+  "currency": "INR",
+  "adapters": [
+    "arxiv",
+    "crossref",
+    "openalex",
+    "europe_pmc",
+    "gdelt",
+    "searxng",
+    "world_bank"
+  ],
+  "official_sources": [
+    {
+      "name": "India Data Portal",
+      "country": "IN",
+      "category": "statistics",
+      "url": "https://data.gov.in/"
+    },
+    {
+      "name": "India Code",
+      "country": "IN",
+      "category": "law",
+      "url": "https://www.indiacode.nic.in/"
+    },
+    {
+      "name": "Reserve Bank of India",
+      "country": "IN",
+      "category": "finance",
+      "url": "https://www.rbi.org.in/"
+    }
+  ],
+  "rss_sources": [],
+  "currencies": {
+    "IN": "INR",
+    "PK": "PKR",
+    "BD": "BDT",
+    "LK": "LKR",
+    "NP": "NPR"
+  }
+}
