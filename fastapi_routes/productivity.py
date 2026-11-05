@@ -143,6 +143,14 @@ def _record(user_id: str, tool_id: str, country: str, started: float, success: b
                      latency_ms=(time.monotonic()-started)*1000,success=success)
 
 
+def _safety(tool_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return guard_productivity_tool(tool_id, payload)
+    except ProductivitySafetyError as exc:
+        status = 503 if "UNAVAILABLE" in exc.code or "REGISTRATION" in exc.code else 422
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
 class ResearchInput(BaseModel):
     query: str = Field(min_length=1,max_length=500)
     locale: str = Field(default="en-KE",max_length=20)
@@ -240,7 +248,7 @@ def global_research(body: ResearchInput, request: Request):
     user_oid,user_id=_identity(request,body.model_dump())
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,"research_global",tier)
-    safety=guard_productivity_tool("research_global",body.model_dump())
+    safety=_safety("research_global",body.model_dump())
     import time
     started=time.monotonic()
     try:
@@ -270,7 +278,7 @@ def generate_workspace_artifact(body: GenerateInput, request: Request):
     tool_id="spreadsheet" if body.kind=="csv" else body.kind
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,tool_id,tier)
-    safety=guard_productivity_tool(tool_id,body.payload)
+    safety=_safety(tool_id,body.payload)
     import time
     started=time.monotonic()
     try:
@@ -309,7 +317,7 @@ def run_sandbox(body: SandboxInput, request: Request):
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,"sandbox_python",tier)
     payload=body.model_dump()
-    safety=guard_productivity_tool("sandbox_python",payload)
+    safety=_safety("sandbox_python",payload)
     base=os.getenv("SANDBOX_SERVICE_URL","").strip().rstrip("/")
     secret=os.getenv("SANDBOX_SHARED_SECRET","").strip()
     if not base or len(secret.encode("utf-8"))<32:
