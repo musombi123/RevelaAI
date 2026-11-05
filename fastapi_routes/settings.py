@@ -21,7 +21,7 @@ ALLOWED_SECTIONS = {
     "accessibility", "plan_usage", "models_mode",
 }
 SECTION_FIELDS = {
-    "appearance": {"theme","accent","custom_accent","chat_background","font","font_size","density","message_width","style","code_theme","reduce_motion","high_contrast"},
+    "appearance": {"theme","scheduled_start","scheduled_end","accent","custom_accent","chat_background","font","font_size","density","message_width","style","code_theme","reduce_motion","high_contrast"},
     "language_region": {"interface_language","ai_reply_language","country","timezone","date_format","number_format","currency","units","week_start"},
     "ai_behavior": {"response_style","tone","reading_level","role_preset","about_me","custom_instructions","show_step_by_step","always_show_sources","ask_deep_search","default_tools"},
     "search_research": {"default_mode","preferred_regions","preferred_languages","trusted_sources","blocked_domains","citation_style","freshness"},
