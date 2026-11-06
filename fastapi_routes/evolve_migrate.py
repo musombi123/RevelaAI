@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from core_evolve.engine import EvolutionEngine, EvolutionError
-from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest
+from core_evolve.models import (\n    EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest, ToolMindReviewRequest,\n)
 from core_evolve.learning import (
     EvolutionLearningUnavailable, ensure_available, learning_snapshot, record_tool_event,
 )
@@ -222,6 +222,89 @@ async def evaluate_evolution_proposal(
     except EvolutionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"evaluation": report.model_dump(mode="json")}
+
+
+@router.post("/evolve/proposals/{proposal_id}/mind-review", status_code=202)
+async def review_evolution_with_infinite_mind(
+    proposal_id: str,
+    body: ToolMindReviewRequest,
+    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    """Ask the existing Infinite Mind core to review an Evolver proposal."""
+    _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
+    try:
+        ensure_available()
+        proposal = _evolver().get(proposal_id)
+        from core_evolve.learning import objective_matches_proposal
+        if not objective_matches_proposal(proposal, body.objective):
+            raise HTTPException(
+                status_code=409,
+                detail="The supplied objective does not match the immutable proposal fingerprint.",
+            )
+        preflight = await run_in_threadpool(_factory_preflight)
+        from ai.core_mesh import propose_mind_evolution
+
+        mind_proposal = await run_in_threadpool(
+            propose_mind_evolution,
+            body.objective,
+            body.tool_name,
+        )
+        raw_mind_id = mind_proposal.get("id") or mind_proposal.get("proposal_id")
+        mind_proposal_id = str(raw_mind_id) if isinstance(raw_mind_id, str) else None
+        try:
+            record_tool_event(
+                "tool_improvement_proposed",
+                demand=body.objective,
+                tool_name=body.tool_name,
+                status=str(mind_proposal.get("status") or "await_merge"),
+                evolver_proposal_id=proposal_id,
+                mind_proposal_id=mind_proposal_id,
+            )
+        except EvolutionLearningUnavailable:
+            logger.exception("Infinite Mind created an improvement proposal but MongoDB could not record the link")
+            return JSONResponse(
+                {
+                    "status": "partial_success",
+                    "evolver_proposal_id": proposal_id,
+                    "infinite_mind": mind_proposal,
+                    "learning_ledger": "write_failed",
+                    "warning": "Infinite Mind created its proposal, but the association event was not written to MongoDB. Verify the Mind proposal before retrying.",
+                    "candidate_generation": "proposal_only",
+                    "production_changes": False,
+                    "automatic_merge": False,
+                    "preflight": preflight,
+                },
+                status_code=202,
+            )
+    except FactoryPreflightBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Evolution proposal not found.") from exc
+    except EvolutionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("Infinite Mind evolution review failed | error_type=%s", type(exc).__name__)
+        status = getattr(exc, "status_code", 502)
+        raise HTTPException(
+            status_code=status if isinstance(status, int) and 400 <= status <= 599 else 502,
+            detail="Infinite Mind could not review the evolution proposal. Check Core-Two availability and retry.",
+        ) from exc
+    return {
+        "evolver_proposal_id": proposal_id,
+        "infinite_mind": mind_proposal,
+        "learning_ledger": "mongodb",
+        "candidate_generation": "proposal_only",
+        "human_approval_required": True,
+        "automatic_merge": False,
+        "production_changes": False,
+        "preflight": preflight,
+    }
 
 
 @router.get("/evolve/learning/{system_id}")
