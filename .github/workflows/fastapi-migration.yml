@@ -76,7 +76,7 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Compile entry points and native route modules
         run: |
-          python -m py_compile app.py asgi.py whatsapp_webhook.py automation_fabric/http.py automation_fabric/local_agent.py ai/raw_reply.py meta_engineer/generator.py revelai/core/brain_os.py tests/test_fastapi_entrypoint.py tests/test_humanizer_service.py tests/test_automation_fabric.py
+          python -m py_compile app.py asgi.py whatsapp_webhook.py automation_fabric/http.py automation_fabric/local_agent.py ai/raw_reply.py meta_engineer/generator.py revelai/core/brain_os.py tests/test_fastapi_entrypoint.py tests/test_humanizer_service.py tests/test_humanizer_gemini_routes.py tests/test_automation_fabric.py
           python -m compileall -q routes fastapi_routes
       - name: Reject Flask and WSGI runtime dependencies
         run: |
@@ -141,3 +141,4 @@ jobs:
           tests/test_usect_zero_backend.py
           tests/test_automation_fabric.py
           tests/test_humanizer_service.py
+          tests/test_humanizer_gemini_routes.py
