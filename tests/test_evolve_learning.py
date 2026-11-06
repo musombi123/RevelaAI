@@ -10,7 +10,6 @@ from core_evolve.engine import EvolutionEngine, EvolutionError
 from core_evolve.learning import (
     EvolutionLearningUnavailable,
     learning_snapshot,
-    record_proposal,
     recent_evaluations,
 )
 from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest, MetricTarget
@@ -78,21 +77,15 @@ def test_learning_refuses_temporary_local_cache(monkeypatch):
         recent_evaluations("tool.factory")
 
 
-def test_proposal_ledger_hashes_objective_and_omits_raw_prompt(monkeypatch):
+def test_proposal_ledger_hashes_objective_and_omits_raw_prompt(monkeypatch, tmp_path):
     collection = FakeMongoCollection()
     patch_mongo(monkeypatch, collection)
-    from core_evolve.engine import EvolutionEngine
-
-    engine = EvolutionEngine(tmp_path := __import__("pathlib").Path(".pytest-evolver"), durable_learning=True)
-    try:
-        proposal = engine.propose(evolution_request())
-        assert collection.documents[0]["event_type"] == "proposal_created"
-        assert collection.documents[0]["objective_sha256"]
-        assert "Reduce latency while preserving safety and output quality." not in str(collection.documents)
-        assert proposal.learning_context == []
-    finally:
-        import shutil
-        shutil.rmtree(tmp_path, ignore_errors=True)
+    engine = EvolutionEngine(tmp_path, durable_learning=True)
+    proposal = engine.propose(evolution_request())
+    assert collection.documents[0]["event_type"] == "proposal_created"
+    assert collection.documents[0]["objective_sha256"]
+    assert "Reduce latency while preserving safety and output quality." not in str(collection.documents)
+    assert proposal.learning_context == []
 
 
 def test_evaluation_is_persisted_and_reused_by_next_generation(monkeypatch, tmp_path):
