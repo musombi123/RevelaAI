@@ -180,7 +180,7 @@ def _duckduckgo(q,n,lang):
 
 ADAPTERS={"arxiv":_arxiv,"crossref":_crossref,"openalex":_openalex,"europe_pmc":_europe_pmc,"gdelt":_gdelt,"world_bank":_world_bank,"searxng":_searxng,"serpapi":_serpapi,"duckduckgo":_duckduckgo}
 
-def search_global(*,query:str,locale:str="en-KE",country:str="",region:str="",source_country:str="",language:str="",limit:int=8,conflicting_views:bool=False)->dict[str,Any]:
+def search_global(*,query:str,locale:str="en",country:str="",region:str="",source_country:str="",language:str="",limit:int=8,conflicting_views:bool=False)->dict[str,Any]:
     q=str(query or "").strip()
     if not q or len(q)>500: raise ValueError("query must contain 1–500 characters")
     response_lang=(language or "").split("-")[0].lower()
