@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.cors import CORSMiddleware
 
 from fastapi_routes.agi import router as agi_router
+from fastapi_routes.humanizer import router as humanizer_router
 from fastapi_routes.ai import router as ai_router
 from fastapi_routes.automation_fabric import router as automation_fabric_router
 from fastapi_routes.chat import router as chat_router
@@ -364,6 +365,7 @@ app.include_router(system_router)
 app.include_router(ai_router)
 app.include_router(stream_router)
 app.include_router(agi_router)
+app.include_router(humanizer_router)
 app.include_router(sci_core_router)
 app.include_router(usect_zero_router)
 app.include_router(usect_contracts_router)

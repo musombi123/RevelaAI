@@ -128,6 +128,9 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert schema["info"]["title"] == "RevelaAI API"
     assert "/api/chat" in schema["paths"]
     assert "/api/research" in schema["paths"]
+    assert "/api/humanizer/suggest" in schema["paths"]
+    assert "/api/humanizer/pdf/extract" in schema["paths"]
+    assert "/api/humanizer/apply" in schema["paths"]
     assert "/api/brain/status" in schema["paths"]
     assert "/api/security-academy/courses" in schema["paths"]
     assert "/api/security-academy/courses/{course_id}" in schema["paths"]
@@ -702,3 +705,20 @@ def test_legacy_route_module_names_are_native_fastapi_router_aliases() -> None:
     for legacy_name, native_router in aliases:
         assert isinstance(legacy_name, APIRouter)
         assert legacy_name is native_router
+
+
+
+def test_humanizer_endpoints_require_revelacode_authentication():
+    suggestion = client.post(
+        "/api/humanizer/suggest",
+        json={"selected_text": "make use of"},
+    )
+    assert suggestion.status_code == 401
+    assert suggestion.json()["error"]["code"] == "authentication_required"
+
+    extraction = client.post(
+        "/api/humanizer/pdf/extract",
+        files={"file": ("sample.pdf", b"%PDF-invalid", "application/pdf")},
+    )
+    assert extraction.status_code == 401
+    assert extraction.json()["error"]["code"] == "authentication_required"
