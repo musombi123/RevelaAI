@@ -61,7 +61,10 @@ def _factory_preflight() -> dict[str, object]:
     from meta_engineer.introspector import scan_architecture
     from revelai.sci_core.defensive_shield import scan_codebase
 
-    architecture = scan_architecture()
+    try:
+        architecture = scan_architecture()
+    except Exception as exc:
+        raise FactoryPreflightBlocked("Meta-Engineer architecture preflight failed.") from exc
     if not isinstance(architecture, dict) or architecture.get("read_only") is not True:
         raise FactoryPreflightBlocked("Meta-Engineer architecture preflight is unavailable.")
     dependencies = architecture.get("dependencies", {})
@@ -80,7 +83,10 @@ def _factory_preflight() -> dict[str, object]:
             "Meta-Engineer found syntax/parse failures in factory modules: " + ", ".join(parse_errors)
         )
 
-    findings = scan_codebase()
+    try:
+        findings = scan_codebase()
+    except Exception as exc:
+        raise FactoryPreflightBlocked("Sci Defender security preflight failed.") from exc
     if not isinstance(findings, list):
         raise FactoryPreflightBlocked("Sci Defender did not return a valid security scan.")
     blocking = [
@@ -260,6 +266,8 @@ async def propose_evolved_tool(
                 },
                 status_code=202,
             )
+    except FactoryPreflightBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except EvolutionLearningUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -294,7 +302,7 @@ async def sandbox_and_publish_evolved_tool(
     try:
         ensure_available()
         preflight = await run_in_threadpool(_factory_preflight)
-        from ai.tool_registry import publish_signed_tool
+        from ai.tool_registry import get_signed_tool_version, publish_signed_tool
 
         published = await run_in_threadpool(publish_signed_tool, name)
         artifact = published.get("artifact", {}) if isinstance(published, dict) else {}
@@ -302,8 +310,24 @@ async def sandbox_and_publish_evolved_tool(
         evidence = artifact.get("sandbox_evidence", {}) if isinstance(artifact, dict) else {}
         artifact_hash = artifact.get("artifact_hash") if isinstance(artifact, dict) else None
         version = artifact.get("version") if isinstance(artifact, dict) else None
-        risk_tier = manifest.get("risk_tier") if isinstance(manifest, dict) else None
-        sandbox_passed = evidence.get("passed") if isinstance(evidence, dict) else None
+        if (
+            published.get("status") != "signed"
+            or not isinstance(version, str)
+            or not isinstance(artifact_hash, str)
+            or not isinstance(manifest, dict)
+            or not isinstance(evidence, dict)
+            or evidence.get("passed") is not True
+        ):
+            raise RuntimeError("Genesis publication response did not contain verified sandbox evidence.")
+        # Fetch the immutable version again through the existing verifier; do not
+        # trust a publication response merely because the service returned HTTP 201.
+        verified = await run_in_threadpool(
+            get_signed_tool_version, name, version, artifact_hash
+        )
+        manifest = verified["manifest"]
+        evidence = verified["sandbox_evidence"]
+        risk_tier = manifest.get("risk_tier")
+        sandbox_passed = evidence.get("passed")
         try:
             record_tool_event(
                 "tool_published",
@@ -330,6 +354,8 @@ async def sandbox_and_publish_evolved_tool(
                 },
                 status_code=201,
             )
+    except FactoryPreflightBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except EvolutionLearningUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
