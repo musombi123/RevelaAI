@@ -168,7 +168,7 @@ def _safety(tool_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 class ResearchInput(BaseModel):
     query: str = Field(min_length=1,max_length=500)
-    locale: str = Field(default="en-KE",max_length=20)
+    locale: str = Field(default="en",max_length=20)
     language: str = Field(default="",max_length=12)
     country: str = Field(default="",max_length=2)
     region: str = Field(default="",max_length=40)
@@ -350,7 +350,7 @@ def generate_workspace_artifact(body: GenerateInput, request: Request):
         _record(user_id,tool_id,request.headers.get("X-Country","GLOBAL"),started,False)
         raise HTTPException(status_code=422,detail=str(exc)) from exc
     except Exception as exc:
-        _record(user_id,tool_id,"KE",started,False)
+        _record(user_id,tool_id,request.headers.get("X-Country","GLOBAL"),started,False)
         LOG.exception("Artifact generation failed | kind=%s",body.kind)
         raise HTTPException(status_code=500,detail="The requested file could not be generated.") from exc
 
