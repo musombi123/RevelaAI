@@ -46,3 +46,13 @@ def test_country_mapping_and_region_resolver_cover_global_packs():
     assert _region_for_country("FR") == "europe"
     assert _region_for_country("IN") == "south_asia"
     assert _region_for_country("JP") == "east_asia"
+
+def test_productivity_quota_timezone_is_user_supplied_and_validated():
+    from starlette.requests import Request
+    from fastapi_routes.productivity import _request_timezone
+
+    tokyo = Request({"type": "http", "headers": [(b"x-timezone", b"Asia/Tokyo")]})
+    invalid = Request({"type": "http", "headers": [(b"x-timezone", b"../../etc/passwd")]})
+
+    assert _request_timezone(tokyo) == "Asia/Tokyo"
+    assert _request_timezone(invalid) == "UTC"
