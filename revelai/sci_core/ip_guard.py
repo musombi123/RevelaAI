@@ -28,6 +28,9 @@ _AUTO_BLOCK_THRESHOLD = 50
 _AUTO_BLOCK_WINDOW_SECONDS = 300
 _AUTO_BLOCK_DURATION_MINUTES = 30
 _MAX_TRACKED_IPS = 10000
+_BLOCK_CACHE_LOCK = threading.Lock()
+_BLOCK_CACHE: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_BLOCK_CACHE_TTL_SECONDS = 2.0
 
 
 def utcnow() -> datetime:
@@ -139,17 +142,28 @@ def client_ip_from_headers(headers, peer_host: str | None = None) -> str | None:
 
     if peer_host:
         try:
-            return ipaddress.ip_address(peer_host).compressed
+            peer = ipaddress.ip_address(peer_host)
+            return peer.compressed if peer.is_global else None
         except ValueError:
             return None
     return None
 
 
 def _active_block(ip: str, now: datetime | None = None) -> dict[str, Any] | None:
+    cached_at, cached_value = 0.0, None
+    with _BLOCK_CACHE_LOCK:
+        cached = _BLOCK_CACHE.get(ip)
+        if cached:
+            cached_at, cached_value = cached
+            if time.monotonic() < cached_at:
+                return dict(cached_value) if cached_value else None
+
     db = _mongo_db()
     current = now or utcnow()
     doc = db["sci_ip_blocks"].find_one({"ip": ip, "active": True}, sort=[("created_at", -1)])
     if not doc:
+        with _BLOCK_CACHE_LOCK:
+            _BLOCK_CACHE[ip] = (time.monotonic() + _BLOCK_CACHE_TTL_SECONDS, None)
         return None
     expires = doc.get("expires_at")
     if expires is not None:
@@ -166,7 +180,11 @@ def _active_block(ip: str, now: datetime | None = None) -> dict[str, Any] | None
                     {"_id": doc["_id"]},
                     {"$set": {"active": False, "expired_at": current, "status": "expired"}},
                 )
+                with _BLOCK_CACHE_LOCK:
+                    _BLOCK_CACHE[ip] = (time.monotonic() + _BLOCK_CACHE_TTL_SECONDS, None)
                 return None
+    with _BLOCK_CACHE_LOCK:
+        _BLOCK_CACHE[ip] = (time.monotonic() + _BLOCK_CACHE_TTL_SECONDS, dict(doc))
     return doc
 
 
@@ -246,6 +264,8 @@ def block_ip(
         upsert=True,
     )
     _audit(db, "blocked", normalized, str(actor or "unknown"), reason, record["source"])
+    with _BLOCK_CACHE_LOCK:
+        _BLOCK_CACHE.pop(normalized, None)
     return {
         "ip": normalized,
         "status": "blocked",
@@ -272,6 +292,8 @@ def unblock_ip(ip: str, *, actor: str, reason: str = "Administrator released the
     )
     if result.modified_count:
         _audit(db, "unblocked", normalized, str(actor or "unknown"), reason, "manual")
+    with _BLOCK_CACHE_LOCK:
+        _BLOCK_CACHE.pop(normalized, None)
     return {"ip": normalized, "status": "unblocked", "records_released": int(result.modified_count)}
 
 
