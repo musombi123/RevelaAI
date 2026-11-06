@@ -13,10 +13,11 @@ from starlette.concurrency import run_in_threadpool
 
 from core_evolve.engine import EvolutionEngine, EvolutionError
 from core_evolve.models import (
-    EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest, ToolMindReviewRequest,
+    EvolutionDecisionInput, EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest, ToolMindReviewRequest,
 )
 from core_evolve.learning import (
-    EvolutionLearningUnavailable, ensure_available, learning_snapshot, record_tool_event,
+    EvolutionLearningUnavailable, ensure_available, learning_snapshot, recent_proposals,
+    record_human_decision, record_tool_event,
 )
 from core_migrate.models import DeviceEnrollment, MigrationPlanRequest, RobotBlueprintRequest
 from core_migrate.service import MigrationError, MigrationService
@@ -220,6 +221,64 @@ async def create_evolution_proposal(
     except EvolutionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"proposal": proposal.model_dump(mode="json"), "deployment_authorized": False}
+
+
+@router.get("/evolve/proposals")
+async def list_evolution_proposals(
+    request: Request,
+    system_id: str,
+    limit: int = 25,
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    await _require_factory_operator(request)
+    _require_enterprise_license(x_revela_license, "evolve")
+    try:
+        proposals = recent_proposals(system_id, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "proposals": proposals,
+        "source": "mongodb",
+        "original_objectives_included": False,
+        "production_actions_authorized": False,
+    }
+
+
+@router.post("/evolve/proposals/{proposal_id}/decision")
+async def decide_evolution_proposal(
+    proposal_id: str,
+    body: EvolutionDecisionInput,
+    request: Request,
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    reviewer_id = await _require_factory_operator(request)
+    _require_enterprise_license(x_revela_license, "evolve")
+    try:
+        proposal = _evolver().get(proposal_id)
+        result = record_human_decision(
+            proposal_id,
+            body.decision,
+            body.rationale,
+            reviewer_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Evolution proposal not found.") from exc
+    except EvolutionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "proposal": {
+            "proposal_id": proposal.proposal_id,
+            "system_id": proposal.system_id,
+            "generation": proposal.generation,
+        },
+        "decision": result,
+    }
 
 
 @router.post("/evolve/proposals/{proposal_id}/children", status_code=201)
