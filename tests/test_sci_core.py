@@ -253,7 +253,7 @@ class SciCoreIPGuardTests(unittest.TestCase):
         database = _FakeDatabase()
         with patch.object(ip_guard, "_mongo_db", return_value=database), patch.object(
             ip_guard, "_AUTO_BLOCK_THRESHOLD", 2
-        ), patch.dict(os.environ, {"SCI_CORE_IP_ALLOWLIST": ""}, clear=False):
+        ), patch.dict(os.environ, {"SCI_CORE_IP_ALLOWLIST": "8.8.8.8/32"}, clear=False):
             first = ip_guard.record_failed_authentication("1.1.1.1", "/api/auth/login")
             second = ip_guard.record_failed_authentication("1.1.1.1", "/api/auth/login")
             self.assertIsNone(first)
@@ -368,6 +368,17 @@ class SciCoreIPGuardTests(unittest.TestCase):
                 ip_guard._BLOCK_CACHE.pop("1.1.1.1", None)
             self.assertIsNone(ip_guard.is_ip_blocked("1.1.1.1"))
             self.assertFalse(database["sci_ip_blocks"].rows[0]["active"])
+
+
+    def test_automatic_blocking_stays_disabled_without_admin_allowlist(self):
+        with patch.object(ip_guard, "_mongo_db") as database, patch.dict(
+            os.environ, {"SCI_CORE_IP_ALLOWLIST": ""}, clear=False
+        ):
+            self.assertIsNone(
+                ip_guard.record_failed_authentication("1.1.1.1", "/api/auth/login")
+            )
+            database.assert_not_called()
+            self.assertFalse(ip_guard.protection_status()["automatic_blocking"])
 
 
 if __name__ == "__main__":
