@@ -342,53 +342,63 @@ def recent_proposals(system_id: str, limit: int = 25) -> list[dict[str, Any]]:
 
     rows.sort(key=event_time, reverse=True)
     proposals: dict[str, dict[str, Any]] = {}
+
+    # Load proposal records first; evaluation and decision events can be newer.
     for row in rows:
-        event_type = row.get("event_type")
-        proposal_id = row.get("proposal_id")
-        if not isinstance(proposal_id, str) or not proposal_id:
+        if row.get("event_type") != "proposal_created":
             continue
-        if event_type == "proposal_created":
-            state = row.get("proposal_state")
-            if not isinstance(state, dict) or proposal_id in proposals:
-                continue
-            created_at = state.get("created_at") or row.get("created_at")
-            proposals[proposal_id] = {
-                "proposal_id": proposal_id,
-                "system_id": system_id,
-                "parent_proposal_id": state.get("parent_proposal_id"),
-                "generation": state.get("generation"),
-                "objective_fingerprint": state.get("objective"),
-                "brain_category": state.get("brain_category"),
-                "hypotheses": list(state.get("hypotheses") or [])[:40],
-                "proposed_changes": list(state.get("proposed_changes") or [])[:40],
-                "success_metrics": list(state.get("success_metrics") or [])[:12],
-                "guardrails": list(state.get("guardrails") or [])[:40],
-                "learning_context": list(state.get("learning_context") or [])[:12],
-                "status": "proposed",
-                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else None,
-                "latest_evaluation": None,
-                "human_decision": None,
+        proposal_id = row.get("proposal_id")
+        state = row.get("proposal_state")
+        if not isinstance(proposal_id, str) or not proposal_id or not isinstance(state, dict):
+            continue
+        if proposal_id in proposals:
+            continue
+        created_at = state.get("created_at") or row.get("created_at")
+        proposals[proposal_id] = {
+            "proposal_id": proposal_id,
+            "system_id": system_id,
+            "parent_proposal_id": state.get("parent_proposal_id"),
+            "generation": state.get("generation"),
+            "objective_fingerprint": state.get("objective"),
+            "brain_category": state.get("brain_category"),
+            "hypotheses": list(state.get("hypotheses") or [])[:40],
+            "proposed_changes": list(state.get("proposed_changes") or [])[:40],
+            "success_metrics": list(state.get("success_metrics") or [])[:12],
+            "guardrails": list(state.get("guardrails") or [])[:40],
+            "learning_context": list(state.get("learning_context") or [])[:12],
+            "status": "proposed",
+            "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else None,
+            "latest_evaluation": None,
+            "human_decision": None,
+        }
+
+    for row in rows:
+        proposal_id = row.get("proposal_id")
+        proposal = proposals.get(proposal_id) if isinstance(proposal_id, str) else None
+        if proposal is None:
+            continue
+        event_type = row.get("event_type")
+        timestamp = event_time(row)
+        timestamp_text = timestamp.isoformat() if hasattr(timestamp, "isoformat") else None
+        if event_type == "proposal_evaluated" and proposal["latest_evaluation"] is None:
+            proposal["latest_evaluation"] = {
+                "status": row.get("status"),
+                "eligible_for_review": row.get("eligible_for_review") is True,
+                "evidence_complete": row.get("evidence_complete") is True,
+                "test_passed": row.get("test_passed") is True,
+                "security_review_passed": row.get("security_review_passed") is True,
+                "metrics": list(row.get("metrics") or [])[:12],
+                "evaluated_at": timestamp_text,
             }
-        elif event_type == "proposal_evaluated" and proposal_id in proposals:
-            if proposals[proposal_id]["latest_evaluation"] is None:
-                proposals[proposal_id]["latest_evaluation"] = {
-                    "status": row.get("status"),
-                    "eligible_for_review": row.get("eligible_for_review") is True,
-                    "evidence_complete": row.get("evidence_complete") is True,
-                    "test_passed": row.get("test_passed") is True,
-                    "security_review_passed": row.get("security_review_passed") is True,
-                    "metrics": list(row.get("metrics") or [])[:12],
-                    "evaluated_at": event_time(row).isoformat() if hasattr(event_time(row), "isoformat") else None,
-                }
-                proposals[proposal_id]["status"] = str(row.get("status") or "evaluated")
-        elif event_type == "proposal_decided" and proposal_id in proposals:
-            if proposals[proposal_id]["human_decision"] is None:
-                proposals[proposal_id]["human_decision"] = {
-                    "decision": row.get("decision"),
-                    "rationale_fingerprint": row.get("rationale_sha256"),
-                    "decided_at": event_time(row).isoformat() if hasattr(event_time(row), "isoformat") else None,
-                }
-                proposals[proposal_id]["status"] = str(row.get("decision") or proposals[proposal_id]["status"])
+            proposal["status"] = str(row.get("status") or "evaluated")
+        elif event_type == "proposal_decided" and proposal["human_decision"] is None:
+            proposal["human_decision"] = {
+                "decision": row.get("decision"),
+                "rationale_fingerprint": row.get("rationale_sha256"),
+                "decided_at": timestamp_text,
+            }
+            proposal["status"] = str(row.get("decision") or proposal["status"])
+
     result = list(proposals.values())
     result.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     return result[:limit]
