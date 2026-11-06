@@ -7,6 +7,7 @@ Raw objectives, prompts, generated source and user identifiers are never stored.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 from datetime import datetime, timezone
 from threading import Lock
@@ -134,6 +135,15 @@ def record_proposal(proposal: Any) -> None:
             "MongoDB refused the evolution proposal ledger write."
         ) from exc
 
+
+
+def objective_matches_proposal(proposal: Any, objective: str) -> bool:
+    """Verify the caller re-submitted the original objective for a hashed proposal."""
+    if not isinstance(objective, str) or not 3 <= len(objective) <= 2000:
+        return False
+    expected = "sha256:" + _sha256(objective)
+    stored = str(getattr(proposal, "objective", "") or "")
+    return bool(re.fullmatch(r"sha256:[0-9a-f]{64}", stored)) and hmac.compare_digest(stored, expected)
 
 
 def get_proposal(proposal_id: str):
