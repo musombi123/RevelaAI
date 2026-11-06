@@ -124,12 +124,14 @@ All endpoints below are under `/api/usect` and use the existing `X-Organ-Admin-T
 | Method | Route | Effect |
 | --- | --- | --- |
 | GET | `/evolve/capabilities` | Read the versioned capability inventory without claiming unprobed dependencies are online |
+| GET | `/evolve/proposals?system_id=...` | Read MongoDB-backed proposal, evaluation and human-decision history without raw objectives or rationales |
 | GET | `/evolve/learning/{system_id}` | Read MongoDB-backed evaluation signals |
 | POST | `/evolve/tools` | Create an invention proposal through Genesis; no publication |
 | POST | `/evolve/tools/{name}/publish` | Guardian + sandbox + signed registry publication; no gateway execution |
 | POST | `/evolve/proposals` | Create a bounded metric-driven evolution proposal |
 | POST | `/evolve/proposals/{proposal_id}/children` | Create a bounded child proposal |
 | POST | `/evolve/proposals/{proposal_id}/evaluate` | Evaluate candidate measurements and persist results |
+| POST | `/evolve/proposals/{proposal_id}/decision` | Record a one-time human approval for the next engineering review or reject the candidate; never deploys |
 | POST | `/evolve/proposals/{proposal_id}/mind-review` | Ask existing Infinite Mind/Core-Two to review a proposal after objective fingerprint verification and active Genesis artifact verification |
 
 Existing Genesis/Core Mesh endpoints remain the activation, rollback and execution control plane. Do not implement parallel endpoints that duplicate them.
