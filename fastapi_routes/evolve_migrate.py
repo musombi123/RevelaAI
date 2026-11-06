@@ -52,8 +52,27 @@ def _require_enterprise_license(token: str | None, entitlement: str) -> None:
 
 
 @router.get("/evolve/health")
-async def evolve_health() -> dict[str, str]:
-    return {"status": "ok", "organ": "USECT-EVOLVE", "mode": "proposal-and-evidence-only"}
+async def evolve_health() -> dict[str, object]:
+    try:
+        ensure_available()
+    except EvolutionLearningUnavailable:
+        return {
+            "status": "blocked",
+            "organ": "USECT-EVOLVE",
+            "mode": "evidence-driven-proposals",
+            "learning_store": "unavailable",
+            "durable_learning": False,
+            "tool_invention_dependency": "Genesis/Core-One",
+        }
+    return {
+        "status": "ready_for_metric_evolution",
+        "organ": "USECT-EVOLVE",
+        "mode": "evidence-driven-proposals",
+        "learning_store": "mongodb",
+        "durable_learning": True,
+        "tool_invention_dependency": "Genesis/Core-One",
+        "tool_activation_control": "Genesis signed registry",
+    }
 
 
 @router.post("/evolve/proposals", status_code=201)
