@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Literal
 from uuid import uuid4
 
@@ -15,8 +16,8 @@ class StrictModel(BaseModel):
 class MetricTarget(StrictModel):
     name: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
     direction: Literal["minimize", "maximize"]
-    baseline: float
-    target: float
+    baseline: float = Field(allow_inf_nan=False)
+    target: float = Field(allow_inf_nan=False)
     unit: str = Field(default="", max_length=24)
 
 
@@ -89,3 +90,10 @@ class EvolutionEvaluationInput(StrictModel):
     test_passed: bool
     security_review_passed: bool
     evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("observations")
+    @classmethod
+    def reject_non_finite_observations(cls, values: dict[str, float]) -> dict[str, float]:
+        if any(not isfinite(value) for value in values.values()):
+            raise ValueError("observations must contain only finite numbers")
+        return values
