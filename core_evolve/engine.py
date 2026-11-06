@@ -28,7 +28,8 @@ class EvolutionError(RuntimeError):
 class EvolutionEngine:
     MAX_GENERATION = 3
 
-    def __init__(self, store_dir: str | Path | None = None) -> None:
+    def __init__(self, store_dir: str | Path | None = None, *, durable_learning: bool | None = None) -> None:
+        self.durable_learning = (store_dir is None) if durable_learning is None else bool(durable_learning)
         root = store_dir or os.getenv("REVELA_EVOLVE_STORE", ".revela/evolve")
         self.store_dir = Path(root).expanduser().resolve()
         self.store_dir.mkdir(parents=True, exist_ok=True)
@@ -50,7 +51,38 @@ class EvolutionEngine:
             raise KeyError(proposal_id)
         return CandidateProposal.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def _learned_context(self, system_id: str) -> list[str]:
+        if not self.durable_learning:
+            return []
+        try:
+            from .learning import recent_evaluations
+            evaluations = recent_evaluations(system_id, limit=8)
+        except Exception as exc:
+            raise EvolutionError("MongoDB learning history is unavailable; evolution is blocked.") from exc
+
+        context: list[str] = []
+        for evaluation in evaluations:
+            for metric in evaluation.get("metrics", [])[:12]:
+                if metric.get("observed") is None:
+                    continue
+                context.append(
+                    "Prior evidence for %s: observed %s%s against target %s%s; passed=%s; evaluation=%s."
+                    % (
+                        metric.get("name"),
+                        metric.get("observed"),
+                        metric.get("unit") or "",
+                        metric.get("target"),
+                        metric.get("unit") or "",
+                        metric.get("passed"),
+                        evaluation.get("status") or "unknown",
+                    )
+                )
+                if len(context) >= 12:
+                    return context
+        return context
+
     def propose(self, request: EvolutionRequest, *, parent_proposal_id: str | None = None) -> CandidateProposal:
+        learning_context = self._learned_context(request.system_id)
         generation = 1
         if parent_proposal_id:
             parent = self.get(parent_proposal_id)
@@ -76,6 +108,8 @@ class EvolutionEngine:
                 "Run a reproducible side-by-side benchmark against the declared twin baseline; "
                 "report cost, latency, reliability and compliance evidence separately."
             )
+        for signal in learning_context:
+            hypotheses.append("MongoDB learning signal: " + signal)
         if generation > 1:
             hypotheses.append(
                 "Evaluate the evolution workflow itself: measure proposal quality, test coverage, "
@@ -102,8 +136,16 @@ class EvolutionEngine:
                 "Never claim a performance multiplier without benchmark evidence.",
             ],
             evidence_refs=request.evidence_refs,
+            learning_context=learning_context,
         )
         self._save(proposal)
+        if self.durable_learning:
+            try:
+                from .learning import record_proposal
+                record_proposal(proposal)
+            except Exception as exc:
+                self._proposal_path(proposal.proposal_id).unlink(missing_ok=True)
+                raise EvolutionError("MongoDB did not persist this evolution proposal; it was not accepted.") from exc
         return proposal
 
     def evaluate(self, proposal_id: str, result: EvolutionEvaluationInput) -> EvaluationReport:
@@ -131,7 +173,7 @@ class EvolutionEngine:
                 )
             )
 
-        evidence_complete = bool(result.evidence_refs or proposal.evidence_refs) and all(
+        evidence_complete = bool(result.evidence_refs) and all(
             metric.observed is not None for metric in metric_results
         )
         safety_passed = bool(result.test_passed and result.security_review_passed)
@@ -157,7 +199,7 @@ class EvolutionEngine:
             "regression" if any(m.observed is not None and not m.passed for m in metric_results) else
             "insufficient_evidence"
         )
-        return EvaluationReport(
+        report = EvaluationReport(
             proposal_id=proposal.proposal_id,
             metrics=metric_results,
             evidence_complete=evidence_complete,
@@ -168,3 +210,10 @@ class EvolutionEngine:
             verdict=verdict,
             notes=notes,
         )
+        if self.durable_learning:
+            try:
+                from .learning import record_evaluation
+                record_evaluation(proposal, report, result)
+            except Exception as exc:
+                raise EvolutionError("MongoDB did not persist the evaluation evidence; it was not accepted as learned.") from exc
+        return report
