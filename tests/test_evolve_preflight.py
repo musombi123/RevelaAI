@@ -63,3 +63,31 @@ def test_factory_preflight_fails_closed_when_security_scan_unavailable(monkeypat
     monkeypatch.setattr("revelai.sci_core.defensive_shield.scan_codebase", fail_scan)
     with pytest.raises(FactoryPreflightBlocked, match="Sci Defender security preflight failed"):
         _factory_preflight()
+
+
+def test_factory_capability_registry_separates_source_from_runtime_readiness(monkeypatch):
+    from core_evolve.capabilities import capability_registry
+
+    monkeypatch.setattr("core_evolve.capabilities._present", lambda module, source_path, root: True)
+
+    def mongo_unavailable():
+        raise RuntimeError("MongoDB unavailable")
+
+    monkeypatch.setattr("core_evolve.learning.ensure_available", mongo_unavailable)
+    registry = capability_registry()
+    assert registry["schema_version"] == "revela.factory-capability.v1"
+    assert registry["registry_kind"] == "capability_inventory_not_executable_tool_registry"
+    by_id = {item["capability_id"]: item for item in registry["capabilities"]}
+    assert by_id["evolver.evidence_ledger"]["source_present"] is True
+    assert by_id["evolver.evidence_ledger"]["runtime_state"] == "blocked"
+    assert by_id["genesis.invention_factory"]["runtime_state"] == "not_probed"
+    assert by_id["hardware.robot_blueprints"]["execution_boundary"] == "physical_actuation_disabled"
+
+
+def test_capability_registry_marks_missing_source_without_claiming_runtime_ready(monkeypatch):
+    from core_evolve.capabilities import capability_registry
+
+    monkeypatch.setattr("core_evolve.capabilities._present", lambda module, source_path, root: False)
+    registry = capability_registry()
+    assert all(item["source_present"] is False for item in registry["capabilities"])
+    assert all(item["runtime_state"] == "missing" for item in registry["capabilities"])
