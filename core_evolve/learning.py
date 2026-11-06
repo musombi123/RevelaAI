@@ -81,6 +81,21 @@ def record_proposal(proposal: Any) -> None:
         "generation": proposal.generation,
         "status": "proposed",
         "objective_sha256": _sha256(proposal.objective),
+        "proposal_state": {
+            "proposal_id": proposal.proposal_id,
+            "system_id": system_id,
+            "parent_proposal_id": proposal.parent_proposal_id,
+            "generation": proposal.generation,
+            "objective": "sha256:" + _sha256(proposal.objective),
+            "hypotheses": list(proposal.hypotheses[:40]),
+            "proposed_changes": list(proposal.proposed_changes[:40]),
+            "success_metrics": [metric.model_dump(mode="python") for metric in proposal.success_metrics],
+            "guardrails": list(proposal.guardrails[:40]),
+            "evidence_refs": [],
+            "learning_context": list(proposal.learning_context[:12]),
+            "status": "proposed",
+            "created_at": proposal.created_at,
+        },
         "metrics": metrics,
         "evidence_ref_sha256": [_sha256(str(ref)) for ref in proposal.evidence_refs],
         "created_at": datetime.now(timezone.utc),
@@ -93,6 +108,34 @@ def record_proposal(proposal: Any) -> None:
         raise EvolutionLearningUnavailable(
             "MongoDB refused the evolution proposal ledger write."
         ) from exc
+
+
+
+def get_proposal(proposal_id: str):
+    """Load a proposal from MongoDB without recovering the original objective or evidence URLs."""
+    if not isinstance(proposal_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", proposal_id):
+        raise ValueError("Invalid proposal identifier.")
+    try:
+        cursor = (
+            _mongo_collection()
+            .find({"proposal_id": proposal_id, "event_type": "proposal_created"})
+            .sort("created_at", -1)
+            .limit(1)
+        )
+        row = next(iter(cursor), None)
+        if row is None:
+            raise KeyError(proposal_id)
+        state = row.get("proposal_state")
+        if not isinstance(state, dict):
+            raise EvolutionLearningUnavailable("The durable proposal record is incomplete.")
+        from .models import CandidateProposal
+        return CandidateProposal.model_validate(state)
+    except KeyError:
+        raise
+    except EvolutionLearningUnavailable:
+        raise
+    except Exception as exc:
+        raise EvolutionLearningUnavailable("MongoDB proposal state could not be loaded.") from exc
 
 
 def record_evaluation(proposal: Any, report: Any, evaluation: Any) -> None:
