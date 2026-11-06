@@ -148,7 +148,7 @@ class _FakeCollection:
                 row.update(update.get("$set", {}))
                 return type("UpdateResult", (), {"modified_count": 1, "upserted_id": None})()
         if upsert:
-            row = dict(query)
+            row = {"_id": f"fake-{len(self.rows) + 1}", **dict(query)}
             row.update(update.get("$set", {}))
             self.rows.append(row)
             return type("UpdateResult", (), {"modified_count": 0, "upserted_id": len(self.rows)})()
@@ -175,6 +175,10 @@ class _FakeDatabase:
 
 
 class SciCoreIPGuardTests(unittest.TestCase):
+    def setUp(self):
+        with ip_guard._BLOCK_CACHE_LOCK:
+            ip_guard._BLOCK_CACHE.clear()
+
     def test_resolver_does_not_trust_unconfigured_forwarding_headers(self):
         headers = {
             "x-forwarded-for": "1.1.1.1",
@@ -259,7 +263,7 @@ class SciCoreIPGuardTests(unittest.TestCase):
 
     def test_failed_non_auth_request_never_triggers_automatic_ip_block(self):
         with patch.object(ip_guard, "_mongo_db") as database:
-            result = ip_guard.record_failed_authentication("1.1.1.1", "/api/sci/shield/status")
+            result = ip_guard.record_failed_authentication("1.1.1.1", "/api/users/profile")
         self.assertIsNone(result)
         database.assert_not_called()
 
@@ -279,7 +283,7 @@ class SciCoreIPGuardTests(unittest.TestCase):
                 json={"ip": "1.1.1.1", "reason": "Repeated suspicious requests", "confirm": False},
             )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("confirmation", response.json()["error"])
+        self.assertIn("confirmation", response.json()["error"]["message"])
 
 
     def test_x_forwarded_for_uses_configured_trusted_hops_from_right(self):
@@ -312,7 +316,7 @@ class SciCoreIPGuardTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 503)
         self.assertFalse(response.json()["blocked"])
-        self.assertIn("public client IP could not be verified", response.json()["error"])
+        self.assertIn("public client IP could not be verified", response.json()["error"]["message"])
 
 
     def test_asgi_middleware_rejects_a_persisted_blocked_source_before_route(self):
@@ -360,6 +364,8 @@ class SciCoreIPGuardTests(unittest.TestCase):
                 current_ip="8.8.8.8",
             )
             database["sci_ip_blocks"].rows[0]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+            with ip_guard._BLOCK_CACHE_LOCK:
+                ip_guard._BLOCK_CACHE.pop("1.1.1.1", None)
             self.assertIsNone(ip_guard.is_ip_blocked("1.1.1.1"))
             self.assertFalse(database["sci_ip_blocks"].rows[0]["active"])
 
