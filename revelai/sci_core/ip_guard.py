@@ -55,7 +55,9 @@ def ensure_indexes() -> dict[str, Any]:
     db["sci_ip_blocks"].create_index([("ip", 1), ("active", 1)])
     db["sci_ip_blocks"].create_index([("expires_at", 1)])
     db["sci_ip_block_events"].create_index([("created_at", -1)])
-    db["sci_auth_failures"].create_index([("created_at", -1)])
+    db["sci_ip_block_events"].create_index([("ip", 1), ("created_at", -1)])
+    db["sci_auth_failures"].create_index([("ip", 1), ("created_at", -1)])
+    db["sci_auth_failures"].create_index([("created_at", 1)], expireAfterSeconds=2592000)
     return {"persistent": True, "backend": "mongodb"}
 
 
@@ -300,6 +302,48 @@ def list_active_blocks(limit: int = 100) -> list[dict[str, Any]]:
     return result
 
 
+
+
+def _iso(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def list_recent_events(limit: int = 50) -> list[dict[str, Any]]:
+    """Return sanitized block/unblock/expiry audit records; never return tokens."""
+    db = _mongo_db()
+    rows = db["sci_ip_block_events"].find({}).sort("created_at", -1).limit(max(1, min(int(limit), 100)))
+    result = []
+    for row in rows:
+        result.append({
+            "action": str(row.get("action", "")),
+            "ip": str(row.get("ip", "")),
+            "actor": str(row.get("actor", "")),
+            "reason": str(row.get("reason", ""))[:300],
+            "source": str(row.get("source", "")),
+            "created_at": _iso(row.get("created_at")),
+        })
+    return result
+
+
+def list_recent_auth_failures(limit: int = 50) -> list[dict[str, Any]]:
+    """Return minimal failed-auth metadata for defensive review."""
+    db = _mongo_db()
+    rows = db["sci_auth_failures"].find({}).sort("created_at", -1).limit(max(1, min(int(limit), 100)))
+    result = []
+    for row in rows:
+        result.append({
+            "ip": str(row.get("ip", "")),
+            "path": str(row.get("path", ""))[:180],
+            "created_at": _iso(row.get("created_at")),
+        })
+    return result
+
 def protection_status() -> dict[str, Any]:
     try:
         db = _mongo_db()
@@ -330,10 +374,11 @@ def protection_status() -> dict[str, Any]:
 
 
 def record_failed_authentication(ip: str | None, path: str) -> dict[str, Any] | None:
-    """Auto-block only repeated 401s on authentication endpoints.
+    """Persist failed auth metadata and block only sustained brute-force sources.
 
-    The threshold is intentionally high to reduce accidental blocks on shared
-    NATs. IPs on the operator allowlist are never auto-blocked.
+    This is deliberately limited to auth endpoints and HTTP 401 outcomes. No
+    credentials, authorization headers, request bodies, or account identifiers
+    are stored. The threshold remains high to avoid blocking shared NAT users.
     """
     if not ip or not (path.startswith("/api/auth/") or path.startswith("/auth/")):
         return None
@@ -344,37 +389,30 @@ def record_failed_authentication(ip: str | None, path: str) -> dict[str, Any] | 
     except ValueError:
         return None
 
-    now = time.time()
-    with _EVENT_LOCK:
-        events = _FAILED_LOGIN_EVENTS[normalized]
-        while events and now - events[0] > _AUTO_BLOCK_WINDOW_SECONDS:
-            events.popleft()
-        events.append(now)
-        count = len(events)
-        if count < _AUTO_BLOCK_THRESHOLD or normalized in _AUTO_BLOCKED_UNTIL:
-            return None
-        _AUTO_BLOCKED_UNTIL[normalized] = now + (_AUTO_BLOCK_DURATION_MINUTES * 60)
-        if len(_FAILED_LOGIN_EVENTS) > _MAX_TRACKED_IPS:
-            stale = sorted(
-                _FAILED_LOGIN_EVENTS,
-                key=lambda key: _FAILED_LOGIN_EVENTS[key][-1] if _FAILED_LOGIN_EVENTS[key] else 0,
-            )[: len(_FAILED_LOGIN_EVENTS) - _MAX_TRACKED_IPS]
-            for key in stale:
-                _FAILED_LOGIN_EVENTS.pop(key, None)
-                _AUTO_BLOCKED_UNTIL.pop(key, None)
-
-    reason = f"{count} failed authentication attempts within 5 minutes."
     try:
+        db = _mongo_db()
+        now = utcnow()
+        db["sci_auth_failures"].insert_one({
+            "ip": normalized,
+            "path": str(path)[:180],
+            "created_at": now,
+        })
+        since = now - timedelta(seconds=_AUTO_BLOCK_WINDOW_SECONDS)
+        attempts = int(db["sci_auth_failures"].count_documents({
+            "ip": normalized,
+            "created_at": {"$gte": since},
+        }))
+        if attempts < _AUTO_BLOCK_THRESHOLD or _active_block(normalized, now):
+            return None
         return block_ip(
             normalized,
             actor="sci-core-auto-defence",
-            reason=reason,
+            reason=f"{attempts} failed authentication responses within 5 minutes.",
             duration_minutes=_AUTO_BLOCK_DURATION_MINUTES,
             source="auto_bruteforce",
         )
     except (IPGuardStoreUnavailable, ValueError):
-        with _EVENT_LOCK:
-            _AUTO_BLOCKED_UNTIL.pop(normalized, None)
+        # No durable DB means no auto-block claim. Protection status reports degraded.
         return None
 
 
