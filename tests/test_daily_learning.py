@@ -123,3 +123,20 @@ def test_daily_learning_does_not_repeat_a_completed_day_without_force(monkeypatc
     )
 
     assert result == {"status": "already_completed", "run_date": "2026-11-03"}
+
+
+def test_daily_learning_refuses_ephemeral_local_cache(monkeypatch):
+    class EphemeralResearchStore(FakeResearchStore):
+        backend = "local_cache"
+
+    store = EphemeralResearchStore()
+    monkeypatch.setattr("revelai.sci_core.storage.collection", lambda _name: store)
+
+    result = daily_learning.run_daily_learning_cycle(
+        run_date=date(2026, 11, 6),
+        force=True,
+    )
+
+    assert result["status"] == "mongo_unavailable"
+    assert result["persisted"] is False
+    assert store.documents == []
