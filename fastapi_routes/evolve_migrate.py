@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 from functools import lru_cache
 
@@ -10,11 +11,15 @@ from starlette.concurrency import run_in_threadpool
 
 from core_evolve.engine import EvolutionEngine, EvolutionError
 from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest
-from core_evolve.learning import (\n    EvolutionLearningUnavailable, ensure_available, learning_snapshot, record_tool_event,\n)
+from core_evolve.learning import (
+    EvolutionLearningUnavailable, ensure_available, learning_snapshot, record_tool_event,
+)
 from core_migrate.models import DeviceEnrollment, MigrationPlanRequest, RobotBlueprintRequest
 from core_migrate.service import MigrationError, MigrationService
 from core_billing.licensing import LicenseError
 from core_uncopyable.license_lock import require_entitlement
+
+logger = logging.getLogger("revelaai.evolver")
 
 router = APIRouter(prefix="/api/usect", tags=["USECT-EVOLVE-MIGRATE"])
 
@@ -154,7 +159,6 @@ async def propose_evolved_tool(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         # Do not leak upstream tokens, internal URLs, or raw exception contents.
-        logger = __import__("logging").getLogger("revelaai.evolver")
         logger.warning("Genesis invention request failed | error_type=%s", type(exc).__name__)
         status = getattr(exc, "status_code", 502)
         raise HTTPException(
@@ -183,7 +187,7 @@ async def sandbox_and_publish_evolved_tool(
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         ensure_available()
-        from ai.tool_registry import GenesisToolRegistryError, publish_signed_tool
+        from ai.tool_registry import publish_signed_tool
 
         published = await run_in_threadpool(publish_signed_tool, name)
         artifact = published.get("artifact", {}) if isinstance(published, dict) else {}
