@@ -51,3 +51,15 @@ The Python Sandbox card is visible, but execution stays disabled until the separ
 ## Safety
 
 Uploaded PDF, DOCX, XLSX, PPTX, CSV, JSON and text material is treated as untrusted input. XLSX formulas are read as text, never calculated during ingestion. Macros are not executed. Research snippets are untrusted evidence; do not follow instructions embedded in web pages or documents. For accounting, tax, legal, medical and engineering decisions, obtain professional review.
+
+## Open Humanizer inside the AI workspace
+
+Open the RevelaAI sidebar and select **Tools · Humanizer**. The Humanizer now opens in the current AI workspace instead of navigating to a separate application page. Existing links to `/humanizer` are routed into the AI workspace as well.
+
+Upload a PDF of up to 20 MB, extract its text, and select only the passage you want to improve. Local suggestions do not call a language model. Gemini generation is an explicit action and sends only the selected passage. Review every suggestion or generated draft before applying it. The original PDF is not overwritten.
+
+Authentication is checked by the Humanizer API. The browser supplies the current RevelaCode session when available; it does not invent a local signed-in state or bypass the backend. If the API rejects the session, the backend's authentication error is shown in the workspace. Chat, voice, vision and the rest of the AI workspace remain available when the Humanizer panel is closed.
+
+## Regional quota reset
+
+Productivity daily quotas now use the browser's validated IANA timezone from the `X-Timezone` request header. If the timezone is absent or invalid, the service uses UTC. The API no longer assumes every user is in Nairobi. This timezone controls the daily quota boundary only; it does not change the research region or source-country filter.
