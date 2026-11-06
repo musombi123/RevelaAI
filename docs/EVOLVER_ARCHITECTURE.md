@@ -119,7 +119,7 @@ The machine-readable inventory lives in `core_evolve/capabilities.py` under sche
 
 ## API surface introduced by Phase 1
 
-All endpoints below are under `/api/usect` and use the existing `X-Organ-Admin-Token` plus `X-Revela-License` gates.
+All Evolver endpoints below are under `/api/usect`. They use the existing RevelaCode bearer session, the Core Mesh operator allowlist (`CORE_MESH_ADMIN_USER_IDS` or `META_ENGINEER_ADMIN_USER_IDS`), and the signed enterprise `evolve` entitlement supplied through `X-Revela-License`. The browser never receives `REVELA_ORGAN_ADMIN_TOKEN`. Migrate endpoints retain their separate organ-admin token gate.
 
 | Method | Route | Effect |
 | --- | --- | --- |
