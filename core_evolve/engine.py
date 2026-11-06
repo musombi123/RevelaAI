@@ -48,10 +48,10 @@ class EvolutionEngine:
 
     def get(self, proposal_id: str) -> CandidateProposal:
         if self.durable_learning:
+            from .learning import EvolutionLearningUnavailable, get_proposal
             try:
-                from .learning import get_proposal
                 return get_proposal(proposal_id)
-            except (KeyError, __import__("core_evolve.learning", fromlist=["EvolutionLearningUnavailable"]).EvolutionLearningUnavailable):
+            except (KeyError, EvolutionLearningUnavailable):
                 raise
             except Exception as exc:
                 raise EvolutionError("MongoDB proposal state is unavailable; this evolution cannot continue.") from exc
