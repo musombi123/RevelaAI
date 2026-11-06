@@ -130,6 +130,6 @@ All endpoints below are under `/api/usect` and use the existing `X-Organ-Admin-T
 | POST | `/evolve/proposals` | Create a bounded metric-driven evolution proposal |
 | POST | `/evolve/proposals/{proposal_id}/children` | Create a bounded child proposal |
 | POST | `/evolve/proposals/{proposal_id}/evaluate` | Evaluate candidate measurements and persist results |
-| POST | `/evolve/proposals/{proposal_id}/mind-review` | Ask existing Infinite Mind/Core-Two to review a proposal after objective fingerprint verification |
+| POST | `/evolve/proposals/{proposal_id}/mind-review` | Ask existing Infinite Mind/Core-Two to review a proposal after objective fingerprint verification and active Genesis artifact verification |
 
 Existing Genesis/Core Mesh endpoints remain the activation, rollback and execution control plane. Do not implement parallel endpoints that duplicate them.
