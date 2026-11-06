@@ -74,8 +74,10 @@ class EvolutionEngine:
         context: list[str] = []
         if brain_category is not None:
             try:
-                from .learning import recent_brain_outcomes
+                from .learning import EvolutionLearningUnavailable, recent_brain_outcomes
                 brain = recent_brain_outcomes(brain_category)
+            except EvolutionLearningUnavailable:
+                raise
             except Exception as exc:
                 raise EvolutionError("Brain OS MongoDB outcome history is unavailable; evolution is blocked.") from exc
             context.append(
