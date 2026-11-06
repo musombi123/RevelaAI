@@ -293,7 +293,12 @@ async def asgi_security_and_throttle(request: Request, call_next):
                 existing_error = payload.get("error")
                 if not isinstance(existing_error, dict):
                     code = payload.get("code") or payload.get("error_code") or f"HTTP_{status_code}"
-                    message = payload.get("message") or payload.get("detail") or "Request could not be completed."
+                    message = (
+                        payload.get("message")
+                        or payload.get("detail")
+                        or (existing_error if isinstance(existing_error, str) else None)
+                        or "Request could not be completed."
+                    )
                     payload["error"] = {"code": str(code), "message": str(message)}
                 payload.setdefault("status", "error")
                 payload.setdefault("request_id", request_id)
