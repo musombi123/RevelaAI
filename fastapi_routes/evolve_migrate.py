@@ -7,6 +7,7 @@ import os
 from functools import lru_cache
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from core_evolve.engine import EvolutionEngine, EvolutionError
@@ -49,6 +50,65 @@ def _require_enterprise_license(token: str | None, entitlement: str) -> None:
         message = str(exc)
         status = 503 if "not configured" in message.lower() or "unavailable" in message.lower() else 402
         raise HTTPException(status_code=status, detail=message) from exc
+
+
+class FactoryPreflightBlocked(RuntimeError):
+    """Meta-Engineer or Sci Defender rejected the current factory preflight."""
+
+
+def _factory_preflight() -> dict[str, object]:
+    """Run read-only Meta-Engineer architecture and Sci Defender checks."""
+    from meta_engineer.introspector import scan_architecture
+    from revelai.sci_core.defensive_shield import scan_codebase
+
+    architecture = scan_architecture()
+    if not isinstance(architecture, dict) or architecture.get("read_only") is not True:
+        raise FactoryPreflightBlocked("Meta-Engineer architecture preflight is unavailable.")
+    dependencies = architecture.get("dependencies", {})
+    relevant = (
+        "core_evolve/engine.py",
+        "core_evolve/learning.py",
+        "fastapi_routes/evolve_migrate.py",
+    )
+    parse_errors = []
+    for path in relevant:
+        imports = dependencies.get(path, []) if isinstance(dependencies, dict) else []
+        if any(str(item).startswith("parse-error:") for item in imports):
+            parse_errors.append(path)
+    if parse_errors:
+        raise FactoryPreflightBlocked(
+            "Meta-Engineer found syntax/parse failures in factory modules: " + ", ".join(parse_errors)
+        )
+
+    findings = scan_codebase()
+    if not isinstance(findings, list):
+        raise FactoryPreflightBlocked("Sci Defender did not return a valid security scan.")
+    blocking = [
+        item for item in findings
+        if isinstance(item, dict) and str(item.get("severity", "")).lower() in {"critical", "high"}
+    ]
+    if blocking:
+        categories = sorted({str(item.get("type") or "security_finding") for item in blocking})
+        raise FactoryPreflightBlocked(
+            "Sci Defender blocked factory work because critical/high findings remain: "
+            + ", ".join(categories)
+        )
+    return {
+        "meta_engineer": {
+            "status": "passed",
+            "read_only": True,
+            "scanned_module_count": sum(
+                len(paths) for paths in architecture.get("structure", {}).values()
+                if isinstance(paths, list)
+            ),
+        },
+        "sci_defender": {
+            "status": "passed",
+            "findings_reviewed": len(findings),
+            "blocking_findings": 0,
+            "scope": "RevelaAI Python codebase; Genesis separately screens candidate source",
+        },
+    }
 
 
 @router.get("/evolve/health")
@@ -160,6 +220,7 @@ async def propose_evolved_tool(
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         ensure_available()
+        preflight = await run_in_threadpool(_factory_preflight)
         record_tool_event(
             "tool_invention_requested",
             demand=body.demand,
@@ -174,12 +235,31 @@ async def propose_evolved_tool(
             body.language,
         )
         tool_name = proposal.get("name") or proposal.get("tool_name")
-        record_tool_event(
-            "tool_invention_created",
-            demand=body.demand,
-            tool_name=str(tool_name) if tool_name else None,
-            status=str(proposal.get("status") or "await_merge"),
-        )
+        try:
+            record_tool_event(
+                "tool_invention_created",
+                demand=body.demand,
+                tool_name=str(tool_name) if tool_name else None,
+                status=str(proposal.get("status") or "await_merge"),
+            )
+        except EvolutionLearningUnavailable:
+            logger.exception("Genesis created an invention but MongoDB could not record the completion event")
+            return JSONResponse(
+                {
+                    "status": "partial_success",
+                    "proposal": proposal,
+                    "factory": "Genesis",
+                    "operation_created": True,
+                    "learning_ledger": "write_failed",
+                    "warning": "Genesis created the proposal, but its completion event could not be written to MongoDB. Do not resubmit the same invention blindly.",
+                    "human_approval_required": True,
+                    "automatic_merge": False,
+                    "production_deployment": False,
+                    "physical_actuation_enabled": False,
+                    "preflight": preflight,
+                },
+                status_code=202,
+            )
     except EvolutionLearningUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -198,6 +278,7 @@ async def propose_evolved_tool(
         "automatic_merge": False,
         "production_deployment": False,
         "physical_actuation_enabled": False,
+        "preflight": preflight,
     }
 
 
@@ -212,6 +293,7 @@ async def sandbox_and_publish_evolved_tool(
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         ensure_available()
+        preflight = await run_in_threadpool(_factory_preflight)
         from ai.tool_registry import publish_signed_tool
 
         published = await run_in_threadpool(publish_signed_tool, name)
@@ -222,16 +304,32 @@ async def sandbox_and_publish_evolved_tool(
         version = artifact.get("version") if isinstance(artifact, dict) else None
         risk_tier = manifest.get("risk_tier") if isinstance(manifest, dict) else None
         sandbox_passed = evidence.get("passed") if isinstance(evidence, dict) else None
-        record_tool_event(
-            "tool_published",
-            demand="",
-            tool_name=name,
-            status=str(published.get("status") or "signed"),
-            artifact_hash=str(artifact_hash) if artifact_hash else None,
-            version=str(version) if version else None,
-            risk_tier=risk_tier if type(risk_tier) is int else None,
-            sandbox_passed=sandbox_passed if isinstance(sandbox_passed, bool) else None,
-        )
+        try:
+            record_tool_event(
+                "tool_published",
+                demand="",
+                tool_name=name,
+                status=str(published.get("status") or "signed"),
+                artifact_hash=str(artifact_hash) if artifact_hash else None,
+                version=str(version) if version else None,
+                risk_tier=risk_tier if type(risk_tier) is int else None,
+                sandbox_passed=sandbox_passed if isinstance(sandbox_passed, bool) else None,
+            )
+        except EvolutionLearningUnavailable:
+            logger.exception("Genesis published a signed tool but MongoDB could not record the publication event")
+            return JSONResponse(
+                {
+                    "status": "partial_success",
+                    "publication": published,
+                    "publication_completed": True,
+                    "learning_ledger": "write_failed",
+                    "warning": "Genesis signed and published the artifact, but MongoDB did not record the completion event. Verify the signed registry before retrying.",
+                    "execution_performed": False,
+                    "production_deployment": False,
+                    "preflight": preflight,
+                },
+                status_code=201,
+            )
     except EvolutionLearningUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -253,6 +351,7 @@ async def sandbox_and_publish_evolved_tool(
         "production_deployment": False,
         "tier_1_and_2_activation_requires_owner_approval": True,
         "tier_2_actions_require_separate_action_approval": True,
+        "preflight": preflight,
     }
 
 
