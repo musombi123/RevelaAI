@@ -32,7 +32,8 @@ class EvolutionEngine:
         self.durable_learning = (store_dir is None) if durable_learning is None else bool(durable_learning)
         root = store_dir or os.getenv("REVELA_EVOLVE_STORE", ".revela/evolve")
         self.store_dir = Path(root).expanduser().resolve()
-        self.store_dir.mkdir(parents=True, exist_ok=True)
+        if not self.durable_learning:
+            self.store_dir.mkdir(parents=True, exist_ok=True)
 
     def _proposal_path(self, proposal_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", proposal_id):
