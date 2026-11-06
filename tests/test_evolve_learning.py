@@ -56,7 +56,7 @@ class FakeMongoCollection:
         ])
 
 
-def evolution_request() -> EvolutionRequest:
+def evolution_request(brain_category: str | None = None) -> EvolutionRequest:
     return EvolutionRequest(
         system_id="tool.factory",
         objective="Reduce latency while preserving safety and output quality.",
@@ -66,14 +66,18 @@ def evolution_request() -> EvolutionRequest:
         ],
         evidence_refs=["benchmark://baseline-v1"],
         requested_depth=2,
+        brain_category=brain_category,
     )
 
 
-def patch_mongo(monkeypatch, collection):
-    monkeypatch.setattr(
-        "revelai.sci_core.storage.collection",
-        lambda name: collection if name == "evolution_runs" else (_ for _ in ()).throw(ValueError(name)),
-    )
+def patch_mongo(monkeypatch, collection, brain_collection=None):
+    def resolve(name):
+        if name == "evolution_runs":
+            return collection
+        if name == "brain_outcomes" and brain_collection is not None:
+            return brain_collection
+        raise ValueError(name)
+    monkeypatch.setattr("revelai.sci_core.storage.collection", resolve)
 
 
 def test_learning_refuses_temporary_local_cache(monkeypatch):
@@ -198,3 +202,45 @@ def test_mongodb_learning_initializes_query_indexes(monkeypatch):
         "evolution_proposal_lookup",
         "evolution_system_history",
     ]
+
+
+def test_brain_os_outcomes_inform_evolver_and_survive_proposal_reload(monkeypatch, tmp_path):
+    evolution_store = FakeMongoCollection()
+    brain_store = FakeMongoCollection()
+    brain_store.documents.extend([
+        {
+            "category": "engineering",
+            "delivery_success": True,
+            "task_success": True,
+            "latency_ms": 200,
+            "feedback_label": "helpful",
+            "provider": "gemini",
+        },
+        {
+            "category": "engineering",
+            "delivery_success": False,
+            "task_success": False,
+            "latency_ms": 400,
+            "feedback_label": "incorrect",
+            "provider": "hf",
+        },
+    ])
+    patch_mongo(monkeypatch, evolution_store, brain_store)
+    engine = EvolutionEngine(tmp_path, durable_learning=True)
+    proposal = engine.propose(evolution_request("engineering"))
+
+    assert proposal.brain_category == "engineering"
+    assert any("delivery_rate=0.5" in signal for signal in proposal.learning_context)
+    assert any("task_success_rate=0.5" in signal for signal in proposal.learning_context)
+    assert evolution_store.documents[0]["proposal_state"]["brain_category"] == "engineering"
+
+    restarted = EvolutionEngine(tmp_path / "restarted", durable_learning=True)
+    loaded = restarted.get(proposal.proposal_id)
+    assert loaded.brain_category == "engineering"
+
+
+def test_brain_os_learning_refuses_local_cache(monkeypatch):
+    from core_evolve.learning import recent_brain_outcomes
+    patch_mongo(monkeypatch, FakeMongoCollection(), LocalCollection("brain_outcomes"))
+    with pytest.raises(EvolutionLearningUnavailable, match="MongoDB is required"):
+        recent_brain_outcomes("engineering")
