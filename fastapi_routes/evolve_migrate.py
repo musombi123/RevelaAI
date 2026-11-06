@@ -4,6 +4,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+import re
 from functools import lru_cache
 
 from fastapi import APIRouter, Header, HTTPException
@@ -11,7 +12,9 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from core_evolve.engine import EvolutionEngine, EvolutionError
-from core_evolve.models import (\n    EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest, ToolMindReviewRequest,\n)
+from core_evolve.models import (
+    EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest, ToolMindReviewRequest,
+)
 from core_evolve.learning import (
     EvolutionLearningUnavailable, ensure_available, learning_snapshot, record_tool_event,
 )
@@ -252,7 +255,12 @@ async def review_evolution_with_infinite_mind(
             body.tool_name,
         )
         raw_mind_id = mind_proposal.get("id") or mind_proposal.get("proposal_id")
-        mind_proposal_id = str(raw_mind_id) if isinstance(raw_mind_id, str) else None
+        mind_proposal_id = (
+            raw_mind_id
+            if isinstance(raw_mind_id, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", raw_mind_id)
+            else None
+        )
         try:
             record_tool_event(
                 "tool_improvement_proposed",
