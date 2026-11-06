@@ -22,6 +22,7 @@ from services.memory_store import _record_messages, memories
 from fastapi_routes.auth import authenticate_identity
 from fastapi_routes.platform_hubs import load_authoritative_user_context
 from services.revenue_entitlements import check_entitlement
+from services.user_preferences import build_user_preferences_context, is_user_memory_enabled
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 logger = logging.getLogger("revelaai.chat")
@@ -104,6 +105,8 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
         # Keep text responses available even if trial/memory billing is inactive.
         # Only persistent saved-memory access is disabled for the free tier.
         user_oid = None
+    if not is_user_memory_enabled(user_id):
+        user_oid = None
 
     requested_user = str(payload.get("userId") or "").strip()
     if requested_user and requested_user != user_id:
@@ -161,6 +164,9 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
     personalization = _load_personalization_context(user_oid)
     if personalization:
         context = context[-11:] + [personalization]
+    preferences_context = build_user_preferences_context(user_id)
+    if preferences_context:
+        context = context[-11:] + [preferences_context]
 
     try:
         identity_reply = get_identity_answer(message, interaction.get("hub", "auto"))
@@ -214,7 +220,9 @@ def _chat_sync(payload: dict[str, Any], headers: Mapping[str, str]):
                     "provider": result.get("provider"),
                     "model": result.get("model"),
                     "networkUsed": True,
-                    "fallback": False,
+                    "fallback": bool(result.get("fallback_used") or result.get("text_only_fallback")),
+                    "text_only_fallback": bool(result.get("text_only_fallback")),
+                    "model_tier": result.get("model_tier", "full"),
                     "interactionTone": interaction["interactionTone"],
                     "capabilities": interaction["capabilities"],
                     "operator_tool": result.get("operator_tool"),

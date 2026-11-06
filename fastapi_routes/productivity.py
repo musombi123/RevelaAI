@@ -5,6 +5,8 @@ import logging
 import os
 from datetime import datetime, time, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -103,8 +105,10 @@ def _caps(tier: str) -> dict[str, int]:
 
 
 def _usage_today(user_id: str, tool_id: str) -> int:
-    now = datetime.now(timezone.utc)
-    start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+    # Product quotas reset at midnight in the user's platform timezone (Nairobi).
+    local_now = datetime.now(ZoneInfo("Africa/Nairobi"))
+    local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = local_midnight.astimezone(timezone.utc)
     with SessionLocal() as session:
         return int(session.scalar(
             select(func.count(UsageEvent.id)).where(
@@ -140,6 +144,14 @@ def _record(user_id: str, tool_id: str, country: str, started: float, success: b
                      latency_ms=(time.monotonic()-started)*1000,success=success)
 
 
+def _safety(tool_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return guard_productivity_tool(tool_id, payload)
+    except ProductivitySafetyError as exc:
+        status = 503 if "UNAVAILABLE" in exc.code or "REGISTRATION" in exc.code else 422
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
 class ResearchInput(BaseModel):
     query: str = Field(min_length=1,max_length=500)
     locale: str = Field(default="en-KE",max_length=20)
@@ -149,6 +161,12 @@ class ResearchInput(BaseModel):
     source_country: str = Field(default="",max_length=2)
     limit: int = Field(default=8,ge=1,le=20)
     conflicting_views: bool = False
+    preferred_regions: list[str] = Field(default_factory=list,max_length=8)
+    preferred_languages: list[str] = Field(default_factory=list,max_length=8)
+    trusted_sources: list[str] = Field(default_factory=list,max_length=30)
+    blocked_domains: list[str] = Field(default_factory=list,max_length=50)
+    citation_style: str = Field(default="APA",pattern="^(APA|MLA|Chicago|IEEE|Harvard)$")
+    freshness: str = Field(default="any",pattern="^(any|year|month|week)$")
 
 
 class GenerateInput(BaseModel):
@@ -170,11 +188,16 @@ def productivity_catalog(request: Request):
     return {
         "status":"success","tier":tier,"daily_limits":limits,
         "model":{"provider":get_active_text_provider(),"model":get_active_text_model(),"status":"configured_not_health_checked"},
-        "tools":[{**tool,"enabled":_tool_enabled(tool["id"]),
+        "tools":[{**tool,
+                  "enabled":_tool_enabled(tool["id"]),
                   "locked":not _tool_enabled(tool["id"]) or (not tool["free"] and tier=="free"),
                   "daily_limit":limits.get(tool["id"],0),
+                  "daily_used":_usage_today(user_id, tool["id"]),
+                  "remaining":max(0, limits.get(tool["id"],0)-_usage_today(user_id, tool["id"])),
                   "phase_status":"available" if tool["phase"]==1 and _tool_enabled(tool["id"]) else "planned"}
                  for tool in TOOL_CATALOG],
+        "quota_timezone":"Africa/Nairobi",
+        "quota_reset":"00:00 Africa/Nairobi",
         "regions":list_regions(),
         "safety":{"meta_engineer":"required","sci_defender":"required"},
     }
@@ -232,11 +255,44 @@ def global_research(body: ResearchInput, request: Request):
     user_oid,user_id=_identity(request,body.model_dump())
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,"research_global",tier)
-    safety=guard_productivity_tool("research_global",body.model_dump())
+    safety=_safety("research_global",body.model_dump())
     import time
     started=time.monotonic()
     try:
-        result=search_global(**body.model_dump())
+        search_args=body.model_dump(exclude={"preferred_regions","preferred_languages","trusted_sources","blocked_domains","citation_style","freshness"})
+        if not body.region and body.preferred_regions:
+            search_args["region"]=body.preferred_regions[0]
+        if not body.language and body.preferred_languages:
+            search_args["language"]=body.preferred_languages[0]
+        result=search_global(**search_args)
+        sources=result.get("sources", []) if isinstance(result.get("sources"), list) else []
+        blocked={str(value).strip().lower().removeprefix("www.") for value in body.blocked_domains if str(value).strip()}
+        trusted={str(value).strip().lower().removeprefix("www.") for value in body.trusted_sources if str(value).strip()}
+        def source_domain(source):
+            try:
+                return (urlsplit(str(source.get("url") or "")).hostname or "").lower().removeprefix("www.")
+            except Exception:
+                return ""
+        sources=[source for source in sources if not any(source_domain(source)==domain or source_domain(source).endswith("."+domain) for domain in blocked)]
+        freshness_days={"year":365,"month":30,"week":7}.get(body.freshness)
+        if freshness_days:
+            cutoff=datetime.now(timezone.utc)-__import__("datetime").timedelta(days=freshness_days)
+            def is_fresh(source):
+                raw_date=source.get("published_at") or source.get("date") or source.get("published")
+                if not raw_date:
+                    return True
+                try:
+                    parsed=datetime.fromisoformat(str(raw_date).replace("Z","+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed=parsed.replace(tzinfo=timezone.utc)
+                    return parsed >= cutoff
+                except (TypeError,ValueError):
+                    return True
+            sources=[source for source in sources if is_fresh(source)]
+        if trusted:
+            sources.sort(key=lambda source: 0 if any(source_domain(source)==domain or source_domain(source).endswith("."+domain) for domain in trusted) else 1)
+        result["sources"]=sources
+        result["research_preferences"]={"citation_style":body.citation_style,"freshness":body.freshness,"preferred_regions":body.preferred_regions,"preferred_languages":body.preferred_languages,"trusted_sources":sorted(trusted)}
         # Screen untrusted retrieved title/snippet/URL content before any
         # downstream chat model can receive it through the workspace.
         result_safety=guard_productivity_tool(
@@ -262,7 +318,7 @@ def generate_workspace_artifact(body: GenerateInput, request: Request):
     tool_id="spreadsheet" if body.kind=="csv" else body.kind
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,tool_id,tier)
-    safety=guard_productivity_tool(tool_id,body.payload)
+    safety=_safety(tool_id,body.payload)
     import time
     started=time.monotonic()
     try:
@@ -301,7 +357,7 @@ def run_sandbox(body: SandboxInput, request: Request):
     tier=_plan_tier(_entitlement(request))
     _enforce_limit(user_id,"sandbox_python",tier)
     payload=body.model_dump()
-    safety=guard_productivity_tool("sandbox_python",payload)
+    safety=_safety("sandbox_python",payload)
     base=os.getenv("SANDBOX_SERVICE_URL","").strip().rstrip("/")
     secret=os.getenv("SANDBOX_SHARED_SECRET","").strip()
     if not base or len(secret.encode("utf-8"))<32:

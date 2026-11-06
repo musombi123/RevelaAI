@@ -40,6 +40,7 @@ from services.expert_medicine import analyze_medical_query
 from services.image_service import generate_image_asset, parse_image_options
 from fastapi_routes.chat import _load_personalization_context, _persist_turn
 from services.conversation_store import MAX_HISTORY, get_session, resolve_conversation_context, save_session
+from services.user_preferences import build_user_preferences_context, is_user_memory_enabled
 from services.runtime_config import (
     IMAGE_DIR, MAX_CONTENT_LENGTH, REVELAAI_BUILD_ID, REVELAAI_IMAGE_ENGINE_VERSION, cleanup_generated_files,
     get_active_text_provider,
@@ -260,6 +261,7 @@ def _ai_sync(
     session = get_session(session_id)
 
     memory_user_oid = None
+    settings_user_id = None
     if user_id:
         try:
             memory_user_oid, verified_id, auth_error = authenticate_identity(
@@ -269,6 +271,7 @@ def _ai_sync(
                 memory_user_oid = None
                 logger.info("Smart memory identity verification unavailable; AI continues without saved memory")
             else:
+                settings_user_id = verified_id
                 _, memory_entitlement_error = check_entitlement(
                     authorization,
                     hub="smart_ai",
@@ -278,6 +281,8 @@ def _ai_sync(
                 if memory_entitlement_error is not None:
                     memory_user_oid = None
                     logger.info("Long-term memory entitlement is unavailable; AI continues without saved memory")
+                if not is_user_memory_enabled(settings_user_id):
+                    memory_user_oid = None
         except Exception:
             memory_user_oid = None
             logger.warning("Smart memory identity verification failed; continuing without saved memory", exc_info=True)
@@ -366,6 +371,9 @@ def _ai_sync(
             personalization = _load_personalization_context(memory_user_oid)
             if personalization:
                 previous_context = (previous_context + [personalization])[-MAX_HISTORY:]
+        preferences_context = build_user_preferences_context(settings_user_id)
+        if preferences_context:
+            previous_context = (previous_context + [preferences_context])[-MAX_HISTORY:]
 
         intent = classify_intent(message)
         # Tool creation and Core operations use the same automation grant
@@ -569,8 +577,12 @@ def _ai_sync(
             "unknown_learning": unknown_public,
             "ai_model": ai_result.get("model"),
             "provider": ai_result.get("provider", get_active_text_provider()),
+            "fallback": bool(ai_result.get("fallback_used") or ai_result.get("text_only_fallback")),
+            "text_only_fallback": bool(ai_result.get("text_only_fallback")),
+            "model_tier": ai_result.get("model_tier", "full"),
+            "tool_execution": ai_result.get("tool_execution"),
             "memory": {
-                "enabled": True,
+                "enabled": bool(memory_user_oid),
                 "type": "conversation",
                 "source": memory_source,
                 "context_messages": len(previous_context),
