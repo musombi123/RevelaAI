@@ -341,3 +341,38 @@ def test_invalid_version_is_rejected_before_execution_network_call(monkeypatch):
         assert exc.code == "invalid_tool_version"
     else:
         raise AssertionError("malformed tool version must be rejected before networking")
+
+
+def test_exact_signed_version_accepts_canonical_manifest_risk_tier_when_summary_omitted(monkeypatch):
+    manifest = _manifest(risk_tier=1, network=True)
+    record = {
+        "name": "safe_tool",
+        "version": "1.0.0",
+        "artifact_hash": "a" * 64,
+        "manifest": manifest,
+        "signature": "ed25519:" + ("b" * 128),
+        "sandbox_evidence": {"passed": True, "isolation_level": "test"},
+    }
+    monkeypatch.setattr(tool_registry, "_request", lambda *args, **kwargs: {"artifact": record})
+    result = tool_registry.get_signed_tool_version("safe_tool", "1.0.0", "a" * 64)
+    assert result is record
+
+
+def test_exact_signed_version_rejects_conflicting_reported_risk_tier(monkeypatch):
+    manifest = _manifest(risk_tier=1, network=True)
+    record = {
+        "name": "safe_tool",
+        "version": "1.0.0",
+        "artifact_hash": "a" * 64,
+        "manifest": manifest,
+        "risk_tier": 0,
+        "signature": "ed25519:" + ("b" * 128),
+        "sandbox_evidence": {"passed": True, "isolation_level": "test"},
+    }
+    monkeypatch.setattr(tool_registry, "_request", lambda *args, **kwargs: {"artifact": record})
+    try:
+        tool_registry.get_signed_tool_version("safe_tool", "1.0.0", "a" * 64)
+    except tool_registry.GenesisToolRegistryError as exc:
+        assert exc.code == "genesis_invalid_payload"
+    else:
+        raise AssertionError("conflicting summary risk tier must be rejected")
