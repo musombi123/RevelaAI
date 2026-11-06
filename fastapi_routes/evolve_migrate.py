@@ -227,6 +227,36 @@ async def evaluate_evolution_proposal(
     return {"evaluation": report.model_dump(mode="json")}
 
 
+def _active_tool_baseline(records: list[dict], tool_name: str) -> dict[str, object] | None:
+    """Return the exact verified active Genesis artifact used as the evolution baseline."""
+    for item in records:
+        if not isinstance(item, dict) or item.get("active") is not True:
+            continue
+        manifest = item.get("manifest")
+        if not isinstance(manifest, dict) or manifest.get("name") != tool_name:
+            continue
+        artifact_hash = item.get("artifact_hash")
+        version = item.get("version")
+        risk_tier = item.get("risk_tier")
+        if (
+            not isinstance(artifact_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", artifact_hash)
+            or not isinstance(version, str)
+            or not version
+            or type(risk_tier) is not int
+            or risk_tier not in {0, 1, 2}
+        ):
+            continue
+        return {
+            "tool_name": tool_name,
+            "version": version,
+            "artifact_hash": artifact_hash,
+            "risk_tier": risk_tier,
+        }
+    return None
+
+
+
 @router.post("/evolve/proposals/{proposal_id}/mind-review", status_code=202)
 async def review_evolution_with_infinite_mind(
     proposal_id: str,
@@ -247,6 +277,14 @@ async def review_evolution_with_infinite_mind(
                 detail="The supplied objective does not match the immutable proposal fingerprint.",
             )
         preflight = await run_in_threadpool(_factory_preflight)
+        from ai.tool_registry import list_active_tools
+        active_tools = await run_in_threadpool(list_active_tools)
+        baseline = _active_tool_baseline(active_tools, body.tool_name)
+        if baseline is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Infinite Mind review requires a verified active signed Genesis tool as its baseline.",
+            )
         from ai.core_mesh import propose_mind_evolution
 
         mind_proposal = await run_in_threadpool(
@@ -267,6 +305,9 @@ async def review_evolution_with_infinite_mind(
                 demand=body.objective,
                 tool_name=body.tool_name,
                 status=str(mind_proposal.get("status") or "await_merge"),
+                artifact_hash=str(baseline["artifact_hash"]),
+                version=str(baseline["version"]),
+                risk_tier=baseline["risk_tier"],
                 evolver_proposal_id=proposal_id,
                 mind_proposal_id=mind_proposal_id,
             )
@@ -277,6 +318,7 @@ async def review_evolution_with_infinite_mind(
                     "status": "partial_success",
                     "evolver_proposal_id": proposal_id,
                     "infinite_mind": mind_proposal,
+                    "baseline": baseline,
                     "learning_ledger": "write_failed",
                     "warning": "Infinite Mind created its proposal, but the association event was not written to MongoDB. Verify the Mind proposal before retrying.",
                     "candidate_generation": "proposal_only",
@@ -306,6 +348,7 @@ async def review_evolution_with_infinite_mind(
     return {
         "evolver_proposal_id": proposal_id,
         "infinite_mind": mind_proposal,
+        "baseline": baseline,
         "learning_ledger": "mongodb",
         "candidate_generation": "proposal_only",
         "human_approval_required": True,
