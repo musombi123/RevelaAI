@@ -404,11 +404,17 @@ def protection_status() -> dict[str, Any]:
 def record_failed_authentication(ip: str | None, path: str) -> dict[str, Any] | None:
     """Persist failed auth metadata and block only sustained brute-force sources.
 
-    This is deliberately limited to auth endpoints and HTTP 401 outcomes. No
-    credentials, authorization headers, request bodies, or account identifiers
-    are stored. The threshold remains high to avoid blocking shared NAT users.
+    This is deliberately limited to auth endpoints and administrator API
+    endpoints returning HTTP 401. No credentials, authorization headers,
+    request bodies, or account identifiers are stored. The threshold remains
+    high to avoid blocking shared NAT users.
     """
-    if not ip or not (path.startswith("/api/auth/") or path.startswith("/auth/")):
+    eligible_path = (
+        path.startswith("/api/auth/")
+        or path.startswith("/auth/")
+        or path.startswith("/api/sci/")
+    )
+    if not ip or not eligible_path:
         return None
     try:
         normalized = ipaddress.ip_address(ip).compressed
