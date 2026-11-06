@@ -72,7 +72,7 @@ async def humanizer_extract_pdf(request: Request, file: UploadFile = File(...)):
         LOG.warning("Humanizer PDF extraction failed | error_type=%s", type(exc).__name__)
         return JSONResponse({"error": {"code": "PDF_EXTRACTION_FAILED", "message": "The PDF could not be read. It may be encrypted, damaged, or image-only."}}, status_code=422)
     pages = [
-        {"page": int(page.get("page") or index + 1), "text": str(page.get("text") or ""), "characters": int(page.get("characters") or 0)}
+        {"page": int(page.get("page") or index + 1), "text": str(page.get("text") or ""), "characters": int(page.get("characters") or 0), "extraction_method": str(page.get("method") or "native")}
         for index, page in enumerate(result.get("pages", []))
     ]
     return {
