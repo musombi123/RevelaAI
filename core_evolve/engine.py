@@ -46,6 +46,14 @@ class EvolutionEngine:
         temporary.replace(target)
 
     def get(self, proposal_id: str) -> CandidateProposal:
+        if self.durable_learning:
+            try:
+                from .learning import get_proposal
+                return get_proposal(proposal_id)
+            except KeyError:
+                raise
+            except Exception as exc:
+                raise EvolutionError("MongoDB proposal state is unavailable; this evolution cannot continue.") from exc
         path = self._proposal_path(proposal_id)
         if not path.is_file():
             raise KeyError(proposal_id)
@@ -138,14 +146,14 @@ class EvolutionEngine:
             evidence_refs=request.evidence_refs,
             learning_context=learning_context,
         )
-        self._save(proposal)
         if self.durable_learning:
             try:
                 from .learning import record_proposal
                 record_proposal(proposal)
             except Exception as exc:
-                self._proposal_path(proposal.proposal_id).unlink(missing_ok=True)
                 raise EvolutionError("MongoDB did not persist this evolution proposal; it was not accepted.") from exc
+        else:
+            self._save(proposal)
         return proposal
 
     def evaluate(self, proposal_id: str, result: EvolutionEvaluationInput) -> EvaluationReport:
