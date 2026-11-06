@@ -64,8 +64,10 @@ class EvolutionEngine:
         if not self.durable_learning:
             return []
         try:
-            from .learning import recent_evaluations
+            from .learning import EvolutionLearningUnavailable, recent_evaluations
             evaluations = recent_evaluations(system_id, limit=8)
+        except EvolutionLearningUnavailable:
+            raise
         except Exception as exc:
             raise EvolutionError("MongoDB learning history is unavailable; evolution is blocked.") from exc
 
@@ -149,8 +151,10 @@ class EvolutionEngine:
         )
         if self.durable_learning:
             try:
-                from .learning import record_proposal
+                from .learning import EvolutionLearningUnavailable, record_proposal
                 record_proposal(proposal)
+            except EvolutionLearningUnavailable:
+                raise
             except Exception as exc:
                 raise EvolutionError("MongoDB did not persist this evolution proposal; it was not accepted.") from exc
         else:
@@ -221,8 +225,10 @@ class EvolutionEngine:
         )
         if self.durable_learning:
             try:
-                from .learning import record_evaluation
+                from .learning import EvolutionLearningUnavailable, record_evaluation
                 record_evaluation(proposal, report, result)
+            except EvolutionLearningUnavailable:
+                raise
             except Exception as exc:
                 raise EvolutionError("MongoDB did not persist the evaluation evidence; it was not accepted as learned.") from exc
         return report
