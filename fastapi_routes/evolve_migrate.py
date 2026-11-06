@@ -128,14 +128,30 @@ async def evolve_health() -> dict[str, object]:
             "mode": "evidence-driven-proposals",
             "learning_store": "unavailable",
             "durable_learning": False,
+            "capabilities": {
+                "metric_evolution": "blocked",
+                "brain_os_learning": "blocked",
+                "genesis_invention": "dependency_not_probed",
+                "signed_tool_publication": "dependency_not_probed",
+                "production_self_modification": "disabled",
+                "physical_actuation": "disabled",
+            },
             "tool_invention_dependency": "Genesis/Core-One",
         }
     return {
-        "status": "ready_for_metric_evolution",
+        "status": "learning_store_ready",
         "organ": "USECT-EVOLVE",
         "mode": "evidence-driven-proposals",
         "learning_store": "mongodb",
         "durable_learning": True,
+        "capabilities": {
+            "metric_evolution": "available",
+            "brain_os_learning": "available_when_category_is_declared",
+            "genesis_invention": "requires_live_core_one",
+            "signed_tool_publication": "requires_live_core_one_guardian_and_sandbox",
+            "production_self_modification": "disabled",
+            "physical_actuation": "disabled",
+        },
         "tool_invention_dependency": "Genesis/Core-One",
         "tool_activation_control": "Genesis signed registry",
     }
