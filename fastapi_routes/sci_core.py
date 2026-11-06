@@ -262,6 +262,11 @@ async def ip_guard_status(request: Request):
 def _manual_block(payload: dict, actor: str, current_ip: str | None):
     from revelai.sci_core.ip_guard import IPGuardStoreUnavailable, block_ip
 
+    if payload.get("confirm") is not True:
+        return JSONResponse(
+            {"error": "Explicit confirmation is required before blocking an IP."},
+            status_code=400,
+        )
     if not current_ip:
         return JSONResponse(
             {
@@ -269,11 +274,6 @@ def _manual_block(payload: dict, actor: str, current_ip: str | None):
                 "blocked": False,
             },
             status_code=503,
-        )
-    if payload.get("confirm") is not True:
-        return JSONResponse(
-            {"error": "Explicit confirmation is required before blocking an IP."},
-            status_code=400,
         )
     try:
         result = block_ip(
