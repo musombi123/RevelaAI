@@ -101,13 +101,24 @@ def is_allowlisted(ip: str) -> bool:
 
 
 def client_ip_from_headers(headers, peer_host: str | None = None) -> str | None:
-    """Resolve a client IP, trusting X-Forwarded-For only when explicitly enabled.
+    """Resolve a client IP using only an explicitly trusted ingress signal.
 
-    Render terminates TLS at its edge proxy. Configure the trusted proxy hop
-    count in the service environment; never accept arbitrary XFF headers by
-    default. The selected hop is counted from the right so proxy-appended
-    client addresses take precedence over attacker-supplied leading entries.
+    For Render deployments, Cloudflare's CF-Connecting-IP header can be
+    enabled explicitly. Otherwise X-Forwarded-For is used only when the
+    operator has configured the exact trusted proxy hop count. X-Real-IP is
+    deliberately not accepted because a client may supply it directly.
     """
+    trust_cloudflare = os.getenv(
+        "REVELAAI_TRUST_CLOUDFLARE_IP_HEADER", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if trust_cloudflare:
+        value = headers.get("cf-connecting-ip", "").strip()
+        if value:
+            try:
+                return ipaddress.ip_address(value).compressed
+            except ValueError:
+                return None
+
     trust_proxy = os.getenv("REVELAAI_TRUST_PROXY_HEADERS", "").strip().lower() in {
         "1", "true", "yes", "on"
     }
@@ -125,12 +136,7 @@ def client_ip_from_headers(headers, peer_host: str | None = None) -> str | None:
                 return ipaddress.ip_address(candidates[index]).compressed
             except ValueError:
                 return None
-        real_ip = headers.get("x-real-ip", "").strip()
-        if real_ip:
-            try:
-                return ipaddress.ip_address(real_ip).compressed
-            except ValueError:
-                return None
+
     if peer_host:
         try:
             return ipaddress.ip_address(peer_host).compressed
