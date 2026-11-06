@@ -1,4 +1,5 @@
 from urllib.parse import parse_qs, urlsplit
+from io import BytesIO
 
 from openpyxl import load_workbook
 from docx import Document
@@ -34,7 +35,7 @@ def test_xlsx_contains_real_formula_and_opens(monkeypatch, tmp_path):
         }],
     })
     path, _meta = _read_artifact(artifact)
-    workbook = load_workbook(path, data_only=False)
+    workbook = load_workbook(BytesIO(path.read_bytes()), data_only=False)
     assert workbook["Summary"]["B4"].value == "=SUM(A2:A3)"
     workbook.close()
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Literal
 from uuid import uuid4
 
@@ -15,8 +16,8 @@ class StrictModel(BaseModel):
 class MetricTarget(StrictModel):
     name: str = Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
     direction: Literal["minimize", "maximize"]
-    baseline: float
-    target: float
+    baseline: float = Field(allow_inf_nan=False)
+    target: float = Field(allow_inf_nan=False)
     unit: str = Field(default="", max_length=24)
 
 
@@ -26,6 +27,7 @@ class EvolutionRequest(StrictModel):
     metrics: list[MetricTarget] = Field(min_length=1, max_length=12)
     constraints: list[str] = Field(default_factory=list, max_length=30)
     evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+    brain_category: Literal["general", "coding", "research", "community", "biashara", "shamba", "elimu", "scripture", "security", "engineering"] | None = None
     requested_depth: int = Field(default=1, ge=1, le=3)
     twin_baseline: dict[str, float] = Field(default_factory=dict, max_length=20)
 
@@ -35,6 +37,19 @@ class EvolutionRequest(StrictModel):
         if any(not value.strip() for value in values):
             raise ValueError("entries must not be blank")
         return values
+
+class ToolInventionRequest(StrictModel):
+    """A bounded demand routed to the existing Genesis invention engine."""
+
+    demand: str = Field(min_length=3, max_length=500)
+    country: str = Field(default="KE", min_length=2, max_length=2, pattern=r"^[A-Za-z]{2}$")
+    language: str = Field(default="en", min_length=2, max_length=20)
+
+class ToolMindReviewRequest(StrictModel):
+    """Re-submit the original objective to Infinite Mind without persisting raw text."""
+
+    tool_name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    objective: str = Field(min_length=3, max_length=500)
 
 
 class CandidateProposal(StrictModel):
@@ -48,6 +63,8 @@ class CandidateProposal(StrictModel):
     success_metrics: list[MetricTarget]
     guardrails: list[str]
     evidence_refs: list[str]
+    brain_category: Literal["general", "coding", "research", "community", "biashara", "shamba", "elimu", "scripture", "security", "engineering"] | None = None
+    learning_context: list[str] = Field(default_factory=list, max_length=12)
     status: Literal["proposed", "evaluated", "approved", "rejected", "rolled_back"] = "proposed"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -81,3 +98,17 @@ class EvolutionEvaluationInput(StrictModel):
     test_passed: bool
     security_review_passed: bool
     evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+
+    @field_validator("observations")
+    @classmethod
+    def reject_non_finite_observations(cls, values: dict[str, float]) -> dict[str, float]:
+        if any(not isfinite(value) for value in values.values()):
+            raise ValueError("observations must contain only finite numbers")
+        return values
+
+
+class EvolutionDecisionInput(StrictModel):
+    """A recorded human gate before the next engineering stage; never a deployment."""
+
+    decision: Literal["approve_for_next_stage", "reject"]
+    rationale: str = Field(min_length=3, max_length=1000)

@@ -370,6 +370,7 @@ def get_signed_tool_version(name: str, version: str, artifact_hash: str) -> dict
         raise GenesisToolRegistryError("Genesis returned an invalid signed version record.", code="genesis_invalid_payload")
     manifest = record.get("manifest")
     evidence = record.get("sandbox_evidence")
+    reported_risk_tier = record.get("risk_tier")
     if (
         not isinstance(manifest, dict)
         or not _valid_manifest_shape(manifest)
@@ -378,7 +379,7 @@ def get_signed_tool_version(name: str, version: str, artifact_hash: str) -> dict
         or record.get("artifact_hash") != artifact_hash
         or manifest.get("name") != name
         or manifest.get("version") != version
-        or record.get("risk_tier") != manifest.get("risk_tier")
+        or (reported_risk_tier is not None and (type(reported_risk_tier) is not int or reported_risk_tier != manifest.get("risk_tier")))
         or not _SIGNATURE_RE.fullmatch(str(record.get("signature") or ""))
         or not isinstance(evidence, dict)
         or evidence.get("passed") is not True

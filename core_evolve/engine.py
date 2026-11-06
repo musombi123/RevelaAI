@@ -28,10 +28,12 @@ class EvolutionError(RuntimeError):
 class EvolutionEngine:
     MAX_GENERATION = 3
 
-    def __init__(self, store_dir: str | Path | None = None) -> None:
+    def __init__(self, store_dir: str | Path | None = None, *, durable_learning: bool | None = None) -> None:
+        self.durable_learning = (store_dir is None) if durable_learning is None else bool(durable_learning)
         root = store_dir or os.getenv("REVELA_EVOLVE_STORE", ".revela/evolve")
         self.store_dir = Path(root).expanduser().resolve()
-        self.store_dir.mkdir(parents=True, exist_ok=True)
+        if not self.durable_learning:
+            self.store_dir.mkdir(parents=True, exist_ok=True)
 
     def _proposal_path(self, proposal_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", proposal_id):
@@ -45,12 +47,72 @@ class EvolutionEngine:
         temporary.replace(target)
 
     def get(self, proposal_id: str) -> CandidateProposal:
+        if self.durable_learning:
+            from .learning import EvolutionLearningUnavailable, get_proposal
+            try:
+                return get_proposal(proposal_id)
+            except (KeyError, EvolutionLearningUnavailable):
+                raise
+            except Exception as exc:
+                raise EvolutionError("MongoDB proposal state is unavailable; this evolution cannot continue.") from exc
         path = self._proposal_path(proposal_id)
         if not path.is_file():
             raise KeyError(proposal_id)
         return CandidateProposal.model_validate_json(path.read_text(encoding="utf-8"))
 
+    def _learned_context(self, system_id: str, brain_category: str | None = None) -> list[str]:
+        if not self.durable_learning:
+            return []
+        try:
+            from .learning import EvolutionLearningUnavailable, recent_evaluations
+            evaluations = recent_evaluations(system_id, limit=8)
+        except EvolutionLearningUnavailable:
+            raise
+        except Exception as exc:
+            raise EvolutionError("MongoDB learning history is unavailable; evolution is blocked.") from exc
+
+        context: list[str] = []
+        if brain_category is not None:
+            try:
+                from .learning import EvolutionLearningUnavailable, recent_brain_outcomes
+                brain = recent_brain_outcomes(brain_category)
+            except EvolutionLearningUnavailable:
+                raise
+            except Exception as exc:
+                raise EvolutionError("Brain OS MongoDB outcome history is unavailable; evolution is blocked.") from exc
+            context.append(
+                "Brain OS category %s: samples=%s, delivery_rate=%s, task_success_rate=%s, median_latency_ms=%s, feedback=%s."
+                % (
+                    brain.get("category"),
+                    brain.get("sample_count"),
+                    brain.get("delivery_rate"),
+                    brain.get("task_success_rate"),
+                    brain.get("median_latency_ms"),
+                    brain.get("feedback_counts"),
+                )
+            )
+        for evaluation in evaluations:
+            for metric in evaluation.get("metrics", [])[:12]:
+                if metric.get("observed") is None:
+                    continue
+                context.append(
+                    "Prior evidence for %s: observed %s%s against target %s%s; passed=%s; evaluation=%s."
+                    % (
+                        metric.get("name"),
+                        metric.get("observed"),
+                        metric.get("unit") or "",
+                        metric.get("target"),
+                        metric.get("unit") or "",
+                        metric.get("passed"),
+                        evaluation.get("status") or "unknown",
+                    )
+                )
+                if len(context) >= 12:
+                    return context
+        return context
+
     def propose(self, request: EvolutionRequest, *, parent_proposal_id: str | None = None) -> CandidateProposal:
+        learning_context = self._learned_context(request.system_id, request.brain_category)
         generation = 1
         if parent_proposal_id:
             parent = self.get(parent_proposal_id)
@@ -76,6 +138,8 @@ class EvolutionEngine:
                 "Run a reproducible side-by-side benchmark against the declared twin baseline; "
                 "report cost, latency, reliability and compliance evidence separately."
             )
+        for signal in learning_context:
+            hypotheses.append("MongoDB learning signal: " + signal)
         if generation > 1:
             hypotheses.append(
                 "Evaluate the evolution workflow itself: measure proposal quality, test coverage, "
@@ -102,8 +166,19 @@ class EvolutionEngine:
                 "Never claim a performance multiplier without benchmark evidence.",
             ],
             evidence_refs=request.evidence_refs,
+            brain_category=request.brain_category,
+            learning_context=learning_context,
         )
-        self._save(proposal)
+        if self.durable_learning:
+            try:
+                from .learning import EvolutionLearningUnavailable, record_proposal
+                record_proposal(proposal)
+            except EvolutionLearningUnavailable:
+                raise
+            except Exception as exc:
+                raise EvolutionError("MongoDB did not persist this evolution proposal; it was not accepted.") from exc
+        else:
+            self._save(proposal)
         return proposal
 
     def evaluate(self, proposal_id: str, result: EvolutionEvaluationInput) -> EvaluationReport:
@@ -131,7 +206,7 @@ class EvolutionEngine:
                 )
             )
 
-        evidence_complete = bool(result.evidence_refs or proposal.evidence_refs) and all(
+        evidence_complete = bool(result.evidence_refs) and all(
             metric.observed is not None for metric in metric_results
         )
         safety_passed = bool(result.test_passed and result.security_review_passed)
@@ -145,7 +220,7 @@ class EvolutionEngine:
 
         notes = []
         if not evidence_complete:
-            notes.append("Supply measurements for every target and at least one evidence reference.")
+            notes.append("Supply measurements for every target and at least one candidate evidence reference.")
         if not safety_passed:
             notes.append("Both the test suite and independent security review must pass.")
         if not all_metrics_pass:
@@ -157,7 +232,7 @@ class EvolutionEngine:
             "regression" if any(m.observed is not None and not m.passed for m in metric_results) else
             "insufficient_evidence"
         )
-        return EvaluationReport(
+        report = EvaluationReport(
             proposal_id=proposal.proposal_id,
             metrics=metric_results,
             evidence_complete=evidence_complete,
@@ -168,3 +243,12 @@ class EvolutionEngine:
             verdict=verdict,
             notes=notes,
         )
+        if self.durable_learning:
+            try:
+                from .learning import EvolutionLearningUnavailable, record_evaluation
+                record_evaluation(proposal, report, result)
+            except EvolutionLearningUnavailable:
+                raise
+            except Exception as exc:
+                raise EvolutionError("MongoDB did not persist the evaluation evidence; it was not accepted as learned.") from exc
+        return report

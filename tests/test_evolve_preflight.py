@@ -1,0 +1,227 @@
+"""Tests for the independent Evolver factory preflight gates."""
+from __future__ import annotations
+
+import pytest
+
+from fastapi import HTTPException
+from starlette.requests import Request
+
+from fastapi_routes.evolve_migrate import (
+    FactoryPreflightBlocked, _active_tool_baseline, _factory_preflight, _require_factory_operator,
+)
+
+
+def architecture_snapshot(*, parse_error: bool = False):
+    dependencies = {
+        "core_evolve/engine.py": ["os", "pathlib"],
+        "core_evolve/learning.py": ["hashlib", "re"],
+        "fastapi_routes/evolve_migrate.py": ["fastapi", "core_evolve.engine"],
+    }
+    if parse_error:
+        dependencies["core_evolve/engine.py"] = ["parse-error:SyntaxError"]
+    return {
+        "read_only": True,
+        "structure": {
+            "core_evolve": ["core_evolve/engine.py", "core_evolve/learning.py"],
+            "fastapi_routes": ["fastapi_routes/evolve_migrate.py"],
+        },
+        "dependencies": dependencies,
+    }
+
+
+def test_factory_preflight_passes_independent_meta_and_defender_checks(monkeypatch):
+    monkeypatch.setattr("meta_engineer.introspector.scan_architecture", architecture_snapshot)
+    monkeypatch.setattr("revelai.sci_core.defensive_shield.scan_codebase", lambda: [])
+    result = _factory_preflight()
+    assert result["meta_engineer"]["status"] == "passed"
+    assert result["sci_defender"]["status"] == "passed"
+    assert result["meta_engineer"]["read_only"] is True
+
+
+def test_factory_preflight_blocks_meta_engineer_parse_failures(monkeypatch):
+    monkeypatch.setattr(
+        "meta_engineer.introspector.scan_architecture",
+        lambda: architecture_snapshot(parse_error=True),
+    )
+    monkeypatch.setattr("revelai.sci_core.defensive_shield.scan_codebase", lambda: [])
+    with pytest.raises(FactoryPreflightBlocked, match="parse failures"):
+        _factory_preflight()
+
+
+@pytest.mark.parametrize("severity", ["critical", "high"])
+def test_factory_preflight_blocks_sci_defender_high_risk_findings(monkeypatch, severity):
+    monkeypatch.setattr("meta_engineer.introspector.scan_architecture", architecture_snapshot)
+    monkeypatch.setattr(
+        "revelai.sci_core.defensive_shield.scan_codebase",
+        lambda: [{"type": "vulnerable_pattern", "severity": severity}],
+    )
+    with pytest.raises(FactoryPreflightBlocked, match="critical/high findings"):
+        _factory_preflight()
+
+
+def test_factory_preflight_fails_closed_when_security_scan_unavailable(monkeypatch):
+    monkeypatch.setattr("meta_engineer.introspector.scan_architecture", architecture_snapshot)
+
+    def fail_scan():
+        raise RuntimeError("scanner unavailable")
+
+    monkeypatch.setattr("revelai.sci_core.defensive_shield.scan_codebase", fail_scan)
+    with pytest.raises(FactoryPreflightBlocked, match="Sci Defender security preflight failed"):
+        _factory_preflight()
+
+
+def test_factory_capability_registry_separates_source_from_runtime_readiness(monkeypatch):
+    from core_evolve.capabilities import capability_registry
+
+    monkeypatch.setattr("core_evolve.capabilities._present", lambda module, source_path, root: True)
+
+    def mongo_unavailable():
+        raise RuntimeError("MongoDB unavailable")
+
+    monkeypatch.setattr("core_evolve.learning.ensure_available", mongo_unavailable)
+    registry = capability_registry()
+    assert registry["schema_version"] == "revela.factory-capability.v1"
+    assert registry["registry_kind"] == "capability_inventory_not_executable_tool_registry"
+    by_id = {item["capability_id"]: item for item in registry["capabilities"]}
+    assert by_id["evolver.evidence_ledger"]["source_present"] is True
+    assert by_id["evolver.evidence_ledger"]["runtime_state"] == "blocked"
+    assert by_id["genesis.invention_factory"]["runtime_state"] == "not_probed"
+    assert by_id["hardware.robot_blueprints"]["execution_boundary"] == "physical_actuation_disabled"
+
+
+def test_capability_registry_marks_missing_source_without_claiming_runtime_ready(monkeypatch):
+    from core_evolve.capabilities import capability_registry
+
+    monkeypatch.setattr("core_evolve.capabilities._present", lambda module, source_path, root: False)
+    registry = capability_registry()
+    assert all(item["source_present"] is False for item in registry["capabilities"])
+    assert all(item["runtime_state"] == "missing" for item in registry["capabilities"])
+
+
+def test_mind_review_requires_verified_active_genesis_baseline():
+    records = [
+        {
+            "name": "inventory_tool",
+            "version": "1.0.0",
+            "artifact_hash": "a" * 64,
+            "risk_tier": 1,
+            "active": False,
+            "manifest": {"name": "inventory_tool"},
+        },
+        {
+            "name": "inventory_tool",
+            "version": "1.1.0",
+            "artifact_hash": "b" * 64,
+            "risk_tier": 1,
+            "active": True,
+            "manifest": {"name": "inventory_tool"},
+        },
+    ]
+    baseline = _active_tool_baseline(records, "inventory_tool")
+    assert baseline == {
+        "tool_name": "inventory_tool",
+        "version": "1.1.0",
+        "artifact_hash": "b" * 64,
+        "risk_tier": 1,
+    }
+
+
+def test_mind_review_rejects_unverified_or_inactive_baselines():
+    records = [
+        {
+            "name": "inventory_tool",
+            "version": "1.0.0",
+            "artifact_hash": "not-a-hash",
+            "risk_tier": 1,
+            "active": True,
+            "manifest": {"name": "inventory_tool"},
+        },
+        {
+            "name": "other_tool",
+            "version": "1.0.0",
+            "artifact_hash": "c" * 64,
+            "risk_tier": 1,
+            "active": True,
+            "manifest": {"name": "other_tool"},
+        },
+    ]
+    assert _active_tool_baseline(records, "inventory_tool") is None
+
+
+def test_evolver_routes_are_registered_on_native_asgi_app():
+    from asgi import app
+
+    # Current FastAPI's included-router representation may be lazy; resolving
+    # the OpenAPI schema provides the complete mounted route surface.
+    paths = set(app.openapi().get("paths", {}))
+    required = {
+        "/api/usect/evolve/health",
+        "/api/usect/evolve/capabilities",
+        "/api/usect/evolve/learning/{system_id}",
+        "/api/usect/evolve/tools",
+        "/api/usect/evolve/tools/{name}/publish",
+        "/api/usect/evolve/proposals",
+        "/api/usect/evolve/proposals/{proposal_id}/decision",
+        "/api/usect/evolve/proposals/{proposal_id}/children",
+        "/api/usect/evolve/proposals/{proposal_id}/evaluate",
+        "/api/usect/evolve/proposals/{proposal_id}/mind-review",
+    }
+    assert required.issubset(paths), f"Missing Evolver routes: {sorted(required - paths)}"
+
+
+def _operator_request():
+    return Request({
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/api/usect/evolve/capabilities",
+        "raw_path": b"/api/usect/evolve/capabilities",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer verified-session-token")],
+        "server": ("testserver", 443),
+        "client": ("127.0.0.1", 12345),
+    })
+
+
+def test_evolver_uses_verified_revelacode_identity_and_existing_core_mesh_allowlist(monkeypatch):
+    monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "admin-42")
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.resolve_revelacode_user",
+        lambda authorization: ("admin-42", None),
+    )
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.core_mesh_operator_allowed",
+        lambda user_id: user_id == "admin-42",
+    )
+    import asyncio
+    assert asyncio.run(_require_factory_operator(_operator_request())) == "admin-42"
+
+
+def test_evolver_rejects_unallowlisted_authenticated_identity(monkeypatch):
+    monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "admin-42")
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.resolve_revelacode_user",
+        lambda authorization: ("user-7", None),
+    )
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.core_mesh_operator_allowed",
+        lambda user_id: False,
+    )
+    import asyncio
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(_require_factory_operator(_operator_request()))
+    assert error.value.status_code == 403
+
+
+def test_evolver_fails_closed_when_core_mesh_operator_allowlist_is_missing(monkeypatch):
+    monkeypatch.delenv("CORE_MESH_ADMIN_USER_IDS", raising=False)
+    monkeypatch.delenv("META_ENGINEER_ADMIN_USER_IDS", raising=False)
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.resolve_revelacode_user",
+        lambda authorization: ("admin-42", None),
+    )
+    import asyncio
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(_require_factory_operator(_operator_request()))
+    assert error.value.status_code == 503
