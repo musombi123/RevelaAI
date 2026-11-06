@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -67,7 +67,7 @@ async def humanizer_extract_pdf(request: Request, file: UploadFile = File(...)):
         return JSONResponse({"error": {"code": "PDF_TOO_LARGE", "message": "PDF must be 20 MB or smaller."}}, status_code=413)
     try:
         from ai.pdf_processor import process_pdf
-        result = await run_in_threadpool(process_pdf, data, enable_ocr=False)
+        result = await run_in_threadpool(process_pdf, data, enable_ocr=True)
     except Exception as exc:
         LOG.warning("Humanizer PDF extraction failed | error_type=%s", type(exc).__name__)
         return JSONResponse({"error": {"code": "PDF_EXTRACTION_FAILED", "message": "The PDF could not be read. It may be encrypted, damaged, or image-only."}}, status_code=422)
@@ -82,9 +82,9 @@ async def humanizer_extract_pdf(request: Request, file: UploadFile = File(...)):
             "pages": pages,
             "page_count": len(pages),
             "characters": int(result.get("metadata", {}).get("characters") or 0),
-            "ocr_available": False,
+            "ocr_enabled": True,\n            "ocr_pages": int(result.get("metadata", {}).get("ocr_pages") or 0),
             "user_id": user_id,
-            "notice": "PDF text was extracted locally. The original file was not modified or stored. Select a passage to receive local suggestions.",
+            "notice": "PDF text was extracted locally. OCR is attempted when configured. The original file was not modified or stored. Select a passage to receive local suggestions.",
         },
     }
 
