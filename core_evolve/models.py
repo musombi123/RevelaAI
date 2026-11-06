@@ -36,6 +36,13 @@ class EvolutionRequest(StrictModel):
             raise ValueError("entries must not be blank")
         return values
 
+class ToolInventionRequest(StrictModel):
+    """A bounded demand routed to the existing Genesis invention engine."""
+
+    demand: str = Field(min_length=3, max_length=500)
+    country: str = Field(default="KE", min_length=2, max_length=2, pattern=r"^[A-Za-z]{2}$")
+    language: str = Field(default="en", min_length=2, max_length=20)
+
 
 class CandidateProposal(StrictModel):
     proposal_id: str = Field(default_factory=lambda: str(uuid4()))
