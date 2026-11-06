@@ -259,6 +259,7 @@ async def decide_evolution_proposal(
         proposal = _evolver().get(proposal_id)
         result = record_human_decision(
             proposal_id,
+            proposal.system_id,
             body.decision,
             body.rationale,
             reviewer_id,
