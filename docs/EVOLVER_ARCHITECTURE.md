@@ -39,17 +39,17 @@ It is not a second model, a replacement for Genesis, or an unrestricted process 
 
 ## Durable learning record
 
-The canonical database remains the existing `revelai` MongoDB database reached through `revelai.sci_core.storage.collection`. The new `evolution_runs` collection is an append-oriented event ledger.
+The canonical database remains the existing `revelai` MongoDB database reached through `revelai.sci_core.storage.collection`. The new `evolution_runs` collection is both the durable proposal-state store and append-oriented evidence ledger. Production does not depend on a local filesystem copy for proposal retrieval.
 
 The ledger records:
-- proposal and parent IDs, system ID and generation;
+- the privacy-minimized proposal state needed to resume evaluation after a process restart, plus proposal and parent IDs, system ID and generation;
 - a SHA-256 fingerprint of the objective, not the raw objective text;
 - metric names, directions, baselines, observations, targets and pass results;
 - test/security gate booleans and evidence-reference hashes;
 - Genesis tool name/version, risk tier, artifact digest and sandbox result;
 - event timestamps and schema version.
 
-The ledger does not store user prompts, generated source, credentials, full uploaded documents or personal account identifiers. Approved knowledge ingestion is a separate governed learning pathway.
+The original objective is stored only as a SHA-256 fingerprint; the proposal state stores a redacted fingerprint placeholder so evaluation can resume without the original text. The ledger does not store user prompts, generated source, credentials, full uploaded documents or personal account identifiers. Approved knowledge ingestion is a separate governed learning pathway.
 
 If MongoDB is missing or unreachable, Evolver proposal/evaluation operations fail closed. The bounded Sci-Core local cache remains useful for temporary diagnostics only and must never be presented as durable learning.
 
