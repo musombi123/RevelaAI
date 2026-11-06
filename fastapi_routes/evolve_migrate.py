@@ -116,6 +116,16 @@ def _factory_preflight() -> dict[str, object]:
         },
     }
 
+@router.get("/evolve/capabilities")
+async def get_factory_capabilities(
+    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
+    from core_evolve.capabilities import capability_registry
+    return capability_registry()
+
 
 @router.get("/evolve/health")
 async def evolve_health() -> dict[str, object]:
