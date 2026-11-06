@@ -64,6 +64,8 @@ jobs:
           assert not missing, f"Required routes missing: {missing}"
           print(f"FastAPI import and route smoke test passed ({len(required)} required routes).")
           PY
+      - name: Test global research, productivity exports and Humanizer API contracts
+        run: python -m pytest -q tests/test_productivity_research_global.py tests/test_productivity_exports.py tests/test_humanizer_service.py tests/test_humanizer_gemini_routes.py
       - name: Run Genesis registry and Core Mesh integration tests
         run: python -m pytest -q tests/test_genesis_tool_registry.py tests/test_core_mesh.py
       - name: Run USECT evidence inventory, report verification, ordered pipeline and metering tests
