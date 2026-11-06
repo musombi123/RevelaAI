@@ -115,6 +115,7 @@ def record_proposal(proposal: Any) -> None:
             "success_metrics": [metric.model_dump(mode="python") for metric in proposal.success_metrics],
             "guardrails": list(proposal.guardrails[:40]),
             "evidence_refs": [],
+            "brain_category": proposal.brain_category,
             "learning_context": list(proposal.learning_context[:12]),
             "status": "proposed",
             "created_at": proposal.created_at,
