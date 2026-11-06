@@ -7,7 +7,7 @@ import os
 import re
 from functools import lru_cache
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
@@ -22,6 +22,8 @@ from core_migrate.models import DeviceEnrollment, MigrationPlanRequest, RobotBlu
 from core_migrate.service import MigrationError, MigrationService
 from core_billing.licensing import LicenseError
 from core_uncopyable.license_lock import require_entitlement
+from ai.core_mesh import core_mesh_operator_allowed
+from fastapi_routes.auth import resolve_revelacode_user
 
 logger = logging.getLogger("revelaai.evolver")
 
@@ -44,6 +46,39 @@ def _require_organ_token(token: str | None) -> None:
         raise HTTPException(status_code=503, detail="Organ administration is not configured.")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Valid organ administrator token required.")
+
+
+async def _require_factory_operator(request: Request) -> str:
+    """Authenticate with the existing RevelaCode session and Core Mesh operator allowlist."""
+    authorization = request.headers.get("Authorization", "")
+    try:
+        user_id, auth_error = await run_in_threadpool(
+            resolve_revelacode_user, authorization
+        )
+    except Exception as exc:
+        logger.warning("Factory operator authentication could not be verified | error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Core Mesh identity verification is unavailable.") from exc
+    if auth_error is not None or not user_id:
+        status = getattr(auth_error, "status_code", 401) if auth_error is not None else 401
+        raise HTTPException(
+            status_code=status if isinstance(status, int) and 400 <= status <= 599 else 401,
+            detail="A valid RevelaCode session is required for Evolver administration.",
+        )
+    configured = (
+        os.getenv("CORE_MESH_ADMIN_USER_IDS", "")
+        or os.getenv("META_ENGINEER_ADMIN_USER_IDS", "")
+    ).strip()
+    if not configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Configure CORE_MESH_ADMIN_USER_IDS server-side before enabling Evolver administration.",
+        )
+    if not core_mesh_operator_allowed(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This account is not allowlisted as a Core Mesh operator.",
+        )
+    return str(user_id)
 
 
 def _require_enterprise_license(token: str | None, entitlement: str) -> None:
@@ -121,10 +156,10 @@ def _factory_preflight() -> dict[str, object]:
 
 @router.get("/evolve/capabilities")
 async def get_factory_capabilities(
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     from core_evolve.capabilities import capability_registry
     return capability_registry()
@@ -173,10 +208,10 @@ async def evolve_health() -> dict[str, object]:
 @router.post("/evolve/proposals", status_code=201)
 async def create_evolution_proposal(
     body: EvolutionRequest,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         proposal = _evolver().propose(body)
@@ -191,10 +226,10 @@ async def create_evolution_proposal(
 async def recursively_improve_evolver(
     proposal_id: str,
     body: EvolutionRequest,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         proposal = _evolver().propose(body, parent_proposal_id=proposal_id)
@@ -211,10 +246,10 @@ async def recursively_improve_evolver(
 async def evaluate_evolution_proposal(
     proposal_id: str,
     body: EvolutionEvaluationInput,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         report = _evolver().evaluate(proposal_id, body)
@@ -261,11 +296,11 @@ def _active_tool_baseline(records: list[dict], tool_name: str) -> dict[str, obje
 async def review_evolution_with_infinite_mind(
     proposal_id: str,
     body: ToolMindReviewRequest,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     """Ask the existing Infinite Mind core to review an Evolver proposal."""
-    _require_organ_token(x_organ_admin_token)
+    reviewer_id = await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         ensure_available()
@@ -366,11 +401,11 @@ async def review_evolution_with_infinite_mind(
 @router.get("/evolve/learning/{system_id}")
 async def get_evolution_learning(
     system_id: str,
+    request: Request,
     brain_category: str | None = None,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         snapshot = learning_snapshot(system_id, brain_category=brain_category)
@@ -384,11 +419,11 @@ async def get_evolution_learning(
 @router.post("/evolve/tools", status_code=202)
 async def propose_evolved_tool(
     body: ToolInventionRequest,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     """Create a Genesis invention proposal and persist its audit metadata in MongoDB."""
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         ensure_available()
@@ -459,11 +494,11 @@ async def propose_evolved_tool(
 @router.post("/evolve/tools/{name}/publish", status_code=201)
 async def sandbox_and_publish_evolved_tool(
     name: str,
-    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    request: Request,
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     """Run Genesis Guardian/sandbox and publish a signed, immutable candidate."""
-    _require_organ_token(x_organ_admin_token)
+    await _require_factory_operator(request)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         ensure_available()
