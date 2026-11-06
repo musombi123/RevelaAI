@@ -33,3 +33,16 @@ def test_multilingual_language_detection():
 def test_regional_packs_are_config_discoverable():
     regions = {item["id"]: item for item in list_regions()}
     assert {"global", "ke", "africa", "north_america", "europe", "south_asia", "east_asia"} <= set(regions)
+
+def test_country_mapping_and_region_resolver_cover_global_packs():
+    from research_global.engine import _country_code, _region_for_country
+
+    assert _country_code("Brazil") == "BR"
+    assert _country_code("Saudi Arabia") == "SA"
+    assert _country_code("South Korea") == "KR"
+    assert _region_for_country("BR") == "global"
+    assert _region_for_country("SA") == "global"
+    assert _region_for_country("ZA") == "africa"
+    assert _region_for_country("FR") == "europe"
+    assert _region_for_country("IN") == "south_asia"
+    assert _region_for_country("JP") == "east_asia"
