@@ -22,6 +22,7 @@ _TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _EVENT_TYPES = {
     "proposal_created",
     "proposal_evaluated",
+    "proposal_decided",
     "tool_invention_requested",
     "tool_invention_created",
     "tool_published",
@@ -311,6 +312,150 @@ def record_tool_event(
         raise EvolutionLearningUnavailable(
             "MongoDB refused the tool evolution ledger write."
         ) from exc
+
+
+
+def recent_proposals(system_id: str, limit: int = 25) -> list[dict[str, Any]]:
+    """Return privacy-minimized proposal/evaluation/decision summaries from MongoDB."""
+    if not _SYSTEM_ID_RE.fullmatch(str(system_id or "")):
+        raise ValueError("Invalid evolution system identifier.")
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be an integer from 1 to 100")
+    try:
+        rows = list(
+            _mongo_collection()
+            .find({"system_id": system_id})
+            .limit(500)
+        )
+    except EvolutionLearningUnavailable:
+        raise
+    except Exception as exc:
+        raise EvolutionLearningUnavailable("MongoDB proposal history could not be read.") from exc
+
+    def event_time(row: dict[str, Any]):
+        return (
+            row.get("decided_at")
+            or row.get("evaluated_at")
+            or row.get("created_at")
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
+
+    rows.sort(key=event_time, reverse=True)
+    proposals: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        event_type = row.get("event_type")
+        proposal_id = row.get("proposal_id")
+        if not isinstance(proposal_id, str) or not proposal_id:
+            continue
+        if event_type == "proposal_created":
+            state = row.get("proposal_state")
+            if not isinstance(state, dict) or proposal_id in proposals:
+                continue
+            created_at = state.get("created_at") or row.get("created_at")
+            proposals[proposal_id] = {
+                "proposal_id": proposal_id,
+                "system_id": system_id,
+                "parent_proposal_id": state.get("parent_proposal_id"),
+                "generation": state.get("generation"),
+                "objective_fingerprint": state.get("objective"),
+                "brain_category": state.get("brain_category"),
+                "hypotheses": list(state.get("hypotheses") or [])[:40],
+                "proposed_changes": list(state.get("proposed_changes") or [])[:40],
+                "success_metrics": list(state.get("success_metrics") or [])[:12],
+                "guardrails": list(state.get("guardrails") or [])[:40],
+                "learning_context": list(state.get("learning_context") or [])[:12],
+                "status": "proposed",
+                "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else None,
+                "latest_evaluation": None,
+                "human_decision": None,
+            }
+        elif event_type == "proposal_evaluated" and proposal_id in proposals:
+            if proposals[proposal_id]["latest_evaluation"] is None:
+                proposals[proposal_id]["latest_evaluation"] = {
+                    "status": row.get("status"),
+                    "eligible_for_review": row.get("eligible_for_review") is True,
+                    "evidence_complete": row.get("evidence_complete") is True,
+                    "test_passed": row.get("test_passed") is True,
+                    "security_review_passed": row.get("security_review_passed") is True,
+                    "metrics": list(row.get("metrics") or [])[:12],
+                    "evaluated_at": event_time(row).isoformat() if hasattr(event_time(row), "isoformat") else None,
+                }
+                proposals[proposal_id]["status"] = str(row.get("status") or "evaluated")
+        elif event_type == "proposal_decided" and proposal_id in proposals:
+            if proposals[proposal_id]["human_decision"] is None:
+                proposals[proposal_id]["human_decision"] = {
+                    "decision": row.get("decision"),
+                    "rationale_fingerprint": row.get("rationale_sha256"),
+                    "decided_at": event_time(row).isoformat() if hasattr(event_time(row), "isoformat") else None,
+                }
+                proposals[proposal_id]["status"] = str(row.get("decision") or proposals[proposal_id]["status"])
+    result = list(proposals.values())
+    result.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+    return result[:limit]
+
+
+def record_human_decision(
+    proposal_id: str,
+    decision: str,
+    rationale: str,
+    reviewer_id: str,
+) -> dict[str, Any]:
+    """Append a human decision; approval advances to review only, never deploys."""
+    if decision not in {"approve_for_next_stage", "reject"}:
+        raise ValueError("Unsupported human decision.")
+    rationale = " ".join(str(rationale or "").split())
+    if not 3 <= len(rationale) <= 1000:
+        raise ValueError("A decision rationale between 3 and 1000 characters is required.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", str(proposal_id or "")):
+        raise ValueError("Invalid evolution proposal reference.")
+    reviewer_hash = _sha256(str(reviewer_id or ""))
+    if not str(reviewer_id or "").strip():
+        raise ValueError("Verified reviewer identity is required.")
+
+    store = _mongo_collection()
+    latest_evaluation = next(iter(
+        store.find({
+            "proposal_id": proposal_id,
+            "event_type": "proposal_evaluated",
+        }).sort("evaluated_at", -1).limit(1)
+    ), None)
+    if decision == "approve_for_next_stage":
+        if not isinstance(latest_evaluation, dict) or not (
+            latest_evaluation.get("eligible_for_review") is True
+            and latest_evaluation.get("evidence_complete") is True
+            and latest_evaluation.get("test_passed") is True
+            and latest_evaluation.get("security_review_passed") is True
+        ):
+            raise ValueError(
+                "Only a candidate with complete evidence and passed test/security reviews can be approved for the next stage."
+            )
+
+    document = {
+        "schema_version": "revela.evolution-ledger.v1",
+        "event_type": "proposal_decided",
+        "proposal_id": proposal_id,
+        "system_id": str(latest_evaluation.get("system_id") or "") if latest_evaluation else "",
+        "decision": decision,
+        "rationale_sha256": _sha256(rationale),
+        "reviewer_sha256": reviewer_hash,
+        "decided_at": datetime.now(timezone.utc),
+        "production_deployment_authorized": False,
+        "automatic_merge": False,
+    }
+    try:
+        store.insert_one(document)
+    except EvolutionLearningUnavailable:
+        raise
+    except Exception as exc:
+        raise EvolutionLearningUnavailable("MongoDB refused the human decision ledger write.") from exc
+    return {
+        "proposal_id": proposal_id,
+        "decision": decision,
+        "next_stage_review_authorized": decision == "approve_for_next_stage",
+        "production_deployment_authorized": False,
+        "automatic_merge": False,
+        "rationale_persisted_as": "sha256_fingerprint_only",
+    }
 
 
 
