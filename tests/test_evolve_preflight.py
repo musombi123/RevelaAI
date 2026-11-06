@@ -148,7 +148,9 @@ def test_mind_review_rejects_unverified_or_inactive_baselines():
 def test_evolver_routes_are_registered_on_native_asgi_app():
     from asgi import app
 
-    paths = {getattr(route, "path", "") for route in app.routes}
+    # Current FastAPI's included-router representation may be lazy; resolving
+    # the OpenAPI schema provides the complete mounted route surface.
+    paths = set(app.openapi().get("paths", {}))
     required = {
         "/api/usect/evolve/health",
         "/api/usect/evolve/capabilities",
