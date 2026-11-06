@@ -129,6 +129,7 @@ def test_fastapi_openapi_and_docs_are_available() -> None:
     assert "/api/chat" in schema["paths"]
     assert "/api/research" in schema["paths"]
     assert "/api/humanizer/suggest" in schema["paths"]
+    assert "/api/humanizer/generate" in schema["paths"]
     assert "/api/humanizer/pdf/extract" in schema["paths"]
     assert "/api/humanizer/apply" in schema["paths"]
     assert "/api/brain/status" in schema["paths"]
