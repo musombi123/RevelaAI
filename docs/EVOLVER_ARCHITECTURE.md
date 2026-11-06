@@ -34,7 +34,7 @@ It is not a second model, a replacement for Genesis, or an unrestricted process 
 6. **Compare:** Evaluate the candidate against the same baseline using named metrics for task quality, accuracy, latency, reliability, resource use, cost and applicable safety constraints.
 7. **Publish:** Ask Genesis to sign and append the validated artifact to its immutable registry. A published artifact is not automatically a production deployment.
 8. **Activate:** Reuse Genesis activation controls. Tier 1 and Tier 2 artifacts require owner approval bound to the exact artifact digest; Tier 2 actions require separate action approval. Existing Tier 0 activation rules remain in force.
-9. **Learn:** Record privacy-minimized proposal and evaluation evidence in MongoDB. The next proposal can retrieve a bounded history of verified metric outcomes. Temporary local cache is never accepted as durable learning.
+9. **Learn:** Record privacy-minimized proposal and evaluation evidence in MongoDB. The next proposal can retrieve a bounded history of verified metric outcomes and (when a Brain OS category is explicitly supplied) aggregate Brain OS delivery, task-quality, latency and feedback signals. Delivery success is never treated as task-quality success. Temporary local cache is never accepted as durable learning.
 10. **Improve again:** Create a new generation, preserving parentage, evidence, rollback target and the active version. Stop when evidence is insufficient, a safety gate fails, a metric regresses, or the generation budget is exhausted.
 
 ## Durable learning record
@@ -43,6 +43,7 @@ The canonical database remains the existing `revelai` MongoDB database reached t
 
 The ledger records:
 - the privacy-minimized proposal state needed to resume evaluation after a process restart, plus proposal and parent IDs, system ID and generation;
+- an optional declared Brain OS category, allowing domain-specific delivery, task-quality, latency and feedback aggregates to inform the next candidate;
 - a SHA-256 fingerprint of the objective, not the raw objective text;
 - metric names, directions, baselines, observations, targets and pass results;
 - test/security gate booleans and evidence-reference hashes;
