@@ -713,6 +713,9 @@ def test_humanizer_endpoints_require_revelacode_authentication():
     assert suggestion.status_code == 401
     assert suggestion.json()["error"]["code"] == "authentication_required"
 
-    extraction = client.post(\n        "/api/humanizer/pdf/extract",\n        files={"file": ("sample.pdf", b"%PDF-invalid", "application/pdf")},\n    )
+    extraction = client.post(
+        "/api/humanizer/pdf/extract",
+        files={"file": ("sample.pdf", b"%PDF-invalid", "application/pdf")},
+    )
     assert extraction.status_code == 401
     assert extraction.json()["error"]["code"] == "authentication_required"
