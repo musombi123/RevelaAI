@@ -10,6 +10,7 @@ from core_evolve.engine import EvolutionEngine
 from core_evolve.learning import (
     EvolutionLearningUnavailable,
     learning_snapshot,
+    objective_matches_proposal,
     recent_evaluations,
 )
 from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest, MetricTarget
@@ -244,3 +245,14 @@ def test_brain_os_learning_refuses_local_cache(monkeypatch):
     patch_mongo(monkeypatch, FakeMongoCollection(), LocalCollection("brain_outcomes"))
     with pytest.raises(EvolutionLearningUnavailable, match="MongoDB is required"):
         recent_brain_outcomes("engineering")
+
+
+def test_objective_fingerprint_required_before_infinite_mind_review():
+    from types import SimpleNamespace
+    from core_evolve.learning import _sha256
+
+    objective = "Improve the signed inventory tool while preserving its permission boundary."
+    proposal = SimpleNamespace(objective="sha256:" + _sha256(objective))
+    assert objective_matches_proposal(proposal, objective) is True
+    assert objective_matches_proposal(proposal, objective + " change") is False
+    assert objective_matches_proposal(SimpleNamespace(objective=objective), objective) is False
