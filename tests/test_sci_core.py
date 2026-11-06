@@ -186,7 +186,7 @@ class SciCoreIPGuardTests(unittest.TestCase):
         }, clear=False):
             self.assertEqual(
                 ip_guard.client_ip_from_headers(headers, "10.0.0.8"),
-                "10.0.0.8",
+                None,
             )
 
     def test_resolver_uses_configured_cloudflare_client_ip(self):
