@@ -45,6 +45,12 @@ class ToolInventionRequest(StrictModel):
     country: str = Field(default="KE", min_length=2, max_length=2, pattern=r"^[A-Za-z]{2}$")
     language: str = Field(default="en", min_length=2, max_length=20)
 
+class ToolMindReviewRequest(StrictModel):
+    """Re-submit the original objective to Infinite Mind without persisting raw text."""
+
+    tool_name: str = Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    objective: str = Field(min_length=3, max_length=500)
+
 
 class CandidateProposal(StrictModel):
     proposal_id: str = Field(default_factory=lambda: str(uuid4()))
