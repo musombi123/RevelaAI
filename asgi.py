@@ -134,6 +134,41 @@ async def asgi_security_and_throttle(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", "").strip()[:100] or uuid.uuid4().hex
     request.state.request_id = request_id
 
+    # Apply persistent Sci-Core blocks at the RevelaAI ASGI edge. The trusted
+    # client-IP resolver rejects arbitrary forwarded headers unless an operator
+    # explicitly enables the Render/Cloudflare ingress signal.
+    client_ip = None
+    if request.method != "OPTIONS" and path not in {"/health", "/ready", "/_fastapi/health"}:
+        try:
+            from revelai.sci_core.ip_guard import client_ip_from_headers, is_ip_blocked
+
+            peer_host = request.client.host if request.client else None
+            client_ip = client_ip_from_headers(request.headers, peer_host)
+            if client_ip:
+                blocked = await asyncio.to_thread(is_ip_blocked, client_ip)
+                if blocked:
+                    expires = blocked.get("expires_at")
+                    if isinstance(expires, datetime):
+                        expires = expires.isoformat()
+                    response = JSONResponse(
+                        {
+                            "status": "blocked",
+                            "code": "SCI_CORE_IP_BLOCKED",
+                            "message": "This source IP is temporarily blocked by RevelaAI defensive protection.",
+                            "ip": client_ip,
+                            "expires_at": expires,
+                            "reason": str(blocked.get("reason") or "Defensive block")[:300],
+                            "request_id": request_id,
+                        },
+                        status_code=403,
+                        headers={"Retry-After": "300"},
+                    )
+                    return _secure_response(response, request_id)
+        except Exception as exc:
+            # Protection lookups are fail-open during a Mongo outage, but the
+            # IP Guard status endpoint reports degraded and admin mutations fail closed.
+            logger.warning("Sci-Core IP lookup skipped | error_type=%s", type(exc).__name__)
+
     content_length = request.headers.get("content-length")
     if content_length:
         try:
@@ -210,6 +245,37 @@ async def asgi_security_and_throttle(request: Request, call_next):
             return _secure_response(response, request_id)
 
     response = await call_next(request)
+
+    # Count only failed responses from authentication routes. The IP-guard
+    # service persists IP/path/time metadata only (never credentials or JWTs).
+    if response.status_code == 401 and client_ip and (
+        path.startswith("/api/auth/") or path.startswith("/auth/")
+    ):
+        try:
+            from revelai.sci_core.ip_guard import record_failed_authentication
+
+            auto_block = await asyncio.to_thread(
+                record_failed_authentication, client_ip, path
+            )
+            if auto_block:
+                expires = auto_block.get("expires_at")
+                if isinstance(expires, datetime):
+                    expires = expires.isoformat()
+                response = JSONResponse(
+                    {
+                        "status": "blocked",
+                        "code": "SCI_CORE_AUTO_IP_BLOCKED",
+                        "message": "Repeated failed authentication responses triggered a temporary defensive IP block.",
+                        "ip": client_ip,
+                        "expires_at": expires,
+                        "request_id": request_id,
+                    },
+                    status_code=403,
+                    headers={"Retry-After": "1800"},
+                )
+        except Exception as exc:
+            logger.warning("Sci-Core failed-auth signal could not be stored | error_type=%s", type(exc).__name__)
+
     # Normalize JSON error responses from route handlers so every failed request
     # has a stable envelope and correlation ID, not only an X-Request-ID header.
     if response.status_code >= 400 and "application/json" in response.headers.get("content-type", ""):
@@ -269,6 +335,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
             "request_id": request_id,
         }
     return JSONResponse(body, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.on_event("startup")
+def initialize_sci_ip_guard() -> None:
+    """Initialize persistent defensive block/audit indexes without breaking service boot."""
+    try:
+        from revelai.sci_core.ip_guard import ensure_indexes
+        state = ensure_indexes()
+        logger.info("Sci-Core IP protection initialized | storage=%s", state.get("backend"))
+    except Exception as exc:
+        logger.warning(
+            "Sci-Core IP protection degraded at startup | error_type=%s",
+            type(exc).__name__,
+        )
 
 
 @app.on_event("startup")
