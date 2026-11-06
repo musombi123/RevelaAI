@@ -201,13 +201,14 @@ async def evaluate_evolution_proposal(
 @router.get("/evolve/learning/{system_id}")
 async def get_evolution_learning(
     system_id: str,
+    brain_category: str | None = None,
     x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
     x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
 ) -> dict:
     _require_organ_token(x_organ_admin_token)
     _require_enterprise_license(x_revela_license, "evolve")
     try:
-        snapshot = learning_snapshot(system_id)
+        snapshot = learning_snapshot(system_id, brain_category=brain_category)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except EvolutionLearningUnavailable as exc:
