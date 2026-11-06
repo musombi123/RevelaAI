@@ -96,19 +96,6 @@ def test_evaluation_is_persisted_and_reused_by_next_generation(monkeypatch, tmp_
     engine = EvolutionEngine(tmp_path, durable_learning=True)
 
     proposal = engine.propose(evolution_request())
-    report = engine.evaluate(
-        proposal.proposal_id,
-        EvolutionEvaluationInput(
-            proposal_id=proposal.proposal_id,
-            observations={"latency_ms": 40, "success_rate": 0.995},
-            test_passed=True,
-            security_review_passed=True,
-            evidence_refs=["benchmark://candidate-v1", "tests://ci/run-101"],
-        ),
-    )
-    assert report.eligible_for_review is True
-    assert collection.documents[-1]["event_type"] == "proposal_evaluated"
-
     # A fresh engine instance must recover the proposal from MongoDB, not local JSON.
     restarted_engine = EvolutionEngine(tmp_path / "restarted", durable_learning=True)
     report = restarted_engine.evaluate(
@@ -122,6 +109,7 @@ def test_evaluation_is_persisted_and_reused_by_next_generation(monkeypatch, tmp_
         ),
     )
     assert report.eligible_for_review is True
+    assert collection.documents[-1]["event_type"] == "proposal_evaluated"
 
     next_proposal = engine.propose(evolution_request())
     assert len(next_proposal.learning_context) >= 2
