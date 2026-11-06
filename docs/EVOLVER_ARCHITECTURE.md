@@ -1,8 +1,8 @@
 # RevelaAI Evolver — Architecture and Operational Contract
 
-**Status:** Phase 1 implementation  
-**Contract version:** 1.0  
-**Owner:** RevelaAI platform  
+**Status:** Phase 1 implementation
+**Contract version:** 1.0
+**Owner:** RevelaAI platform
 **Primary services:** USECT-EVOLVE, Genesis/Core-One, Brain OS, Sci-Core, Guardian/Sci Defender, signed Genesis tool registry
 
 ## Purpose
