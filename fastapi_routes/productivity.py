@@ -104,9 +104,23 @@ def _caps(tier: str) -> dict[str, int]:
     return dict(PRO_CAPS if tier == "pro" else PLUS_CAPS if tier == "plus" else FREE_CAPS)
 
 
-def _usage_today(user_id: str, tool_id: str) -> int:
-    # Product quotas reset at midnight in the user's platform timezone (Nairobi).
-    local_now = datetime.now(ZoneInfo("Africa/Nairobi"))
+def _request_timezone(request: Request) -> str:
+    """Use a validated browser timezone; default globally to UTC, never a Kenya-only zone."""
+    candidate = str(request.headers.get("X-Timezone") or os.getenv("REVELAAI_QUOTA_TIMEZONE") or "UTC").strip()
+    try:
+        ZoneInfo(candidate)
+        return candidate
+    except Exception:
+        return "UTC"
+
+
+def _usage_today(user_id: str, tool_id: str, timezone_name: str = "UTC") -> int:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except Exception:
+        zone = ZoneInfo("UTC")
+        timezone_name = "UTC"
+    local_now = datetime.now(zone)
     local_midnight = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     start = local_midnight.astimezone(timezone.utc)
     with SessionLocal() as session:
@@ -119,12 +133,12 @@ def _usage_today(user_id: str, tool_id: str) -> int:
         ) or 0)
 
 
-def _enforce_limit(user_id: str, tool_id: str, tier: str) -> int:
+def _enforce_limit(user_id: str, tool_id: str, tier: str, timezone_name: str = "UTC") -> int:
     if not _tool_enabled(tool_id):
         raise HTTPException(status_code=503, detail="This tool is currently disabled by a platform administrator.")
     limits = _caps(tier)
     limit = int(limits.get(tool_id, 0))
-    used = _usage_today(user_id, tool_id)
+    used = _usage_today(user_id, tool_id, timezone_name)
     if limit <= 0:
         raise HTTPException(status_code=402, detail="This productivity tool is not enabled for your current plan.")
     if used >= limit:
@@ -140,7 +154,7 @@ def _enforce_limit(user_id: str, tool_id: str, tier: str) -> int:
 def _record(user_id: str, tool_id: str, country: str, started: float, success: bool) -> None:
     import time
     with SessionLocal() as session:
-        record_usage(session,user_id=user_id,tool_id=tool_id,country=country or "KE",
+        record_usage(session,user_id=user_id,tool_id=tool_id,country=country or "GLOBAL",
                      latency_ms=(time.monotonic()-started)*1000,success=success)
 
 
@@ -185,6 +199,7 @@ def productivity_catalog(request: Request):
     _, user_id = _identity(request)
     tier = _plan_tier(_entitlement(request))
     limits = _caps(tier)
+    quota_timezone = _request_timezone(request)
     return {
         "status":"success","tier":tier,"daily_limits":limits,
         "model":{"provider":get_active_text_provider(),"model":get_active_text_model(),"status":"configured_not_health_checked"},
@@ -192,12 +207,12 @@ def productivity_catalog(request: Request):
                   "enabled":_tool_enabled(tool["id"]),
                   "locked":not _tool_enabled(tool["id"]) or (not tool["free"] and tier=="free"),
                   "daily_limit":limits.get(tool["id"],0),
-                  "daily_used":_usage_today(user_id, tool["id"]),
-                  "remaining":max(0, limits.get(tool["id"],0)-_usage_today(user_id, tool["id"])),
+                  "daily_used":_usage_today(user_id, tool["id"], quota_timezone),
+                  "remaining":max(0, limits.get(tool["id"],0)-_usage_today(user_id, tool["id"], quota_timezone)),
                   "phase_status":"available" if tool["phase"]==1 and _tool_enabled(tool["id"]) else "planned"}
                  for tool in TOOL_CATALOG],
-        "quota_timezone":"Africa/Nairobi",
-        "quota_reset":"00:00 Africa/Nairobi",
+        "quota_timezone":quota_timezone,
+        "quota_reset":"00:00 " + quota_timezone,
         "regions":list_regions(),
         "safety":{"meta_engineer":"required","sci_defender":"required"},
     }
@@ -254,7 +269,7 @@ def admin_set_productivity_tool(tool_id: str, body: AdminToolControlInput, reque
 def global_research(body: ResearchInput, request: Request):
     user_oid,user_id=_identity(request,body.model_dump())
     tier=_plan_tier(_entitlement(request))
-    _enforce_limit(user_id,"research_global",tier)
+    _enforce_limit(user_id,"research_global",tier,_request_timezone(request))
     safety=_safety("research_global",body.model_dump())
     import time
     started=time.monotonic()
@@ -308,7 +323,7 @@ def global_research(body: ResearchInput, request: Request):
         raise HTTPException(status_code=503,detail="Global research providers are temporarily unavailable.") from exc
     result["safety"]={"request":safety,"retrieved_sources":result_safety}
     result["tier"]=tier
-    result["quota_remaining"]=max(0,_caps(tier)["research_global"]-_usage_today(user_id,"research_global"))
+    result["quota_remaining"]=max(0,_caps(tier)["research_global"]-_usage_today(user_id,"research_global",_request_timezone(request)))
     return result
 
 
@@ -317,7 +332,7 @@ def generate_workspace_artifact(body: GenerateInput, request: Request):
     _oid,user_id=_identity(request,{"kind":body.kind})
     tool_id="spreadsheet" if body.kind=="csv" else body.kind
     tier=_plan_tier(_entitlement(request))
-    _enforce_limit(user_id,tool_id,tier)
+    _enforce_limit(user_id,tool_id,tier,_request_timezone(request))
     safety=_safety(tool_id,body.payload)
     import time
     started=time.monotonic()
@@ -326,13 +341,13 @@ def generate_workspace_artifact(body: GenerateInput, request: Request):
         elif body.kind=="word": result=create_word_document(user_id,body.payload)
         elif body.kind=="powerpoint": result=create_powerpoint(user_id,body.payload)
         else: result=create_csv(user_id,body.payload)
-        _record(user_id,tool_id,request.headers.get("X-Country","KE"),started,True)
+        _record(user_id,tool_id,request.headers.get("X-Country","GLOBAL"),started,True)
         result["safety"]=safety
         result["tier"]=tier
-        result["quota_remaining"]=max(0,_caps(tier)[tool_id]-_usage_today(user_id,tool_id))
+        result["quota_remaining"]=max(0,_caps(tier)[tool_id]-_usage_today(user_id,tool_id,_request_timezone(request)))
         return {"status":"success","artifact":result}
     except ValueError as exc:
-        _record(user_id,tool_id,"KE",started,False)
+        _record(user_id,tool_id,request.headers.get("X-Country","GLOBAL"),started,False)
         raise HTTPException(status_code=422,detail=str(exc)) from exc
     except Exception as exc:
         _record(user_id,tool_id,"KE",started,False)
@@ -355,7 +370,7 @@ def download_productivity_file(file_id: str, expires: int, sig: str):
 def run_sandbox(body: SandboxInput, request: Request):
     _oid,user_id=_identity(request,{"tool":"sandbox_python"})
     tier=_plan_tier(_entitlement(request))
-    _enforce_limit(user_id,"sandbox_python",tier)
+    _enforce_limit(user_id,"sandbox_python",tier,_request_timezone(request))
     payload=body.model_dump()
     safety=_safety("sandbox_python",payload)
     base=os.getenv("SANDBOX_SERVICE_URL","").strip().rstrip("/")
