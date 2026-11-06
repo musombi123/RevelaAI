@@ -262,6 +262,14 @@ async def ip_guard_status(request: Request):
 def _manual_block(payload: dict, actor: str, current_ip: str | None):
     from revelai.sci_core.ip_guard import IPGuardStoreUnavailable, block_ip
 
+    if not current_ip:
+        return JSONResponse(
+            {
+                "error": "The administrator's public client IP could not be verified. Configure the trusted Render proxy header before creating an IP block.",
+                "blocked": False,
+            },
+            status_code=503,
+        )
     if payload.get("confirm") is not True:
         return JSONResponse(
             {"error": "Explicit confirmation is required before blocking an IP."},
@@ -290,6 +298,11 @@ def _manual_block(payload: dict, actor: str, current_ip: str | None):
     except IPGuardStoreUnavailable as exc:
         return JSONResponse(
             {"error": str(exc), "status": "degraded", "blocked": False},
+            status_code=503,
+        )
+    except Exception:
+        return JSONResponse(
+            {"error": "Persistent IP block storage is unavailable; no block was confirmed.", "status": "degraded", "blocked": False},
             status_code=503,
         )
 
@@ -333,6 +346,11 @@ def _manual_unblock(payload: dict, actor: str):
     except IPGuardStoreUnavailable as exc:
         return JSONResponse(
             {"error": str(exc), "status": "degraded"},
+            status_code=503,
+        )
+    except Exception:
+        return JSONResponse(
+            {"error": "Persistent IP block storage is unavailable; unblock status could not be verified.", "status": "degraded"},
             status_code=503,
         )
 
