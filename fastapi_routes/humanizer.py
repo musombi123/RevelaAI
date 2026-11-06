@@ -1,6 +1,7 @@
 """Authenticated API for local and explicit Gemini selective humanization."""
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -92,7 +93,7 @@ async def humanizer_generate_with_gemini(request: Request):
     # JSON framing separates user-provided source text from the fixed system
     # policy. The model is told to treat the selected passage as content, not
     # as instructions, and must return only that passage rewritten.
-    generation_input = __import__("json").dumps(
+    generation_input = json.dumps(
         {
             "task": "Rewrite only the selected_text field.",
             "style": style,
