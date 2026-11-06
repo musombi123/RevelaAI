@@ -104,7 +104,7 @@ A feature flag alone does not make a capability available.
 
 - Evolver proposal and evaluation history is durably written to MongoDB using the existing Sci-Core storage connection.
 - MongoDB fallback to `LocalCollection` is rejected for learning operations.
-- Subsequent proposals can include bounded historical metric signals from prior evaluations.
+- Subsequent proposals can include bounded historical metric signals from prior evaluations and optional Brain OS category-level outcomes; delivery and task-quality evidence remain separate.
 - Creating an invention calls the existing Genesis invention pipeline.
 - Publishing a tool calls the existing Guardian, sandbox and signed Genesis registry path.
 - New routes use the existing organ-admin and enterprise-evolve entitlement checks.
