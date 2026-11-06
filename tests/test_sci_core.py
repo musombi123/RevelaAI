@@ -282,5 +282,38 @@ class SciCoreIPGuardTests(unittest.TestCase):
         self.assertIn("confirmation", response.json()["error"])
 
 
+    def test_x_forwarded_for_uses_configured_trusted_hops_from_right(self):
+        headers = {
+            "x-forwarded-for": "9.9.9.9, 1.1.1.1, 10.0.0.1, 10.0.0.2",
+        }
+        with patch.dict(os.environ, {
+            "REVELAAI_TRUST_PROXY_HEADERS": "true",
+            "REVELAAI_TRUSTED_PROXY_HOPS": "2",
+            "REVELAAI_TRUST_CLOUDFLARE_IP_HEADER": "",
+        }, clear=False):
+            self.assertEqual(
+                ip_guard.client_ip_from_headers(headers, "10.0.0.3"),
+                "1.1.1.1",
+            )
+
+    def test_manual_block_fails_closed_when_admin_client_ip_is_unresolved(self):
+        with patch(
+            "fastapi_routes.sci_core.require_platform_admin",
+            return_value=("admin-123", None),
+        ), patch("fastapi_routes.sci_core._request_client_ip", return_value=None):
+            response = client.post(
+                "/api/sci/ip-guard/block",
+                json={
+                    "ip": "1.1.1.1",
+                    "reason": "Repeated suspicious requests",
+                    "duration_minutes": 30,
+                    "confirm": True,
+                },
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(response.json()["blocked"])
+        self.assertIn("public client IP could not be verified", response.json()["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
