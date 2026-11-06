@@ -6,15 +6,20 @@ Sci-Core IP Guard is a **persistent application-edge control for the RevelaAI AS
 
 The IP Guard is intentionally unavailable when durable MongoDB storage is unavailable. Keep the existing \`MONGO_URI\` configured for the RevelaAI service.
 
-For a standard Render web-service ingress, Render's current guidance is to resolve the client address from \`X-Forwarded-For\` because requests pass through Cloudflare and Render load balancers. Configure the trusted proxy count only after confirming the actual header shape for your service:
+For a standard Render public web-service ingress, use Cloudflare's client-IP header:
 
-- \`REVELAAI_TRUST_PROXY_HEADERS=true\`
-- \`REVELAAI_TRUSTED_PROXY_HOPS=2\` for the normal Cloudflare + Render proxy chain, provided the service's observed \`X-Forwarded-For\` has the client address followed by those two trusted proxy hops.
+- `REVELAAI_TRUST_CLOUDFLARE_IP_HEADER=true`
 
-The resolver selects from the right by the configured number of trusted hops. Do not use \`REVELAAI_TRUST_PROXY_HEADERS=true\` with an unverified hop count; an incorrect count can identify a proxy or a spoofed address rather than the real client.
+Render states that inbound public web-service traffic passes through Cloudflare. Cloudflare documents `CF-Connecting-IP` as the single visitor IP header sent to the origin and recommends it over parsing `X-Forwarded-For`. Enable this setting only for the Render service behind its normal Cloudflare ingress. Do not expose a separate untrusted origin path that bypasses that ingress while trusting this header.
 
-An alternative is \`REVELAAI_TRUST_CLOUDFLARE_IP_HEADER=true\`, but enable it only when you have confirmed that requests reach the service through your trusted Cloudflare/Render ingress and that \`CF-Connecting-IP\` is set by that ingress. The resolver does not trust \`X-Real-IP\`. When no trusted public client address can be established, IP-based blocking is not applied and the status endpoint does not claim a verified client IP.
+Fallback for a separately verified proxy chain only:
 
+- `REVELAAI_TRUST_PROXY_HEADERS=true`
+- `REVELAAI_TRUSTED_PROXY_HOPS=<verified number of trusted proxy hops>`
+
+The fallback selects from the right based on the configured hop count. Do not copy an assumed value such as 1 or 2 without observing the actual header chain for the service. An incorrect count can select a proxy or an attacker-supplied address. Do not trust `X-Real-IP`.
+
+When no trusted public client address can be established, IP-based blocking is not applied and the status endpoint does not claim a verified client IP.
 Optional administrator safety allowlist:
 
 - \`SCI_CORE_IP_ALLOWLIST=<your-stable-admin-public-ip>/32\`
