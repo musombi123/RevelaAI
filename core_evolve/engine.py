@@ -145,7 +145,7 @@ class EvolutionEngine:
 
         notes = []
         if not evidence_complete:
-            notes.append("Supply measurements for every target and at least one evidence reference.")
+            notes.append("Supply measurements for every target and at least one candidate evidence reference.")
         if not safety_passed:
             notes.append("Both the test suite and independent security review must pass.")
         if not all_metrics_pass:
