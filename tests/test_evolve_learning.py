@@ -37,6 +37,11 @@ class FakeMongoCollection:
 
     def __init__(self):
         self.documents = []
+        self.indexes = []
+
+    def create_index(self, keys, name=None):
+        self.indexes.append((keys, name))
+        return name
 
     def insert_one(self, document):
         self.documents.append(deepcopy(document))
@@ -178,3 +183,18 @@ def test_learning_snapshot_returns_aggregate_metric_signals(monkeypatch):
         "samples": 2, "pass_count": 1, "pass_rate": 0.5
     }
     assert snapshot["raw_prompts_included"] is False
+
+
+def test_mongodb_learning_initializes_query_indexes(monkeypatch):
+    collection = FakeMongoCollection()
+    patch_mongo(monkeypatch, collection)
+    from core_evolve.learning import ensure_available, _INDEXES_READY, _INDEX_LOCK
+    with _INDEX_LOCK:
+        # Reset module state only within this isolated test.
+        import core_evolve.learning as learning
+        learning._INDEXES_READY = False
+    ensure_available()
+    assert [name for _keys, name in collection.indexes] == [
+        "evolution_proposal_lookup",
+        "evolution_system_history",
+    ]
