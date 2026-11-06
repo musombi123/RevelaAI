@@ -21,14 +21,14 @@ Optional administrator safety allowlist:
 - For IPv6, use \`<your-stable-admin-ipv6>/128\`.
 - Multiple addresses/networks are comma-separated.
 
-The allowlist is checked before both manual and automatic blocks. The API also refuses to block the public IP used by the administrator's current session when it can reliably resolve it. Add stable administrator egress addresses before enabling automatic blocking on a shared service.
+The allowlist is checked before both manual and automatic blocks. Automatic blocking is disabled until at least one stable administrator egress IP/network has been explicitly allowlisted. The API also refuses to block the public IP used by the administrator's current session when it can reliably resolve it. This prevents a burst of expired-admin-token requests on an administrator's shared network from locking out the operator.
 
 ## What is enforced
 
 - Manual block: one exact, globally routable IPv4 or IPv6 address. CIDR ranges, private addresses, loopback, multicast, unspecified and documentation/test ranges are rejected.
 - Duration: 5 minutes through 7 days. The dashboard offers 15 minutes through 7 days.
 - Reason: required and audited.
-- Automatic response: 50 HTTP 401 responses from the same public IP within a rolling 5-minute window on \`/api/auth/\`, \`/auth/\`, or \`/api/sci/\` endpoints creates a 30-minute \`auto_bruteforce\` block.
+- Automatic response: only after SCI_CORE_IP_ALLOWLIST is configured, 50 HTTP 401 responses from the same non-allowlisted public IP within a rolling 5-minute window on \`/api/auth/\`, \`/auth/\`, or \`/api/sci/\` endpoints creates a 30-minute \`auto_bruteforce\` block.
 - Unblock: administrator-only, reasoned and audited.
 - Audit: actor, source, IP, reason, action and timestamp. Failed-auth records contain IP, endpoint path and timestamp only; authorization headers, passwords, request bodies and tokens are never persisted.
 
