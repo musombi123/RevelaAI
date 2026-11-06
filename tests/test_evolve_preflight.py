@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from fastapi_routes.evolve_migrate import FactoryPreflightBlocked, _factory_preflight
+from fastapi_routes.evolve_migrate import (\n    FactoryPreflightBlocked, _active_tool_baseline, _factory_preflight,\n)
 
 
 def architecture_snapshot(*, parse_error: bool = False):
@@ -91,3 +91,53 @@ def test_capability_registry_marks_missing_source_without_claiming_runtime_ready
     registry = capability_registry()
     assert all(item["source_present"] is False for item in registry["capabilities"])
     assert all(item["runtime_state"] == "missing" for item in registry["capabilities"])
+
+
+def test_mind_review_requires_verified_active_genesis_baseline():
+    records = [
+        {
+            "name": "inventory_tool",
+            "version": "1.0.0",
+            "artifact_hash": "a" * 64,
+            "risk_tier": 1,
+            "active": False,
+            "manifest": {"name": "inventory_tool"},
+        },
+        {
+            "name": "inventory_tool",
+            "version": "1.1.0",
+            "artifact_hash": "b" * 64,
+            "risk_tier": 1,
+            "active": True,
+            "manifest": {"name": "inventory_tool"},
+        },
+    ]
+    baseline = _active_tool_baseline(records, "inventory_tool")
+    assert baseline == {
+        "tool_name": "inventory_tool",
+        "version": "1.1.0",
+        "artifact_hash": "b" * 64,
+        "risk_tier": 1,
+    }
+
+
+def test_mind_review_rejects_unverified_or_inactive_baselines():
+    records = [
+        {
+            "name": "inventory_tool",
+            "version": "1.0.0",
+            "artifact_hash": "not-a-hash",
+            "risk_tier": 1,
+            "active": True,
+            "manifest": {"name": "inventory_tool"},
+        },
+        {
+            "name": "other_tool",
+            "version": "1.0.0",
+            "artifact_hash": "c" * 64,
+            "risk_tier": 1,
+            "active": True,
+            "manifest": {"name": "other_tool"},
+        },
+    ]
+    assert _active_tool_baseline(records, "inventory_tool") is None
