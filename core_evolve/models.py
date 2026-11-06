@@ -27,6 +27,7 @@ class EvolutionRequest(StrictModel):
     metrics: list[MetricTarget] = Field(min_length=1, max_length=12)
     constraints: list[str] = Field(default_factory=list, max_length=30)
     evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+    brain_category: Literal["general", "coding", "research", "community", "biashara", "shamba", "elimu", "scripture", "security", "engineering"] | None = None
     requested_depth: int = Field(default=1, ge=1, le=3)
     twin_baseline: dict[str, float] = Field(default_factory=dict, max_length=20)
 
@@ -56,6 +57,7 @@ class CandidateProposal(StrictModel):
     success_metrics: list[MetricTarget]
     guardrails: list[str]
     evidence_refs: list[str]
+    brain_category: Literal["general", "coding", "research", "community", "biashara", "shamba", "elimu", "scripture", "security", "engineering"] | None = None
     learning_context: list[str] = Field(default_factory=list, max_length=12)
     status: Literal["proposed", "evaluated", "approved", "rejected", "rolled_back"] = "proposed"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
