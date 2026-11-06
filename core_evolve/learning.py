@@ -24,6 +24,7 @@ _EVENT_TYPES = {
     "tool_invention_requested",
     "tool_invention_created",
     "tool_published",
+    "tool_improvement_proposed",
 }
 _INDEX_LOCK = Lock()
 _INDEXES_READY = False
@@ -262,9 +263,11 @@ def record_tool_event(
     version: str | None = None,
     risk_tier: int | None = None,
     sandbox_passed: bool | None = None,
+    evolver_proposal_id: str | None = None,
+    mind_proposal_id: str | None = None,
 ) -> None:
-    """Persist non-content metadata for Genesis invention and publication events."""
-    if event_type not in {"tool_invention_requested", "tool_invention_created", "tool_published"}:
+    """Persist privacy-minimized metadata for Genesis and Infinite Mind events."""
+    if event_type not in {"tool_invention_requested", "tool_invention_created", "tool_published", "tool_improvement_proposed"}:
         raise ValueError("Unsupported tool evolution event.")
     if tool_name is not None and not _TOOL_NAME_RE.fullmatch(tool_name):
         raise ValueError("Invalid Genesis tool identifier.")
@@ -272,6 +275,9 @@ def record_tool_event(
         raise ValueError("Invalid signed artifact digest.")
     if risk_tier is not None and (type(risk_tier) is not int or risk_tier not in {0, 1, 2}):
         raise ValueError("Invalid tool risk tier.")
+    for proposal_ref in (evolver_proposal_id, mind_proposal_id):
+        if proposal_ref is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", proposal_ref):
+            raise ValueError("Invalid evolution proposal reference.")
 
     document = {
         "schema_version": "revela.evolution-ledger.v1",
@@ -283,6 +289,8 @@ def record_tool_event(
         "tool_version": str(version or "")[:64] or None,
         "risk_tier": risk_tier,
         "sandbox_passed": sandbox_passed,
+        "evolver_proposal_id": evolver_proposal_id,
+        "mind_proposal_id": mind_proposal_id,
         "created_at": datetime.now(timezone.utc),
     }
     try:
