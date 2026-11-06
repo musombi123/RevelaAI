@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from core_evolve.engine import EvolutionEngine, EvolutionError
+from core_evolve.engine import EvolutionEngine
 from core_evolve.learning import (
     EvolutionLearningUnavailable,
     learning_snapshot,
@@ -137,7 +137,7 @@ def test_evaluation_requires_candidate_evidence_not_only_baseline_reference(tmp_
 def test_production_proposal_is_not_accepted_when_mongo_is_unavailable(monkeypatch, tmp_path):
     patch_mongo(monkeypatch, LocalCollection("evolution_runs"))
     engine = EvolutionEngine(tmp_path, durable_learning=True)
-    with pytest.raises(EvolutionError, match="MongoDB learning history is unavailable"):
+    with pytest.raises(EvolutionLearningUnavailable, match="MongoDB is required"):
         engine.propose(evolution_request())
     assert list(tmp_path.glob("*.json")) == []
 
