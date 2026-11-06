@@ -152,19 +152,20 @@ _CATALOG: tuple[FactoryCapability, ...] = (
 
 
 def _present(module: str | None, source_path: str | None, root: Path) -> bool:
+    checks: list[bool] = []
     if source_path:
         candidate = (root / source_path).resolve()
         try:
             candidate.relative_to(root.resolve())
         except ValueError:
             return False
-        return candidate.is_file()
+        checks.append(candidate.is_file())
     if module:
         try:
-            return importlib.util.find_spec(module) is not None
+            checks.append(importlib.util.find_spec(module) is not None)
         except (ImportError, ModuleNotFoundError, ValueError):
             return False
-    return False
+    return bool(checks) and all(checks)
 
 
 def capability_registry() -> dict[str, Any]:
