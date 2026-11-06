@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from fastapi_routes.evolve_migrate import (\n    FactoryPreflightBlocked, _active_tool_baseline, _factory_preflight,\n)
+from fastapi_routes.evolve_migrate import (
+    FactoryPreflightBlocked, _active_tool_baseline, _factory_preflight,
+)
 
 
 def architecture_snapshot(*, parse_error: bool = False):
