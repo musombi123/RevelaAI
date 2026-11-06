@@ -12,6 +12,8 @@ from core_evolve.learning import (
     learning_snapshot,
     objective_matches_proposal,
     recent_evaluations,
+    recent_proposals,
+    record_human_decision,
 )
 from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest, MetricTarget
 from revelai.sci_core.storage import LocalCollection
@@ -256,3 +258,86 @@ def test_objective_fingerprint_required_before_infinite_mind_review():
     assert objective_matches_proposal(proposal, objective) is True
     assert objective_matches_proposal(proposal, objective + " change") is False
     assert objective_matches_proposal(SimpleNamespace(objective=objective), objective) is False
+
+
+def test_proposal_history_combines_creation_evaluation_and_decision_without_raw_text(monkeypatch, tmp_path):
+    collection = FakeMongoCollection()
+    patch_mongo(monkeypatch, collection)
+    engine = EvolutionEngine(tmp_path, durable_learning=True)
+    proposal = engine.propose(evolution_request())
+    engine.evaluate(
+        proposal.proposal_id,
+        EvolutionEvaluationInput(
+            proposal_id=proposal.proposal_id,
+            observations={"latency_ms": 40, "success_rate": 0.995},
+            test_passed=True,
+            security_review_passed=True,
+            evidence_refs=["benchmark://candidate-v1"],
+        ),
+    )
+    decision = record_human_decision(
+        proposal.proposal_id,
+        proposal.system_id,
+        "approve_for_next_stage",
+        "Evidence and safety checks are complete; proceed to the next engineering review.",
+        "verified-admin-123",
+    )
+    assert decision["next_stage_review_authorized"] is True
+    assert decision["production_deployment_authorized"] is False
+
+    history = recent_proposals("tool.factory")
+    assert len(history) == 1
+    item = history[0]
+    assert item["proposal_id"] == proposal.proposal_id
+    assert item["objective_fingerprint"].startswith("sha256:")
+    assert item["latest_evaluation"]["eligible_for_review"] is True
+    assert item["human_decision"]["decision"] == "approve_for_next_stage"
+    assert proposal.objective not in str(item)
+    assert "Evidence and safety checks are complete" not in str(collection.documents)
+
+
+def test_human_approval_fails_without_complete_evidence(monkeypatch, tmp_path):
+    collection = FakeMongoCollection()
+    patch_mongo(monkeypatch, collection)
+    engine = EvolutionEngine(tmp_path, durable_learning=True)
+    proposal = engine.propose(evolution_request())
+    engine.evaluate(
+        proposal.proposal_id,
+        EvolutionEvaluationInput(
+            proposal_id=proposal.proposal_id,
+            observations={"latency_ms": 40},
+            test_passed=True,
+            security_review_passed=False,
+            evidence_refs=["benchmark://candidate-v1"],
+        ),
+    )
+    with pytest.raises(ValueError, match="complete evidence"):
+        record_human_decision(
+            proposal.proposal_id,
+            proposal.system_id,
+            "approve_for_next_stage",
+            "Review this candidate.",
+            "verified-admin-123",
+        )
+
+
+def test_human_decision_is_single_use_and_cannot_be_overwritten(monkeypatch, tmp_path):
+    collection = FakeMongoCollection()
+    patch_mongo(monkeypatch, collection)
+    engine = EvolutionEngine(tmp_path, durable_learning=True)
+    proposal = engine.propose(evolution_request())
+    record_human_decision(
+        proposal.proposal_id,
+        proposal.system_id,
+        "reject",
+        "The candidate objective needs a new generation.",
+        "verified-admin-123",
+    )
+    with pytest.raises(ValueError, match="already has a human decision"):
+        record_human_decision(
+            proposal.proposal_id,
+            proposal.system_id,
+            "approve_for_next_stage",
+            "Actually approve it.",
+            "verified-admin-123",
+        )
