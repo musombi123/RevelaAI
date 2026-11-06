@@ -270,6 +270,11 @@ async def review_evolution_with_infinite_mind(
     try:
         ensure_available()
         proposal = _evolver().get(proposal_id)
+        if proposal.system_id not in {body.tool_name, "tool." + body.tool_name}:
+            raise HTTPException(
+                status_code=409,
+                detail="The Evolver proposal is not scoped to the named tool.",
+            )
         from core_evolve.learning import objective_matches_proposal
         if not objective_matches_proposal(proposal, body.objective):
             raise HTTPException(
