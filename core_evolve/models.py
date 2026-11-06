@@ -105,3 +105,10 @@ class EvolutionEvaluationInput(StrictModel):
         if any(not isfinite(value) for value in values.values()):
             raise ValueError("observations must contain only finite numbers")
         return values
+
+
+class EvolutionDecisionInput(StrictModel):
+    """A recorded human gate before the next engineering stage; never a deployment."""
+
+    decision: Literal["approve_for_next_stage", "reject"]
+    rationale: str = Field(min_length=3, max_length=1000)
