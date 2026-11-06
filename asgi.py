@@ -249,7 +249,9 @@ async def asgi_security_and_throttle(request: Request, call_next):
     # Count only failed responses from authentication routes. The IP-guard
     # service persists IP/path/time metadata only (never credentials or JWTs).
     if response.status_code == 401 and client_ip and (
-        path.startswith("/api/auth/") or path.startswith("/auth/")
+        path.startswith("/api/auth/")
+        or path.startswith("/auth/")
+        or path.startswith("/api/sci/")
     ):
         try:
             from revelai.sci_core.ip_guard import record_failed_authentication
