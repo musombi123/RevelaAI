@@ -48,6 +48,7 @@ class CandidateProposal(StrictModel):
     success_metrics: list[MetricTarget]
     guardrails: list[str]
     evidence_refs: list[str]
+    learning_context: list[str] = Field(default_factory=list, max_length=12)
     status: Literal["proposed", "evaluated", "approved", "rejected", "rolled_back"] = "proposed"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
