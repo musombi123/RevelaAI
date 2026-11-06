@@ -50,58 +50,6 @@ PROTECTED_PATTERNS = (
     re.compile(r"\b(?:19|20)\d{2}\b"),
     re.compile(r"\b\d+(?:\.\d+)?%"),
     re.compile(r"\b[A-Z]{2,6}\b"),
-)"Local, deterministic, selective humanization suggestions.
-
-This module never calls an LLM or external service. It proposes conservative
-word/phrase alternatives for text explicitly selected by the user. It does not
-rewrite whole documents, claim to bypass AI detectors, or alter source files.
-"""
-from __future__ import annotations
-
-import re
-from typing import Any
-
-MAX_SELECTION_CHARS = 4_000
-MAX_CONTEXT_CHARS = 1_000
-
-# Conservative phrase substitutions. Entries are suggestions, not universal
-# synonyms; the API returns rationale and requires explicit user acceptance.
-PHRASE_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
-    (r"\bin order to\b", ("to",), "Shorten a wordy construction."),
-    (r"\bdue to the fact that\b", ("because",), "Use a more direct connector."),
-    (r"\bat this point in time\b", ("now", "currently"), "Replace a wordy time expression."),
-    (r"\bfor the purpose of\b", ("to", "for"), "Use a more concise phrase."),
-    (r"\bin the event that\b", ("if",), "Use a direct conditional."),
-    (r"\bwith regard to\b", ("about", "regarding"), "Use a clearer connector."),
-    (r"\bmake use of\b", ("use",), "Prefer the direct verb."),
-    (r"\bhas the ability to\b", ("can",), "Prefer a concise modal verb."),
-    (r"\ba large number of\b", ("many",), "Use a concise quantifier."),
-    (r"\ba small number of\b", ("few",), "Use a concise quantifier."),
-    (r"\bthe majority of\b", ("most",), "Use a concise quantifier."),
-    (r"\bin spite of the fact that\b", ("although", "even though"), "Simplify the contrast."),
-    (r"\bit is important to note that\b", ("notably,", "Importantly,"), "Remove a stock introductory phrase."),
-    (r"\bthere are a number of\b", ("there are several", "several"), "Reduce unnecessary wording."),
-    (r"\butilize\b", ("use",), "Prefer a familiar verb."),
-    (r"\bdemonstrate\b", ("show", "illustrate"), "Offer a more natural verb."),
-    (r"\bcommence\b", ("begin", "start"), "Prefer a familiar verb."),
-    (r"\bterminate\b", ("end", "stop"), "Prefer a familiar verb."),
-    (r"\bapproximately\b", ("about", "roughly"), "Offer a more conversational alternative."),
-    (r"\bsubsequently\b", ("later", "afterward"), "Offer a simpler transition."),
-    (r"\bfurthermore\b", ("also", "in addition"), "Vary a formal transition."),
-    (r"\bmoreover\b", ("also", "besides"), "Vary a formal transition."),
-    (r"\btherefore\b", ("so", "as a result"), "Offer a more natural transition."),
-    (r"\bfacilitate\b", ("help", "make easier"), "Prefer a clearer verb."),
-    (r"\bnecessitate\b", ("require", "call for"), "Prefer a familiar verb."),
-    (r"\bendeavour\b", ("effort", "attempt"), "Offer a simpler alternative."),
-    (r"\bendeavor\b", ("effort", "attempt"), "Offer a simpler alternative."),
-)
-
-PROTECTED_PATTERNS = (
-    re.compile(r"\\b(?:https?://|www\\.)\\S+", re.I),
-    re.compile(r"\\b[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}\\b"),
-    re.compile(r"\\b(?:19|20)\\d{2}\\b"),
-    re.compile(r"\\b\\d+(?:\\.\\d+)?%\\b"),
-    re.compile(r"\\b(?:[A-Z]{2,}|[A-Z][a-z]+(?:[A-Z][a-z]+)+)\\b"),
 )
 
 
