@@ -6,9 +6,11 @@ import os
 from functools import lru_cache
 
 from fastapi import APIRouter, Header, HTTPException
+from starlette.concurrency import run_in_threadpool
 
 from core_evolve.engine import EvolutionEngine, EvolutionError
-from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest
+from core_evolve.models import EvolutionEvaluationInput, EvolutionRequest, ToolInventionRequest
+from core_evolve.learning import (\n    EvolutionLearningUnavailable, ensure_available, learning_snapshot, record_tool_event,\n)
 from core_migrate.models import DeviceEnrollment, MigrationPlanRequest, RobotBlueprintRequest
 from core_migrate.service import MigrationError, MigrationService
 from core_billing.licensing import LicenseError
@@ -98,6 +100,131 @@ async def evaluate_evolution_proposal(
     except EvolutionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"evaluation": report.model_dump(mode="json")}
+
+
+@router.get("/evolve/learning/{system_id}")
+async def get_evolution_learning(
+    system_id: str,
+    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
+    try:
+        snapshot = learning_snapshot(system_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"learning": snapshot}
+
+
+@router.post("/evolve/tools", status_code=202)
+async def propose_evolved_tool(
+    body: ToolInventionRequest,
+    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    """Create a Genesis invention proposal and persist its audit metadata in MongoDB."""
+    _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
+    try:
+        ensure_available()
+        record_tool_event(
+            "tool_invention_requested",
+            demand=body.demand,
+            status="requested",
+        )
+        from ai.core_mesh import propose_genesis_invention
+
+        proposal = await run_in_threadpool(
+            propose_genesis_invention,
+            body.demand,
+            body.country,
+            body.language,
+        )
+        tool_name = proposal.get("name") or proposal.get("tool_name")
+        record_tool_event(
+            "tool_invention_created",
+            demand=body.demand,
+            tool_name=str(tool_name) if tool_name else None,
+            status=str(proposal.get("status") or "await_merge"),
+        )
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        # Do not leak upstream tokens, internal URLs, or raw exception contents.
+        logger = __import__("logging").getLogger("revelaai.evolver")
+        logger.warning("Genesis invention request failed | error_type=%s", type(exc).__name__)
+        status = getattr(exc, "status_code", 502)
+        raise HTTPException(
+            status_code=status if isinstance(status, int) and 400 <= status <= 599 else 502,
+            detail="Genesis could not complete the invention proposal. Check the Core-One status and retry.",
+        ) from exc
+    return {
+        "proposal": proposal,
+        "factory": "Genesis",
+        "learning_ledger": "mongodb",
+        "human_approval_required": True,
+        "automatic_merge": False,
+        "production_deployment": False,
+        "physical_actuation_enabled": False,
+    }
+
+
+@router.post("/evolve/tools/{name}/publish", status_code=201)
+async def sandbox_and_publish_evolved_tool(
+    name: str,
+    x_organ_admin_token: str | None = Header(default=None, alias="X-Organ-Admin-Token"),
+    x_revela_license: str | None = Header(default=None, alias="X-Revela-License"),
+) -> dict:
+    """Run Genesis Guardian/sandbox and publish a signed, immutable candidate."""
+    _require_organ_token(x_organ_admin_token)
+    _require_enterprise_license(x_revela_license, "evolve")
+    try:
+        ensure_available()
+        from ai.tool_registry import GenesisToolRegistryError, publish_signed_tool
+
+        published = await run_in_threadpool(publish_signed_tool, name)
+        artifact = published.get("artifact", {}) if isinstance(published, dict) else {}
+        manifest = artifact.get("manifest", {}) if isinstance(artifact, dict) else {}
+        evidence = artifact.get("sandbox_evidence", {}) if isinstance(artifact, dict) else {}
+        artifact_hash = artifact.get("artifact_hash") if isinstance(artifact, dict) else None
+        version = artifact.get("version") if isinstance(artifact, dict) else None
+        risk_tier = manifest.get("risk_tier") if isinstance(manifest, dict) else None
+        sandbox_passed = evidence.get("passed") if isinstance(evidence, dict) else None
+        record_tool_event(
+            "tool_published",
+            demand="",
+            tool_name=name,
+            status=str(published.get("status") or "signed"),
+            artifact_hash=str(artifact_hash) if artifact_hash else None,
+            version=str(version) if version else None,
+            risk_tier=risk_tier if type(risk_tier) is int else None,
+            sandbox_passed=sandbox_passed if isinstance(sandbox_passed, bool) else None,
+        )
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        error_code = getattr(exc, "code", "")
+        status = getattr(exc, "status_code", 502)
+        if error_code:
+            raise HTTPException(
+                status_code=status if isinstance(status, int) and 400 <= status <= 599 else 502,
+                detail=str(exc),
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail="Genesis Guardian or sandbox publication failed; no tool was reported as published.",
+        ) from exc
+    return {
+        "publication": published,
+        "learning_ledger": "mongodb",
+        "execution_performed": False,
+        "production_deployment": False,
+        "tier_1_and_2_activation_requires_owner_approval": True,
+        "tier_2_actions_require_separate_action_approval": True,
+    }
 
 
 @router.get("/migrate/devices")
