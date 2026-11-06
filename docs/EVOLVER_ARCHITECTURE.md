@@ -106,6 +106,7 @@ A feature flag alone does not make a capability available.
 - MongoDB fallback to `LocalCollection` is rejected for learning operations.
 - Subsequent proposals can include bounded historical metric signals from prior evaluations and optional Brain OS category-level outcomes; delivery and task-quality evidence remain separate.
 - Creating an invention calls the existing Genesis invention pipeline.
+- Existing Evolver proposals can be submitted to the existing Infinite Mind/Core-Two review path using an objective fingerprint check; no raw objective text is persisted.
 - Publishing a tool calls the existing Guardian, sandbox and signed Genesis registry path.
 - New routes use the existing organ-admin and enterprise-evolve entitlement checks.
 - No new route executes generated code in the RevelaAI Python process.
@@ -129,5 +130,6 @@ All endpoints below are under `/api/usect` and use the existing `X-Organ-Admin-T
 | POST | `/evolve/proposals` | Create a bounded metric-driven evolution proposal |
 | POST | `/evolve/proposals/{proposal_id}/children` | Create a bounded child proposal |
 | POST | `/evolve/proposals/{proposal_id}/evaluate` | Evaluate candidate measurements and persist results |
+| POST | `/evolve/proposals/{proposal_id}/mind-review` | Ask existing Infinite Mind/Core-Two to review a proposal after objective fingerprint verification |
 
 Existing Genesis/Core Mesh endpoints remain the activation, rollback and execution control plane. Do not implement parallel endpoints that duplicate them.
