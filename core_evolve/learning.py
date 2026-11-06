@@ -294,13 +294,93 @@ def record_tool_event(
         ) from exc
 
 
-def learning_snapshot(system_id: str, limit: int = 8) -> dict[str, Any]:
+
+_BRAIN_CATEGORIES = {
+    "general", "coding", "research", "community", "biashara",
+    "shamba", "elimu", "scripture", "security", "engineering",
+}
+
+
+def recent_brain_outcomes(category: str, limit: int = 200) -> dict[str, Any]:
+    """Aggregate privacy-minimized Brain OS outcomes for one declared domain."""
+    if category not in _BRAIN_CATEGORIES:
+        raise ValueError("Unsupported Brain OS category.")
+    if type(limit) is not int or not 1 <= limit <= 500:
+        raise ValueError("limit must be an integer from 1 to 500")
+    try:
+        from revelai.sci_core.storage import collection
+        store = collection("brain_outcomes")
+        if getattr(store, "backend", None) == "local_cache":
+            raise EvolutionLearningUnavailable(
+                "MongoDB is required for durable Brain OS learning evidence."
+            )
+        rows = list(
+            store.find({"category": category})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+    except EvolutionLearningUnavailable:
+        raise
+    except Exception as exc:
+        raise EvolutionLearningUnavailable(
+            "Brain OS outcome history is unavailable from MongoDB."
+        ) from exc
+
+    delivery: list[bool] = []
+    task_quality: list[bool] = []
+    latencies: list[int] = []
+    feedback: dict[str, int] = {}
+    providers: dict[str, int] = {}
+    for row in rows:
+        delivered = row.get("delivery_success")
+        if not isinstance(delivered, bool):
+            delivered = row.get("success")
+        if isinstance(delivered, bool):
+            delivery.append(delivered)
+        task_success = row.get("task_success")
+        if isinstance(task_success, bool):
+            task_quality.append(task_success)
+        latency = row.get("latency_ms")
+        if type(latency) is int and 0 <= latency <= 600000:
+            latencies.append(latency)
+        label = row.get("feedback_label")
+        if isinstance(label, str) and label in {"helpful", "unhelpful", "correct", "incorrect", "resolved", "unresolved"}:
+            feedback[label] = feedback.get(label, 0) + 1
+        provider = row.get("provider")
+        if isinstance(provider, str) and provider:
+            providers[provider[:80]] = providers.get(provider[:80], 0) + 1
+
+    latencies.sort()
+    median_latency = None
+    if latencies:
+        middle = len(latencies) // 2
+        median_latency = (
+            latencies[middle] if len(latencies) % 2
+            else round((latencies[middle - 1] + latencies[middle]) / 2)
+        )
+    return {
+        "category": category,
+        "sample_count": len(rows),
+        "delivery_samples": len(delivery),
+        "delivery_rate": round(sum(delivery) / len(delivery), 3) if delivery else None,
+        "task_quality_samples": len(task_quality),
+        "task_success_rate": round(sum(task_quality) / len(task_quality), 3) if task_quality else None,
+        "median_latency_ms": median_latency,
+        "feedback_counts": feedback,
+        "provider_counts": providers,
+        "source": "brain_os_mongodb",
+        "raw_user_content_included": False,
+    }
+
+
+
+def learning_snapshot(system_id: str, limit: int = 8, brain_category: str | None = None) -> dict[str, Any]:
     evaluations = recent_evaluations(system_id, limit)
     metric_rows: dict[str, list[bool]] = {}
     for evaluation in evaluations:
         for metric in evaluation["metrics"]:
             metric_rows.setdefault(metric["name"], []).append(metric["passed"])
-    return {
+    snapshot = {
         "system_id": system_id,
         "evaluation_count": len(evaluations),
         "recent_evaluations": evaluations,
@@ -316,3 +396,6 @@ def learning_snapshot(system_id: str, limit: int = 8) -> dict[str, Any]:
         "raw_prompts_included": False,
         "generated_source_included": False,
     }
+    if brain_category is not None:
+        snapshot["brain_os"] = recent_brain_outcomes(brain_category)
+    return snapshot
