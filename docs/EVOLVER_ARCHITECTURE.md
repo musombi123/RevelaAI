@@ -112,12 +112,17 @@ A feature flag alone does not make a capability available.
 - Tests prove no raw objective/source material is written to the evolution ledger, fallback is rejected, learning context is reused and candidate evidence is required.
 - CI passes before this branch is considered merge-ready.
 
+## Capability contract
+
+The machine-readable inventory lives in `core_evolve/capabilities.py` under schema `revela.factory-capability.v1`. It is not a second executable tool registry: Genesis owns signed tool manifests and versions. Each capability records its owner, domain, dependencies, lifecycle, runtime-probe type, approval policy and execution boundary. The inventory never turns source presence into runtime readiness; external services remain `not_probed` until a real health probe is available.
+
 ## API surface introduced by Phase 1
 
 All endpoints below are under `/api/usect` and use the existing `X-Organ-Admin-Token` plus `X-Revela-License` gates.
 
 | Method | Route | Effect |
 | --- | --- | --- |
+| GET | `/evolve/capabilities` | Read the versioned capability inventory without claiming unprobed dependencies are online |
 | GET | `/evolve/learning/{system_id}` | Read MongoDB-backed evaluation signals |
 | POST | `/evolve/tools` | Create an invention proposal through Genesis; no publication |
 | POST | `/evolve/tools/{name}/publish` | Guardian + sandbox + signed registry publication; no gateway execution |
