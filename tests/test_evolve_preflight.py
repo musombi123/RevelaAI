@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import pytest
 
+from fastapi import HTTPException
+from starlette.requests import Request
+
 from fastapi_routes.evolve_migrate import (
-    FactoryPreflightBlocked, _active_tool_baseline, _factory_preflight,
+    FactoryPreflightBlocked, _active_tool_baseline, _factory_preflight, _require_factory_operator,
 )
 
 
@@ -158,8 +161,67 @@ def test_evolver_routes_are_registered_on_native_asgi_app():
         "/api/usect/evolve/tools",
         "/api/usect/evolve/tools/{name}/publish",
         "/api/usect/evolve/proposals",
+        "/api/usect/evolve/proposals/{proposal_id}/decision",
         "/api/usect/evolve/proposals/{proposal_id}/children",
         "/api/usect/evolve/proposals/{proposal_id}/evaluate",
         "/api/usect/evolve/proposals/{proposal_id}/mind-review",
     }
     assert required.issubset(paths), f"Missing Evolver routes: {sorted(required - paths)}"
+
+
+def _operator_request():
+    return Request({
+        "type": "http",
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "https",
+        "path": "/api/usect/evolve/capabilities",
+        "raw_path": b"/api/usect/evolve/capabilities",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer verified-session-token")],
+        "server": ("testserver", 443),
+        "client": ("127.0.0.1", 12345),
+    })
+
+
+def test_evolver_uses_verified_revelacode_identity_and_existing_core_mesh_allowlist(monkeypatch):
+    monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "admin-42")
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.resolve_revelacode_user",
+        lambda authorization: ("admin-42", None),
+    )
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.core_mesh_operator_allowed",
+        lambda user_id: user_id == "admin-42",
+    )
+    import asyncio
+    assert asyncio.run(_require_factory_operator(_operator_request())) == "admin-42"
+
+
+def test_evolver_rejects_unallowlisted_authenticated_identity(monkeypatch):
+    monkeypatch.setenv("CORE_MESH_ADMIN_USER_IDS", "admin-42")
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.resolve_revelacode_user",
+        lambda authorization: ("user-7", None),
+    )
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.core_mesh_operator_allowed",
+        lambda user_id: False,
+    )
+    import asyncio
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(_require_factory_operator(_operator_request()))
+    assert error.value.status_code == 403
+
+
+def test_evolver_fails_closed_when_core_mesh_operator_allowlist_is_missing(monkeypatch):
+    monkeypatch.delenv("CORE_MESH_ADMIN_USER_IDS", raising=False)
+    monkeypatch.delenv("META_ENGINEER_ADMIN_USER_IDS", raising=False)
+    monkeypatch.setattr(
+        "fastapi_routes.evolve_migrate.resolve_revelacode_user",
+        lambda authorization: ("admin-42", None),
+    )
+    import asyncio
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(_require_factory_operator(_operator_request()))
+    assert error.value.status_code == 503
