@@ -143,3 +143,21 @@ def test_mind_review_rejects_unverified_or_inactive_baselines():
         },
     ]
     assert _active_tool_baseline(records, "inventory_tool") is None
+
+
+def test_evolver_routes_are_registered_on_native_asgi_app():
+    from asgi import app
+
+    paths = {getattr(route, "path", "") for route in app.routes}
+    required = {
+        "/api/usect/evolve/health",
+        "/api/usect/evolve/capabilities",
+        "/api/usect/evolve/learning/{system_id}",
+        "/api/usect/evolve/tools",
+        "/api/usect/evolve/tools/{name}/publish",
+        "/api/usect/evolve/proposals",
+        "/api/usect/evolve/proposals/{proposal_id}/children",
+        "/api/usect/evolve/proposals/{proposal_id}/evaluate",
+        "/api/usect/evolve/proposals/{proposal_id}/mind-review",
+    }
+    assert required.issubset(paths), f"Missing Evolver routes: {sorted(required - paths)}"
