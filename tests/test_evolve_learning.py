@@ -84,6 +84,8 @@ def test_proposal_ledger_hashes_objective_and_omits_raw_prompt(monkeypatch, tmp_
     proposal = engine.propose(evolution_request())
     assert collection.documents[0]["event_type"] == "proposal_created"
     assert collection.documents[0]["objective_sha256"]
+    assert collection.documents[0]["proposal_state"]["objective"].startswith("sha256:")
+    assert collection.documents[0]["proposal_state"]["evidence_refs"] == []
     assert "Reduce latency while preserving safety and output quality." not in str(collection.documents)
     assert proposal.learning_context == []
 
@@ -106,6 +108,20 @@ def test_evaluation_is_persisted_and_reused_by_next_generation(monkeypatch, tmp_
     )
     assert report.eligible_for_review is True
     assert collection.documents[-1]["event_type"] == "proposal_evaluated"
+
+    # A fresh engine instance must recover the proposal from MongoDB, not local JSON.
+    restarted_engine = EvolutionEngine(tmp_path / "restarted", durable_learning=True)
+    report = restarted_engine.evaluate(
+        proposal.proposal_id,
+        EvolutionEvaluationInput(
+            proposal_id=proposal.proposal_id,
+            observations={"latency_ms": 40, "success_rate": 0.995},
+            test_passed=True,
+            security_review_passed=True,
+            evidence_refs=["benchmark://candidate-v1", "tests://ci/run-101"],
+        ),
+    )
+    assert report.eligible_for_review is True
 
     next_proposal = engine.propose(evolution_request())
     assert len(next_proposal.learning_context) >= 2
