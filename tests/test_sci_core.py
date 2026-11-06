@@ -315,5 +315,54 @@ class SciCoreIPGuardTests(unittest.TestCase):
         self.assertIn("public client IP could not be verified", response.json()["error"])
 
 
+    def test_asgi_middleware_rejects_a_persisted_blocked_source_before_route(self):
+        blocked = {
+            "ip": "1.1.1.1",
+            "reason": "Repeated suspicious requests",
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+        }
+        with patch("revelai.sci_core.ip_guard.client_ip_from_headers", return_value="1.1.1.1"), patch(
+            "revelai.sci_core.ip_guard.is_ip_blocked", return_value=blocked
+        ):
+            response = client.get("/api/sci/ip-guard/status")
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["code"], "SCI_CORE_IP_BLOCKED")
+
+    def test_unblock_releases_the_persistent_record_and_writes_audit(self):
+        database = _FakeDatabase()
+        with patch.object(ip_guard, "_mongo_db", return_value=database), patch.dict(
+            os.environ, {"SCI_CORE_IP_ALLOWLIST": ""}, clear=False
+        ):
+            ip_guard.block_ip(
+                "1.1.1.1",
+                actor="admin-123",
+                reason="Repeated suspicious application requests",
+                current_ip="8.8.8.8",
+            )
+            result = ip_guard.unblock_ip(
+                "1.1.1.1",
+                actor="admin-123",
+                reason="Administrator reviewed and cleared this source.",
+            )
+            self.assertEqual(result["status"], "unblocked")
+            self.assertIsNone(ip_guard.is_ip_blocked("1.1.1.1"))
+            self.assertEqual(database["sci_ip_block_events"].count_documents({}), 2)
+
+    def test_expired_block_is_deactivated_on_the_next_source_request(self):
+        database = _FakeDatabase()
+        with patch.object(ip_guard, "_mongo_db", return_value=database), patch.dict(
+            os.environ, {"SCI_CORE_IP_ALLOWLIST": ""}, clear=False
+        ):
+            ip_guard.block_ip(
+                "1.1.1.1",
+                actor="admin-123",
+                reason="Repeated suspicious application requests",
+                current_ip="8.8.8.8",
+            )
+            database["sci_ip_blocks"].rows[0]["expires_at"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+            self.assertIsNone(ip_guard.is_ip_blocked("1.1.1.1"))
+            self.assertFalse(database["sci_ip_blocks"].rows[0]["active"])
+
+
 if __name__ == "__main__":
     unittest.main()
