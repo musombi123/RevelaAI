@@ -60,7 +60,7 @@ class EvolutionEngine:
             raise KeyError(proposal_id)
         return CandidateProposal.model_validate_json(path.read_text(encoding="utf-8"))
 
-    def _learned_context(self, system_id: str) -> list[str]:
+    def _learned_context(self, system_id: str, brain_category: str | None = None) -> list[str]:
         if not self.durable_learning:
             return []
         try:
@@ -72,6 +72,23 @@ class EvolutionEngine:
             raise EvolutionError("MongoDB learning history is unavailable; evolution is blocked.") from exc
 
         context: list[str] = []
+        if brain_category is not None:
+            try:
+                from .learning import recent_brain_outcomes
+                brain = recent_brain_outcomes(brain_category)
+            except Exception as exc:
+                raise EvolutionError("Brain OS MongoDB outcome history is unavailable; evolution is blocked.") from exc
+            context.append(
+                "Brain OS category %s: samples=%s, delivery_rate=%s, task_success_rate=%s, median_latency_ms=%s, feedback=%s."
+                % (
+                    brain.get("category"),
+                    brain.get("sample_count"),
+                    brain.get("delivery_rate"),
+                    brain.get("task_success_rate"),
+                    brain.get("median_latency_ms"),
+                    brain.get("feedback_counts"),
+                )
+            )
         for evaluation in evaluations:
             for metric in evaluation.get("metrics", [])[:12]:
                 if metric.get("observed") is None:
@@ -93,7 +110,7 @@ class EvolutionEngine:
         return context
 
     def propose(self, request: EvolutionRequest, *, parent_proposal_id: str | None = None) -> CandidateProposal:
-        learning_context = self._learned_context(request.system_id)
+        learning_context = self._learned_context(request.system_id, request.brain_category)
         generation = 1
         if parent_proposal_id:
             parent = self.get(parent_proposal_id)
@@ -147,6 +164,7 @@ class EvolutionEngine:
                 "Never claim a performance multiplier without benchmark evidence.",
             ],
             evidence_refs=request.evidence_refs,
+            brain_category=request.brain_category,
             learning_context=learning_context,
         )
         if self.durable_learning:
