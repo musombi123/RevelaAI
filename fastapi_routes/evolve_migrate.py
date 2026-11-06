@@ -85,6 +85,8 @@ async def create_evolution_proposal(
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         proposal = _evolver().propose(body)
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except EvolutionError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"proposal": proposal.model_dump(mode="json"), "deployment_authorized": False}
@@ -101,6 +103,8 @@ async def recursively_improve_evolver(
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         proposal = _evolver().propose(body, parent_proposal_id=proposal_id)
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Parent proposal not found.") from exc
     except EvolutionError as exc:
@@ -119,6 +123,8 @@ async def evaluate_evolution_proposal(
     _require_enterprise_license(x_revela_license, "evolve")
     try:
         report = _evolver().evaluate(proposal_id, body)
+    except EvolutionLearningUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Proposal not found.") from exc
     except EvolutionError as exc:
