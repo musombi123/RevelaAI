@@ -206,3 +206,146 @@ async def prototype(request: Request):
     if not isinstance(payload, dict):
         payload = {}
     return await run_in_threadpool(_prototype, payload)
+
+
+def _request_client_ip(request: Request) -> str | None:
+    from revelai.sci_core.ip_guard import client_ip_from_headers
+    peer = request.client.host if request.client else None
+    return client_ip_from_headers(request.headers, peer)
+
+
+def _ip_guard_snapshot(request: Request) -> dict:
+    from revelai.sci_core.ip_guard import (
+        IPGuardStoreUnavailable,
+        ensure_indexes,
+        list_active_blocks,
+        list_recent_auth_failures,
+        list_recent_events,
+        protection_status,
+    )
+
+    state = protection_status()
+    payload = {
+        **state,
+        "client_ip": _request_client_ip(request),
+        "active_blocks": [],
+        "recent_events": [],
+        "recent_auth_failures": [],
+        "defensive_only": True,
+    }
+    if not state.get("persistent"):
+        return payload
+    try:
+        ensure_indexes()
+        payload["active_blocks"] = list_active_blocks(100)
+        payload["recent_events"] = list_recent_events(50)
+        payload["recent_auth_failures"] = list_recent_auth_failures(50)
+        payload["active_block_count"] = len(payload["active_blocks"])
+        return payload
+    except IPGuardStoreUnavailable as exc:
+        payload.update({
+            "status": "degraded",
+            "persistent": False,
+            "error": str(exc),
+        })
+        return payload
+
+
+@router.get("/ip-guard/status")
+async def ip_guard_status(request: Request):
+    _actor, error = _authorized(request)
+    if error:
+        return error
+    return await run_in_threadpool(_ip_guard_snapshot, request)
+
+
+def _manual_block(payload: dict, actor: str, current_ip: str | None):
+    from revelai.sci_core.ip_guard import IPGuardStoreUnavailable, block_ip
+
+    if payload.get("confirm") is not True:
+        return JSONResponse(
+            {"error": "Explicit confirmation is required before blocking an IP."},
+            status_code=400,
+        )
+    try:
+        result = block_ip(
+            payload.get("ip"),
+            actor=actor,
+            reason=payload.get("reason", ""),
+            duration_minutes=payload.get("duration_minutes", 60),
+            source="manual",
+            current_ip=current_ip,
+        )
+        return JSONResponse(
+            {
+                **result,
+                "enforcement": "application_edge",
+                "message": "The IP is now blocked by the RevelaAI ASGI application edge.",
+                "host_firewall_changed": False,
+            },
+            status_code=201,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except IPGuardStoreUnavailable as exc:
+        return JSONResponse(
+            {"error": str(exc), "status": "degraded", "blocked": False},
+            status_code=503,
+        )
+
+
+@router.post("/ip-guard/block")
+async def ip_guard_block(request: Request):
+    actor, error = _authorized(request)
+    if error:
+        return error
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return await run_in_threadpool(
+        _manual_block, payload, actor or "unknown", _request_client_ip(request)
+    )
+
+
+def _manual_unblock(payload: dict, actor: str):
+    from revelai.sci_core.ip_guard import IPGuardStoreUnavailable, unblock_ip
+
+    reason = str(payload.get("reason") or "Administrator released the block").strip()
+    try:
+        if len(reason) < 8 or len(reason) > 300:
+            raise ValueError("Enter an unblock reason between 8 and 300 characters.")
+        result = unblock_ip(
+            payload.get("ip"),
+            actor=actor,
+            reason=reason,
+        )
+        return {
+            **result,
+            "enforcement": "application_edge",
+            "message": "The active RevelaAI application-edge block has been released.",
+            "host_firewall_changed": False,
+        }
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except IPGuardStoreUnavailable as exc:
+        return JSONResponse(
+            {"error": str(exc), "status": "degraded"},
+            status_code=503,
+        )
+
+
+@router.post("/ip-guard/unblock")
+async def ip_guard_unblock(request: Request):
+    actor, error = _authorized(request)
+    if error:
+        return error
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return await run_in_threadpool(_manual_unblock, payload, actor or "unknown")
