@@ -396,6 +396,7 @@ def recent_proposals(system_id: str, limit: int = 25) -> list[dict[str, Any]]:
 
 def record_human_decision(
     proposal_id: str,
+    system_id: str,
     decision: str,
     rationale: str,
     reviewer_id: str,
@@ -408,11 +409,22 @@ def record_human_decision(
         raise ValueError("A decision rationale between 3 and 1000 characters is required.")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", str(proposal_id or "")):
         raise ValueError("Invalid evolution proposal reference.")
+    if not _SYSTEM_ID_RE.fullmatch(str(system_id or "")):
+        raise ValueError("Invalid evolution system identifier.")
     reviewer_hash = _sha256(str(reviewer_id or ""))
     if not str(reviewer_id or "").strip():
         raise ValueError("Verified reviewer identity is required.")
 
     store = _mongo_collection()
+    existing_decision = next(iter(
+        store.find({
+            "proposal_id": proposal_id,
+            "event_type": "proposal_decided",
+        }).sort("decided_at", -1).limit(1)
+    ), None)
+    if existing_decision is not None:
+        raise ValueError("This proposal already has a human decision. Create a new child proposal for another review cycle.")
+
     latest_evaluation = next(iter(
         store.find({
             "proposal_id": proposal_id,
@@ -434,7 +446,7 @@ def record_human_decision(
         "schema_version": "revela.evolution-ledger.v1",
         "event_type": "proposal_decided",
         "proposal_id": proposal_id,
-        "system_id": str(latest_evaluation.get("system_id") or "") if latest_evaluation else "",
+        "system_id": system_id,
         "decision": decision,
         "rationale_sha256": _sha256(rationale),
         "reviewer_sha256": reviewer_hash,
