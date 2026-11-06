@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any
 
 class EvolutionLearningUnavailable(RuntimeError):
@@ -24,6 +25,8 @@ _EVENT_TYPES = {
     "tool_invention_created",
     "tool_published",
 }
+_INDEX_LOCK = Lock()
+_INDEXES_READY = False
 
 
 def _sha256(value: str) -> str:
@@ -49,6 +52,26 @@ def _mongo_collection():
         raise EvolutionLearningUnavailable(
             "MongoDB evolution collection does not expose the required persistence contract."
         )
+
+    global _INDEXES_READY
+    create_index = getattr(store, "create_index", None)
+    if callable(create_index) and not _INDEXES_READY:
+        with _INDEX_LOCK:
+            if not _INDEXES_READY:
+                try:
+                    create_index(
+                        [("proposal_id", 1), ("event_type", 1)],
+                        name="evolution_proposal_lookup",
+                    )
+                    create_index(
+                        [("system_id", 1), ("event_type", 1), ("evaluated_at", -1)],
+                        name="evolution_system_history",
+                    )
+                except Exception as exc:
+                    raise EvolutionLearningUnavailable(
+                        "MongoDB evolution indexes could not be initialized."
+                    ) from exc
+                _INDEXES_READY = True
     return store
 
 
