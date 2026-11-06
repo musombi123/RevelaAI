@@ -41,6 +41,19 @@ def run_daily_learning_cycle(run_date: date | None = None, force: bool = False):
     day = (run_date or datetime.now(timezone.utc).date()).isoformat()
     from revelai.sci_core.storage import collection
     store = collection("research")
+    # Daily AI learning is durable platform knowledge, not a disposable cache.
+    # Sci-Core may return LocalCollection when MongoDB is missing/unreachable;
+    # never report a learning cycle as persisted in that fallback.
+    if getattr(store, "backend", None) == "local_cache":
+        logger.error("Daily learning skipped: MongoDB research collection is unavailable")
+        return {
+            "status": "mongo_unavailable",
+            "run_date": day,
+            "source_count": 0,
+            "candidate_count": 0,
+            "persisted": False,
+            "reason": "MongoDB is required for durable AI learning.",
+        }
     if not force and store.count_documents({"kind": "daily_gemini_learning", "run_date": day}):
         return {"status": "already_completed", "run_date": day}
 
