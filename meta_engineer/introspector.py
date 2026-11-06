@@ -8,7 +8,7 @@ PROTECTED = ["fastapi_routes/auth.py", "fastapi_routes/admin_auth.py", "revelai/
 
 def scan_architecture() -> dict[str, Any]:
     """Walk source roots and map Python imports without writing files."""
-    roots = [ROOT / "fastapi_routes", ROOT / "revelai", ROOT / "services", ROOT / "ai", ROOT / "models", ROOT / "automation_fabric", ROOT / "meta_engineer"]
+    roots = [ROOT / "fastapi_routes", ROOT / "revelai", ROOT / "services", ROOT / "ai", ROOT / "models", ROOT / "automation_fabric", ROOT / "meta_engineer", ROOT / "core_evolve", ROOT / "core_migrate"]
     structure, dependencies, schemas, files = {}, {}, {}, []
     for root in roots:
         if not root.is_dir(): continue
