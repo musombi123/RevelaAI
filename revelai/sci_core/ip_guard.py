@@ -382,7 +382,8 @@ def protection_status() -> dict[str, Any]:
             "storage": "mongodb",
             "status": "active",
             "active_blocks": int(active),
-            "automatic_blocking": True,
+            "automatic_blocking": bool(_allowlist()),
+            "auto_block_requires_allowlist": True,
             "auto_block_threshold": _AUTO_BLOCK_THRESHOLD,
             "auto_block_window_seconds": _AUTO_BLOCK_WINDOW_SECONDS,
             "auto_block_duration_minutes": _AUTO_BLOCK_DURATION_MINUTES,
@@ -396,6 +397,7 @@ def protection_status() -> dict[str, Any]:
             "status": "degraded",
             "active_blocks": 0,
             "automatic_blocking": False,
+            "auto_block_requires_allowlist": True,
             "error": str(exc),
             "allowlist_configured": bool(_allowlist()),
         }
@@ -414,7 +416,9 @@ def record_failed_authentication(ip: str | None, path: str) -> dict[str, Any] | 
         or path.startswith("/auth/")
         or path.startswith("/api/sci/")
     )
-    if not ip or not eligible_path:
+    if not ip or not eligible_path or not _allowlist():
+        # Automatic response stays disabled until the operator has explicitly
+        # allowlisted stable administrator egress IP ranges.
         return None
     try:
         normalized = ipaddress.ip_address(ip).compressed
