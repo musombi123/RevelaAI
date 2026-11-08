@@ -1,7 +1,4 @@
 """Identity-header consistency tests for the native FastAPI Smart Memory router."""
-import time
-
-import jwt
 from fastapi.testclient import TestClient
 
 from asgi import app
@@ -13,36 +10,18 @@ TEST_SECRET = "native-fastapi-test-secret"
 
 
 def _install_verified_test_identity(monkeypatch):
-    monkeypatch.setattr(auth_module, "JWT_SECRET", TEST_SECRET)
-    monkeypatch.setattr(auth_module, "REVELAAI_SERVICE_KEY", "test-service-key")
-
-    class VerifiedUserResponse:
-        status_code = 200
-
-        @staticmethod
-        def json():
-            return {"exists": True, "userId": USER_ID}
-
+    token = "opaque-test-platform-session"
     monkeypatch.setattr(
-        auth_module.requests,
-        "get",
-        lambda *args, **kwargs: VerifiedUserResponse(),
-    )
-
-    token = jwt.encode(
-        {
-            "sub": USER_ID,
-            "user_id": USER_ID,
-            "iat": int(time.time()),
-            "exp": int(time.time()) + 300,
-        },
-        TEST_SECRET,
-        algorithm="HS256",
+        auth_module,
+        "resolve_revelacode_user",
+        lambda authorization: (USER_ID, None)
+        if authorization == "Bearer " + token
+        else (None, None),
     )
     return token
 
 
-def test_header_must_match_signed_token(monkeypatch):
+def test_header_must_match_authoritative_platform_identity(monkeypatch):
     token = _install_verified_test_identity(monkeypatch)
     client = TestClient(app)
     response = client.post(
@@ -57,7 +36,7 @@ def test_header_must_match_signed_token(monkeypatch):
     assert response.json()["code"] == "user_identity_mismatch"
 
 
-def test_body_cannot_conflict_with_valid_identity_header(monkeypatch):
+def test_body_cannot_conflict_with_authoritative_platform_identity(monkeypatch):
     token = _install_verified_test_identity(monkeypatch)
     client = TestClient(app)
     response = client.post(
