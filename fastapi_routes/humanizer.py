@@ -5,8 +5,8 @@ import json
 import logging
 from typing import Any
 
-from fastapi import APIRouter, File, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 from fastapi_routes.auth import resolve_revelacode_user
@@ -186,11 +186,25 @@ async def humanizer_extract_pdf(request: Request, file: UploadFile = File(...)):
     try:
         from ai.pdf_processor import process_pdf
         result = await run_in_threadpool(process_pdf, data, enable_ocr=True)
+        from services.humanizer_pdf_service import inspect_pdf_layout
+        try:
+            layout = await run_in_threadpool(inspect_pdf_layout, data)
+        except Exception as layout_exc:
+            LOG.warning("Humanizer PDF layout inspection failed | error_type=%s", type(layout_exc).__name__)
+            layout = []
     except Exception as exc:
         LOG.warning("Humanizer PDF extraction failed | error_type=%s", type(exc).__name__)
         return JSONResponse({"error": {"code": "PDF_EXTRACTION_FAILED", "message": "The PDF could not be read. It may be encrypted, damaged, or image-only."}}, status_code=422)
+    layout_by_page = {int(item.get("page") or 0): item for item in layout}
     pages = [
-        {"page": int(page.get("page") or index + 1), "text": str(page.get("text") or ""), "characters": int(page.get("characters") or 0), "extraction_method": str(page.get("method") or "native")}
+        {
+            "page": int(page.get("page") or index + 1),
+            "text": str(page.get("text") or ""),
+            "characters": int(page.get("characters") or 0),
+            "extraction_method": str(page.get("method") or "native"),
+            "layout_supported": bool(layout_by_page.get(int(page.get("page") or index + 1), {}).get("layout_supported", False)),
+            "layout_reason": str(layout_by_page.get(int(page.get("page") or index + 1), {}).get("reason") or ""),
+        }
         for index, page in enumerate(result.get("pages", []))
     ]
     return {
@@ -203,7 +217,7 @@ async def humanizer_extract_pdf(request: Request, file: UploadFile = File(...)):
             "ocr_enabled": True,
             "ocr_pages": int(result.get("metadata", {}).get("ocr_pages") or 0),
             "user_id": user_id,
-            "notice": "PDF text was extracted locally. OCR is attempted when configured. The original file was not modified or stored. Select a passage to receive local suggestions.",
+            "notice": "PDF text was extracted locally. OCR is attempted when configured. Native text pages may support conservative PDF reconstruction; scanned/OCR pages and unsupported text layouts remain unchanged. The original file was not modified or stored.",
         },
     }
 
@@ -228,3 +242,81 @@ async def humanizer_apply(request: Request):
     except ValueError as exc:
         return JSONResponse({"error": {"code": "REPLACEMENT_REJECTED", "message": str(exc)}}, status_code=409)
     return {"success": True, "data": {"text": revised, "accepted_count": len(replacements), "model_used": False}}
+
+
+
+@router.post("/pdf/reconstruct")
+async def humanizer_reconstruct_pdf(
+    request: Request,
+    file: UploadFile = File(...),
+    accepted_replacements: str = Form(...),
+):
+    """Return a new PDF with only explicitly accepted, geometrically safe edits."""
+    _user_id, error = _authenticated_user(request)
+    if error:
+        return error
+
+    filename = (file.filename or "document.pdf").replace("\\\\", "/").split("/")[-1]
+    if not filename.lower().endswith(".pdf"):
+        return JSONResponse(
+            {"error": {"code": "PDF_REQUIRED", "message": "Upload a PDF file."}},
+            status_code=415,
+        )
+    data = await file.read(MAX_PDF_BYTES + 1)
+    if not data:
+        return JSONResponse(
+            {"error": {"code": "EMPTY_PDF", "message": "The PDF is empty."}},
+            status_code=400,
+        )
+    if len(data) > MAX_PDF_BYTES:
+        return JSONResponse(
+            {"error": {"code": "PDF_TOO_LARGE", "message": "PDF must be 20 MB or smaller."}},
+            status_code=413,
+        )
+    try:
+        replacements = json.loads(accepted_replacements)
+    except (TypeError, ValueError):
+        return JSONResponse(
+            {"error": {"code": "INVALID_REPLACEMENTS", "message": "Accepted replacements must be valid JSON."}},
+            status_code=400,
+        )
+    if not isinstance(replacements, list) or not replacements:
+        return JSONResponse(
+            {"error": {"code": "INVALID_REPLACEMENTS", "message": "Approve at least one replacement before exporting."}},
+            status_code=400,
+        )
+    if len(replacements) > 40:
+        return JSONResponse(
+            {"error": {"code": "TOO_MANY_REPLACEMENTS", "message": "Apply no more than 40 replacements per PDF export."}},
+            status_code=413,
+        )
+
+    try:
+        from services.humanizer_pdf_service import HumanizerPDFError, reconstruct_pdf
+
+        output, metadata = await run_in_threadpool(reconstruct_pdf, data, replacements)
+    except HumanizerPDFError as exc:
+        return JSONResponse(
+            {"error": {"code": "PDF_RECONSTRUCTION_UNSUPPORTED", "message": str(exc)}},
+            status_code=422,
+        )
+    except Exception as exc:
+        LOG.warning("Humanizer PDF reconstruction failed | error_type=%s", type(exc).__name__)
+        return JSONResponse(
+            {"error": {"code": "PDF_RECONSTRUCTION_FAILED", "message": "The revised PDF could not be validated. The original file remains unchanged."}},
+            status_code=422,
+        )
+
+    stem = filename.rsplit(".", 1)[0][:100]
+    safe_stem = "".join(character if character.isalnum() or character in "-_" else "_" for character in stem).strip("_") or "document"
+    download_name = f"{safe_stem}-humanized.pdf"
+    return Response(
+        content=output,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "X-Humanizer-Changes": str(metadata["accepted_replacements"]),
+            "X-Humanizer-Changed-Pages": str(metadata["changed_pages"]),
+            "Cache-Control": "no-store",
+        },
+    )
