@@ -337,9 +337,8 @@ def enforce_uncopyable_startup() -> None:
             raise RuntimeError("REVELA_MASTER_KEY_BASE64 must contain valid base64.") from key_exc
         if len(decoded_master_key) < 32:
             raise RuntimeError("REVELA_MASTER_KEY_BASE64 must decode to at least 32 bytes.")
-        jwt_secret = env.get("JWT_SECRET", "")
-        if len(jwt_secret.encode("utf-8")) < 32:
-            raise RuntimeError("JWT_SECRET must be configured with at least 32 UTF-8 bytes when REVELA_UNCOPYABLE_ENFORCE=true.")
+        # Platform JWT credentials are validated only by RevelaCode Backend.
+        # RevelaAI must not duplicate the platform signing secret.
         hardware_fingerprint()
     except (RecipeLockError, LicenseError, RuntimeError) as exc:
         logger.critical("USECT-UNCOPYABLE startup gate rejected runtime: %s", type(exc).__name__)
