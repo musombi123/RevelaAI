@@ -7,15 +7,15 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, Iterator
 
-import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from ai.intent_router import classify_intent
 from ai.usect_zero_tools import select_tool_for_message
 from ai.core_mesh import core_mesh_operator_allowed
 from ai.json_utils import error_response
-from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
+from fastapi_routes.auth import resolve_revelacode_user
 from services.revenue_entitlements import check_entitlement
 from services.ai_service import detect_capability, process_message
 from services.image_service import generate_image_asset, parse_image_options
@@ -28,27 +28,6 @@ from services.runtime_config import (
 router = APIRouter(tags=["AI Streaming"])
 logger = logging.getLogger("revelaai.fastapi.stream")
 MAX_BODY_BYTES = MAX_CONTENT_LENGTH
-
-
-def _subject(headers: Mapping[str, str]) -> str | None:
-    authorization = next(
-        (str(v) for k, v in headers.items() if str(k).casefold() == "authorization"),
-        "",
-    ).strip()
-    secret = JWT_SECRET
-    if not secret or not authorization.startswith("Bearer ") or not authorization[7:].strip():
-        return None
-    try:
-        claims = jwt.decode(
-            authorization[7:].strip(),
-            secret,
-            algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
-        )
-    except jwt.InvalidTokenError:
-        return None
-    value = claims.get("sub") or claims.get("user_id") or claims.get("id")
-    return str(value).strip() if value is not None and str(value).strip() else None
 
 
 def _session_id(headers: Mapping[str, str], cookies: Mapping[str, str], subject: str | None) -> str:
@@ -146,7 +125,15 @@ async def ai_stream(request: Request):
 
     headers = dict(request.headers)
     cookies = dict(request.cookies)
-    subject = _subject(headers)
+    authorization = next(
+        (str(v) for k, v in headers.items() if str(k).casefold() == "authorization"),
+        "",
+    )
+    subject = None
+    if authorization.strip():
+        subject, auth_error = await run_in_threadpool(resolve_revelacode_user, authorization)
+        if auth_error is not None:
+            return auth_error
     session_id = _session_id(headers, cookies, subject)
     session = get_session(session_id)
     raw_client_context = payload.get("context", [])

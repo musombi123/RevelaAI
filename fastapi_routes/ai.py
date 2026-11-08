@@ -16,7 +16,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
 
-import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -29,7 +28,7 @@ from ai.usect_zero_tools import select_tool_for_message
 from ai.core_mesh import core_mesh_operator_allowed
 from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
 from ai.json_utils import enforce_base_schema, error_response, extract_json
-from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET, authenticate_identity
+from fastapi_routes.auth import authenticate_identity
 from revelai.core.agi_manifest import get_self_description_answer
 from services.ai_service import detect_capability, process_message
 from services.revenue_entitlements import check_entitlement
@@ -56,25 +55,6 @@ def _error(code: str, message: str, status_code: int, request_id: str | None = N
     if isinstance(body, dict) and request_id:
         body["request_id"] = request_id
     return JSONResponse(body, status_code=status_code)
-
-
-def _subject_from_bearer(authorization: str) -> str | None:
-    secret = JWT_SECRET
-    header = str(authorization or "").strip()
-    if not secret or not header.startswith("Bearer ") or not header[7:].strip():
-        return None
-    try:
-        claims = jwt.decode(
-            header[7:].strip(),
-            secret,
-            algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
-        )
-    except jwt.InvalidTokenError:
-        return None
-    raw_id = claims.get("sub") or claims.get("user_id") or claims.get("id")
-    value = str(raw_id or "").strip()
-    return value or None
 
 
 def _session_id(
@@ -256,36 +236,34 @@ def _ai_sync(
         (str(v) for k, v in headers.items() if str(k).casefold() == "authorization"),
         "",
     )
-    user_id = _subject_from_bearer(authorization)
+    user_id = None
+    memory_user_oid = None
+    settings_user_id = None
+    if authorization.strip():
+        memory_user_oid, user_id, auth_error = authenticate_identity(
+            authorization, headers, payload
+        )
+        if auth_error is not None:
+            # A supplied bearer credential must never silently degrade to a
+            # guest request when the platform backend rejects/unavailable.
+            return auth_error
+        settings_user_id = user_id
+
     session_id = _session_id(headers, cookies, user_id, payload)
     session = get_session(session_id)
 
-    memory_user_oid = None
-    settings_user_id = None
     if user_id:
-        try:
-            memory_user_oid, verified_id, auth_error = authenticate_identity(
-                authorization, headers, payload
-            )
-            if auth_error or verified_id != user_id:
-                memory_user_oid = None
-                logger.info("Smart memory identity verification unavailable; AI continues without saved memory")
-            else:
-                settings_user_id = verified_id
-                _, memory_entitlement_error = check_entitlement(
-                    authorization,
-                    hub="smart_ai",
-                    feature="long_memory",
-                    timeout_seconds=1.0,
-                )
-                if memory_entitlement_error is not None:
-                    memory_user_oid = None
-                    logger.info("Long-term memory entitlement is unavailable; AI continues without saved memory")
-                if not is_user_memory_enabled(settings_user_id):
-                    memory_user_oid = None
-        except Exception:
+        _, memory_entitlement_error = check_entitlement(
+            authorization,
+            hub="smart_ai",
+            feature="long_memory",
+            timeout_seconds=1.0,
+        )
+        if memory_entitlement_error is not None:
             memory_user_oid = None
-            logger.warning("Smart memory identity verification failed; continuing without saved memory", exc_info=True)
+            logger.info("Long-term memory entitlement is unavailable; AI continues without saved memory")
+        if not is_user_memory_enabled(settings_user_id):
+            memory_user_oid = None
 
     message = ""
     attachment_metadata = None
