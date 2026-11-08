@@ -141,4 +141,5 @@ jobs:
           tests/test_usect_zero_backend.py
           tests/test_automation_fabric.py
           tests/test_humanizer_service.py
+          tests/test_humanizer_pdf_service.py
           tests/test_humanizer_gemini_routes.py

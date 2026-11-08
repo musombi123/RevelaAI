@@ -723,3 +723,13 @@ def test_humanizer_endpoints_require_revelacode_authentication():
     )
     assert extraction.status_code == 401
     assert extraction.json()["error"]["code"] == "authentication_required"
+
+    reconstruction = client.post(
+        "/api/humanizer/pdf/reconstruct",
+        files={
+            "file": ("sample.pdf", b"%PDF-invalid", "application/pdf"),
+            "accepted_replacements": (None, "[]"),
+        },
+    )
+    assert reconstruction.status_code == 401
+    assert reconstruction.json()["error"]["code"] == "authentication_required"
