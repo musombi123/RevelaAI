@@ -33,7 +33,7 @@ def test_header_must_match_authoritative_platform_identity(monkeypatch):
         json={"userMessage": "My farm grows maize"},
     )
     assert response.status_code == 403
-    assert response.json()["code"] == "user_identity_mismatch"
+    assert response.json()["error"]["code"] == "user_identity_mismatch"
 
 
 def test_body_cannot_conflict_with_authoritative_platform_identity(monkeypatch):
@@ -48,4 +48,4 @@ def test_body_cannot_conflict_with_authoritative_platform_identity(monkeypatch):
         json={"userId": OTHER_ID, "userMessage": "My farm grows maize"},
     )
     assert response.status_code == 403
-    assert response.json()["code"] == "user_identity_mismatch"
+    assert response.json()["error"]["code"] == "user_identity_mismatch"
