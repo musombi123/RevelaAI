@@ -256,7 +256,7 @@ async def humanizer_reconstruct_pdf(
     if error:
         return error
 
-    filename = (file.filename or "document.pdf").replace("\\\\", "/").split("/")[-1]
+    filename = (file.filename or "document.pdf").replace("\\", "/").split("/")[-1]
     if not filename.lower().endswith(".pdf"):
         return JSONResponse(
             {"error": {"code": "PDF_REQUIRED", "message": "Upload a PDF file."}},
