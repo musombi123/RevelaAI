@@ -14,7 +14,6 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-import jwt
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
@@ -23,7 +22,7 @@ from ai.ai_client import generate_hf_speech, transcribe_hf_audio
 from ai.intent_router import classify_intent
 from ai.core_mesh import core_mesh_operator_allowed
 from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
-from fastapi_routes.auth import JWT_ALGORITHM, JWT_SECRET
+from fastapi_routes.auth import resolve_revelacode_user
 from services.revenue_entitlements import check_entitlement
 from services.ai_service import detect_capability, process_message
 from services.audio_utils import audio_extension_for_mime
@@ -50,24 +49,6 @@ def _error(code: str, message: str, status_code: int):
         },
         status_code=status_code,
     )
-
-
-def _subject_from_bearer(authorization: str) -> str | None:
-    secret = JWT_SECRET
-    header = str(authorization or "").strip()
-    if not secret or not header.startswith("Bearer ") or not header[7:].strip():
-        return None
-    try:
-        claims = jwt.decode(
-            header[7:].strip(),
-            secret,
-            algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "iat", "exp"]},
-        )
-    except jwt.InvalidTokenError:
-        return None
-    value = claims.get("sub") or claims.get("user_id") or claims.get("id")
-    return str(value).strip() if value is not None and str(value).strip() else None
 
 
 def _session_id(request: Request, subject: str | None) -> str:
@@ -407,7 +388,10 @@ async def voice(request: Request):
         audio_bytes = await uploaded.read()
         if len(audio_bytes) > VOICE_MAX_BYTES:
             return _error("AUDIO_TOO_LARGE", "Audio exceeds the maximum allowed size.", 413)
-        subject = _subject_from_bearer(request.headers.get("Authorization", ""))
+        authorization = request.headers.get("Authorization", "")
+        subject, auth_error = await run_in_threadpool(resolve_revelacode_user, authorization)
+        if auth_error is not None:
+            return auth_error
         session_id = _session_id(request, subject)
         return await run_in_threadpool(
             _voice_sync,
