@@ -1,0 +1,42 @@
+name: RevelaAI Keepalive
+
+on:
+  schedule:
+    # Render free web services may spin down after 15 minutes without inbound traffic.
+    # GitHub Actions runs independently and sends a lightweight inbound health request.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: revelaai-keepalive
+  cancel-in-progress: true
+
+jobs:
+  keepalive:
+    name: Ping the live RevelaAI ASGI process
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check RevelaAI process health
+        env:
+          HEALTH_URL: https://revelaai.onrender.com/_fastapi/health
+        run: |
+          set -euo pipefail
+          echo "Pinging RevelaAI process health endpoint..."
+          for attempt in 1 2 3; do
+            if curl --fail --silent --show-error --max-time 25 \
+              --header "User-Agent: RevelaAI-Keepalive/1.0" \
+              --output /tmp/revelaai-health.json \
+              --write-out "HTTP %{http_code} in %{time_total}s\\n" \
+              "$HEALTH_URL"; then
+              cat /tmp/revelaai-health.json
+              exit 0
+            fi
+            echo "Health check attempt $attempt failed."
+            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+          done
+          echo "::error::RevelaAI did not respond successfully after 3 attempts."
+          exit 1
