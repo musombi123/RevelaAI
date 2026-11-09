@@ -199,4 +199,7 @@ def is_image_revision_request(
     # Restrict matching to the opening command, not quoted instructions or
     # examples appearing later in a long message.
     opening = text.splitlines()[0].strip()
-    return bool(_IMAGE_REVISION_COMMAND_RE.match(opening))
+    return bool(
+        _IMAGE_REVISION_COMMAND_RE.match(opening)
+        or _IMAGE_REVISION_USE_RE.match(opening)
+    )
