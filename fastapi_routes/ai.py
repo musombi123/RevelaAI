@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from ai.ai_client import get_image_provider_status
 from ai.global_brain_adapter import build_global_context
 from ai.hub_prompts import HUB_LABELS, get_identity_answer
-from ai.intent_router import classify_intent
+from ai.intent_router import classify_intent, is_image_revision_request
 from ai.usect_zero_tools import select_tool_for_message
 from ai.core_mesh import core_mesh_operator_allowed
 from ai.gemini_tool_gateway import mark_core_usage, requires_automation_entitlement
@@ -318,9 +318,9 @@ def _ai_sync(
         except ValueError as exc:
             return _error("INVALID_IMAGE_OPTIONS", str(exc), 400, request_id)
 
-    revision_requested = bool(
-        session.get("last_design_request")
-        and re.search(r"\b(change|switch|replace|make|increase|decrease|bigger|smaller|use|translate|recolour|recolor|move|remove|add|edit|revise)\b", message, re.I)
+    revision_requested = is_image_revision_request(
+        message,
+        has_previous_design=bool(session.get("last_design_request")),
     )
     if revision_requested:
         original_design_request = str(session.get("last_design_request") or "").strip()
