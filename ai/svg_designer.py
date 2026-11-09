@@ -177,13 +177,6 @@ DANGEROUS_TAGS = {
     "filter",
 }
 
-DANGEROUS_PROTOCOLS = (
-    "javascript:",
-    "data:",
-    "vbscript:",
-    "file:",
-)
-
 EVENT_ATTRIBUTE_RE = re.compile(
     r"^on[a-z0-9_-]+$",
     re.I,
@@ -209,9 +202,8 @@ CSS_URL_RE = re.compile(
     re.I,
 )
 
-EXTERNAL_REFERENCE_RE = re.compile(
-    r"(?:https?://|//|javascript:|data:|file:)",
-    re.I,
+LOCAL_FRAGMENT_RE = re.compile(
+    r"^#[A-Za-z_][A-Za-z0-9_.:-]*$"
 )
 
 
@@ -441,37 +433,50 @@ def _sanitize_attributes(
             continue
 
         # -------------------------------------------------
-        # External URL references
+        # Preserve only the canonical SVG namespace.
+        # ElementTree stores namespace declarations outside
+        # the normal attribute map when parsing source SVG.
+        # Our serializer adds this attribute explicitly.
+        # -------------------------------------------------
+
+        if local_attribute.lower() == "xmlns":
+
+            if value != SVG_NAMESPACE:
+
+                del element.attrib[
+                    attribute
+                ]
+
+            continue
+
+        # -------------------------------------------------
+        # URL-bearing attributes
+        #
+        # The designer currently needs no linked assets.
+        # Permit only same-document fragment references;
+        # all network, data, file and script URLs are removed.
         # -------------------------------------------------
 
         if SAFE_URL_ATTRIBUTE_RE.match(
             local_attribute
         ):
 
-            lowered = (
-                value.strip().lower()
-            )
-
-            if any(
-                lowered.startswith(
-                    protocol
-                )
-                for protocol in DANGEROUS_PROTOCOLS
+            if not LOCAL_FRAGMENT_RE.fullmatch(
+                value.strip()
             ):
 
                 del element.attrib[
                     attribute
                 ]
 
-                continue
+            continue
 
         # -------------------------------------------------
-        # Any external reference
+        # Inline CSS and resource-bearing CSS values are
+        # outside this designer's static-vector contract.
         # -------------------------------------------------
 
-        if EXTERNAL_REFERENCE_RE.search(
-            value
-        ):
+        if local_attribute.lower() == "style" or CSS_URL_RE.search(value):
 
             del element.attrib[
                 attribute
@@ -479,16 +484,9 @@ def _sanitize_attributes(
 
             continue
 
-        # -------------------------------------------------
-        # Unsafe CSS URL
-        # -------------------------------------------------
-
-        if (
-            "url(" in value.lower()
-            and CSS_URL_RE.search(
-                value
-            )
-        ):
+        # Never allow a base URL to change how references
+        # in this document are resolved.
+        if local_attribute.lower() == "base":
 
             del element.attrib[
                 attribute
@@ -597,7 +595,6 @@ def _sanitize_tree(
                 or child_name
                 not in ALLOWED_TAGS
             ):
-
                 parent.remove(
                     child
                 )
@@ -746,12 +743,33 @@ def _validate_svg(
                     )
                 )
 
-            if EXTERNAL_REFERENCE_RE.search(
-                str(value)
+            attribute_value = str(value).strip()
+
+            if local_attribute.lower() == "xmlns":
+
+                if attribute_value != SVG_NAMESPACE:
+
+                    raise ValueError(
+                        "SVG namespace declaration is invalid."
+                    )
+
+                continue
+
+            if SAFE_URL_ATTRIBUTE_RE.match(local_attribute):
+
+                if not LOCAL_FRAGMENT_RE.fullmatch(attribute_value):
+
+                    raise ValueError(
+                        "SVG contains an external reference."
+                    )
+
+            if (
+                local_attribute.lower() == "style"
+                or CSS_URL_RE.search(attribute_value)
             ):
 
                 raise ValueError(
-                    "SVG contains an external reference."
+                    "SVG contains an unsafe CSS resource reference."
                 )
 
     _validate_requested_text(
@@ -840,17 +858,10 @@ def sanitize_svg(
         0
     ).strip()
 
-    # -----------------------------------------------------
-    # Reject obvious external resources
-    # -----------------------------------------------------
-
-    if EXTERNAL_REFERENCE_RE.search(
-        svg_text
-    ):
-
-        raise ValueError(
-            "SVG contains an external reference."
-        )
+    # Do not scan the raw document for URL-looking strings here:
+    # the mandatory SVG namespace itself is an HTTP URI. Parse XML
+    # first, then inspect only URL-bearing attributes and CSS values
+    # in the sanitizer and validator below.
 
     # -----------------------------------------------------
     # XML parsing
@@ -1197,8 +1208,7 @@ def _draw_leaf(
             "C589 565 679 515 694 400 "
             "C709 285 634 190 512 150 Z"
         ),
-        fill=primary,
-    )
+        fill=primary,    )
 
     _add(
         group,
@@ -1797,7 +1807,6 @@ def _local_svg_fallback(
             "church",
         )
     ):
-
         _draw_scripture(
             root,
             primary,
