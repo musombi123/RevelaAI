@@ -216,7 +216,7 @@ def is_image_revision_request(
         return False
 
     text = str(message or "").strip()
-    if not text or len(text) > 1600:
+    if not text:
         return False
 
     # Restrict matching to the opening command, not quoted instructions or
