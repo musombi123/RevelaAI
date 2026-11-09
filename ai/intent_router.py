@@ -1,3 +1,5 @@
+import re
+
 def classify_intent(message: str) -> str:
     msg = message.lower().strip()
 
@@ -168,10 +170,10 @@ def classify_intent(message: str) -> str:
 # "make", or "add": system prompts and technical discussions routinely
 # contain those words and must remain ordinary text requests.
 _IMAGE_REVISION_COMMAND_RE = re.compile(
-    r"^\\s*(?:(?:please|can you|could you|would you|i want you to|"
-    r"i would like you to|i'd like you to)\\s+)*"
+    r"^\s*(?:(?:please|can you|could you|would you|i want you to|"
+    r"i would like you to|i'd like you to)\s+)*"
     r"(?:change|switch|replace|make|increase|decrease|bigger|smaller|"
-    r"use|translate|recolour|recolor|move|remove|add|edit|revise)\\b",
+    r"use|translate|recolour|recolor|move|remove|add|edit|revise)\b",
     re.IGNORECASE,
 )
 
