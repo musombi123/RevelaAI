@@ -160,3 +160,41 @@ def classify_intent(message: str) -> str:
     # Default
     # -----------------------
     return "general"
+
+
+
+# A design revision is a short, explicit command at the start of a turn.
+# Do not scan arbitrary long-form prose for generic verbs such as "use",
+# "make", or "add": system prompts and technical discussions routinely
+# contain those words and must remain ordinary text requests.
+_IMAGE_REVISION_COMMAND_RE = re.compile(
+    r"^\\s*(?:(?:please|can you|could you|would you|i want you to|"
+    r"i would like you to|i'd like you to)\\s+)*"
+    r"(?:change|switch|replace|make|increase|decrease|bigger|smaller|"
+    r"use|translate|recolour|recolor|move|remove|add|edit|revise)\\b",
+    re.IGNORECASE,
+)
+
+
+def is_image_revision_request(
+    message: str,
+    *,
+    has_previous_design: bool = False,
+) -> bool:
+    """Return True only for a clearly stated edit command in a design session.
+
+    The previous implementation searched the entire message for words like
+    "use". That caused long system prompts and technical instructions to be
+    mistaken for edits to the previous image.
+    """
+    if not has_previous_design:
+        return False
+
+    text = str(message or "").strip()
+    if not text or len(text) > 1600:
+        return False
+
+    # Restrict matching to the opening command, not quoted instructions or
+    # examples appearing later in a long message.
+    opening = text.splitlines()[0].strip()
+    return bool(_IMAGE_REVISION_COMMAND_RE.match(opening))
