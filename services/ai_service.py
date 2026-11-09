@@ -245,7 +245,6 @@ def detect_capability(
         "image",
         "visual_generation",
         "design_generation",
-        "graphic_design",
         "logo_generation",
         "poster_generation",
         "banner_generation",
