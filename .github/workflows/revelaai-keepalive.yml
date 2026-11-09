@@ -2,41 +2,61 @@ name: RevelaAI Keepalive
 
 on:
   schedule:
-    # Render free web services may spin down after 15 minutes without inbound traffic.
-    # GitHub Actions runs independently and sends a lightweight inbound health request.
+    # Run well inside Render's free-service idle window.
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
-permissions:
-  contents: read
+# This workflow only makes an HTTPS health request; it needs no repository access.
+permissions: {}
 
 concurrency:
   group: revelaai-keepalive
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   keepalive:
-    name: Ping the live RevelaAI ASGI process
+    name: Verify the live RevelaAI ASGI process
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 3
     steps:
-      - name: Check RevelaAI process health
+      - name: Ping and validate process health
+        shell: bash
         env:
           HEALTH_URL: https://revelaai.onrender.com/_fastapi/health
         run: |
-          set -euo pipefail
-          echo "Pinging RevelaAI process health endpoint..."
+          set -Eeuo pipefail
+
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+
           for attempt in 1 2 3; do
-            if curl --fail --silent --show-error --max-time 25 \
-              --header "User-Agent: RevelaAI-Keepalive/1.0" \
-              --output /tmp/revelaai-health.json \
-              --write-out "HTTP %{http_code} in %{time_total}s\\n" \
-              "$HEALTH_URL"; then
-              cat /tmp/revelaai-health.json
+            echo "RevelaAI process health check (attempt ${attempt}/3)"
+
+            if curl \
+              --silent --show-error --fail \
+              --proto '=https' --tlsv1.2 \
+              --connect-timeout 10 --max-time 20 \
+              --request GET \
+              --header "Accept: application/json" \
+              --header "Cache-Control: no-cache" \
+              --header "User-Agent: RevelaAI-Keepalive/1.1" \
+              --output "$response_file" \
+              "$HEALTH_URL" \
+              && jq -e '
+                .status == "ok"
+                and .service == "revelaai"
+                and .runtime == "fastapi"
+              ' "$response_file" >/dev/null; then
+              echo "RevelaAI ASGI process is healthy."
+              jq -c '{status, service, runtime, build_id}' "$response_file"
               exit 0
             fi
-            echo "Health check attempt $attempt failed."
-            if [ "$attempt" -lt 3 ]; then sleep 10; fi
+
+            echo "::warning::Health check attempt ${attempt}/3 failed."
+            if [ "$attempt" -lt 3 ]; then
+              sleep 10
+            fi
           done
-          echo "::error::RevelaAI did not respond successfully after 3 attempts."
+
+          echo "::error::RevelaAI failed its process health check after 3 attempts."
           exit 1
