@@ -28,20 +28,20 @@ def classify_intent(message: str) -> str:
     # generate one. Require an explicit creation action tied to a visual
     # artefact, or a clear first-person request for that artefact.
     image_action = re.search(
-        r"\\b(?:generate|create|draw|illustrate|design|make|produce)\\b"
-        r".{0,48}\\b(?:image|picture|photo|artwork|illustration|logo|poster|"
+        r"\b(?:generate|create|draw|illustrate|design|make|produce)\b"
+        r".{0,48}\b(?:image|picture|photo|artwork|illustration|logo|poster|"
         r"banner|flyer|graphic|thumbnail|infographic|diagram|cover|"
         r"business card|instagram post|instagram story|whatsapp status|"
-        r"invitation|certificate)\\b",
+        r"invitation|certificate)\b",
         msg,
         re.IGNORECASE,
     )
     image_request = re.search(
-        r"\\b(?:i need|i want|please make|please create|can you make|"
-        r"could you make|can you create|could you create)\\b"
-        r".{0,32}\\b(?:image|picture|photo|artwork|logo|poster|banner|"
+        r"\b(?:i need|i want|please make|please create|can you make|"
+        r"could you make|can you create|could you create)\b"
+        r".{0,32}\b(?:image|picture|photo|artwork|logo|poster|banner|"
         r"flyer|graphic|thumbnail|infographic|diagram|cover|invitation|"
-        r"certificate)\\b",
+        r"certificate)\b",
         msg,
         re.IGNORECASE,
     )
