@@ -173,7 +173,14 @@ _IMAGE_REVISION_COMMAND_RE = re.compile(
     r"^\s*(?:(?:please|can you|could you|would you|i want you to|"
     r"i would like you to|i'd like you to)\s+)*"
     r"(?:change|switch|replace|make|increase|decrease|bigger|smaller|"
-    r"use|translate|recolour|recolor|move|remove|add|edit|revise)\b",
+    r"translate|recolour|recolor|move|remove|add|edit|revise)\b",
+    re.IGNORECASE,
+)
+_IMAGE_REVISION_USE_RE = re.compile(
+    r"^\s*(?:(?:please|can you|could you|would you)\s+)?"
+    r"use\s+(?:(?:a|an|the|this|that|new)\s+)?"
+    r"(?:background|colour|color|palette|font|typeface|image|photo|"
+    r"texture|gradient|icon|illustration|layout)\b",
     re.IGNORECASE,
 )
 
