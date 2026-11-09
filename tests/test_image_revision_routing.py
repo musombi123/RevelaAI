@@ -1,4 +1,5 @@
-from ai.intent_router import is_image_revision_request
+from ai.intent_router import classify_intent, is_image_revision_request
+from services.ai_service import detect_capability
 
 
 PORTFOLIO_SYSTEM_DIRECTIVE = """
@@ -124,3 +125,23 @@ def test_visual_edit_without_previous_design_is_not_a_revision():
         "Please make the title larger.",
         has_previous_design=False,
     ) is False
+
+
+
+def test_portfolio_directive_stays_on_text_capability():
+    intent = classify_intent(PORTFOLIO_SYSTEM_DIRECTIVE)
+    assert intent != "image_generation"
+    assert detect_capability(PORTFOLIO_SYSTEM_DIRECTIVE, intent=intent) == "text"
+
+
+def test_asking_about_a_logo_does_not_generate_an_image():
+    intent = classify_intent("What makes a good logo memorable?")
+    assert intent == "graphic_design"
+    assert detect_capability("What makes a good logo memorable?", intent=intent) == "text"
+
+
+def test_explicit_logo_creation_still_routes_to_image_generation():
+    prompt = "Create a logo for a technology startup."
+    intent = classify_intent(prompt)
+    assert intent == "image_generation"
+    assert detect_capability(prompt, intent=intent) == "image_generation"
