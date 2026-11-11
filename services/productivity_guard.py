@@ -44,6 +44,8 @@ def _architecture_snapshot() -> dict[str, Any]:
     service_files = snapshot["structure"].get("services", [])
     route_files = snapshot["structure"].get("fastapi_routes", [])
     required = {"services/productivity_service.py", "fastapi_routes/productivity.py"}
+    if tool_id == "workspace_execute":
+        required.update({"services/workspace_engine.py", "fastapi_routes/workspace.py"})
     discovered = set(service_files) | set(route_files)
     if not required.issubset(discovered):
         raise ProductivitySafetyError("META_ENGINEER_REGISTRATION_MISSING", "Meta Engineer could not verify the registered productivity modules.")
