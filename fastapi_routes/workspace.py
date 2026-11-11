@@ -476,7 +476,8 @@ async def execute_workspace_multipart(request: Request):
 
     embedded_images = []
     total_bytes = 0
-    placement = str(form.get("image_placement") or "header").strip().lower()
+    default_placement = "title_slide" if str(form.get("format") or "word").lower() == "powerpoint" else "header"
+    placement = str(form.get("image_placement") or default_placement).strip().lower()
     for field_name in ("images", "image", "logo", "attachment"):
         for upload in form.getlist(field_name):
             if not hasattr(upload, "read") or not str(getattr(upload, "filename", "") or "").strip():
