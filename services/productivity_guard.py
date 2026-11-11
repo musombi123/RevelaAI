@@ -43,10 +43,6 @@ def _architecture_snapshot() -> dict[str, Any]:
         raise ProductivitySafetyError("META_ENGINEER_UNAVAILABLE", "Meta Engineer architecture verification is unavailable.")
     service_files = snapshot["structure"].get("services", [])
     route_files = snapshot["structure"].get("fastapi_routes", [])
-    required = {"services/productivity_service.py", "fastapi_routes/productivity.py"}
-    discovered = set(service_files) | set(route_files)
-    if not required.issubset(discovered):
-        raise ProductivitySafetyError("META_ENGINEER_REGISTRATION_MISSING", "Meta Engineer could not verify the registered productivity modules.")
     _ARCH_SCAN = snapshot
     _LAST_ARCH_SCAN = now
     return snapshot
@@ -56,7 +52,16 @@ def guard_productivity_tool(tool_id: str, payload: dict[str, Any]) -> dict[str, 
     """Fail closed if Meta Engineer or the Sci Defender checks cannot run."""
     if not isinstance(payload, dict):
         raise ProductivitySafetyError("INVALID_TOOL_INPUT", "The tool input must be a JSON object.")
-    _architecture_snapshot()
+    snapshot = _architecture_snapshot()
+    structure = snapshot.get("structure", {})
+    service_files = structure.get("services", [])
+    route_files = structure.get("fastapi_routes", [])
+    required = {"services/productivity_service.py", "fastapi_routes/productivity.py"}
+    if tool_id == "workspace_execute":
+        required.update({"services/workspace_engine.py", "fastapi_routes/workspace.py"})
+    discovered = set(service_files) | set(route_files)
+    if not required.issubset(discovered):
+        raise ProductivitySafetyError("META_ENGINEER_REGISTRATION_MISSING", "Meta Engineer could not verify the registered productivity modules.")
     # Reuse Sci Defender's established defensive signatures. The scan is
     # limited to user-supplied code/text; source paths and secrets are not logged.
     try:
