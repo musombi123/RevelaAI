@@ -34,6 +34,7 @@ TOOL_CATALOG = [
     {"id":"spreadsheet","label":"Spreadsheets","description":"Create real XLSX workbooks with formulas, formatting, tables and CSV exports.","phase":1,"free":True,"plus":True},
     {"id":"word","label":"Word Documents","description":"Generate editable DOCX reports, proposals, letters and other structured documents.","phase":1,"free":True,"plus":True},
     {"id":"powerpoint","label":"PowerPoint","description":"Generate editable PPTX slide decks and PDF previews.","phase":1,"free":True,"plus":True},
+    {"id":"workspace_execute","label":"Workspace Engine","description":"Execute authenticated document, source-code, image-design, image-editing, promotional and dataset-analysis tasks with signed artifact delivery.","phase":1,"free":True,"plus":True},
     {"id":"sandbox_python","label":"Python Sandbox","description":"Run approved Python workloads in an isolated, no-network container.","phase":1,"free":True,"plus":True},
     {"id":"analytics","label":"Data Analytics","description":"Profile, clean, query and analyze CSV/XLSX/JSON data.","phase":2,"free":False,"plus":True},
     {"id":"accounting","label":"Accounting","description":"Double-entry accounting, financial statements, budgets and reconciliations.","phase":2,"free":False,"plus":True},
@@ -42,9 +43,9 @@ TOOL_CATALOG = [
     {"id":"robotics","label":"Robotics","description":"Kinematics, control design, URDF and safe robotics engineering.","phase":3,"free":False,"plus":True},
 ]
 
-FREE_CAPS = {"research_global":5,"spreadsheet":2,"word":1,"powerpoint":1,"sandbox_python":1}
-PLUS_CAPS = {"research_global":60,"spreadsheet":40,"word":20,"powerpoint":20,"sandbox_python":10}
-PRO_CAPS = {"research_global":250,"spreadsheet":150,"word":80,"powerpoint":80,"sandbox_python":60}
+FREE_CAPS = {"research_global":5,"spreadsheet":2,"word":1,"powerpoint":1,"sandbox_python":1,"workspace_execute":2}
+PLUS_CAPS = {"research_global":60,"spreadsheet":40,"word":20,"powerpoint":20,"sandbox_python":10,"workspace_execute":30}
+PRO_CAPS = {"research_global":250,"spreadsheet":150,"word":80,"powerpoint":80,"sandbox_python":60,"workspace_execute":100}
 
 
 def _identity(request: Request, payload: dict[str, Any] | None = None) -> tuple[str, str]:
