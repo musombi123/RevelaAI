@@ -472,7 +472,10 @@ async def execute_workspace_multipart(request: Request):
             try:
                 payload[key] = json.loads(value)
             except ValueError as exc:
-                raise HTTPException(status_code=422, detail=f"Multipart field '{key}' must contain valid JSON.") from exc
+                if key == "dataset":
+                    payload[key] = value
+                else:
+                    raise HTTPException(status_code=422, detail=f"Multipart field '{key}' must contain valid JSON.") from exc
 
     embedded_images = []
     total_bytes = 0
