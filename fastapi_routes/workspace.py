@@ -6,6 +6,8 @@ source code or introduce a second persistence or identity system.
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 import re
@@ -13,7 +15,7 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ai.ai_client import ask_hf
 from ai.intent_router import classify_intent
@@ -25,6 +27,7 @@ from services.productivity_service import (
     create_word_document,
 )
 from services.revenue_entitlements import check_entitlement
+from services.runtime_config import MAX_CONTENT_LENGTH
 from services.workspace_engine import (
     analyze_dataset, edit_image, extract_code_block, markdown_to_sections,
     markdown_to_slides, parse_dataset, render_analysis_chart,
@@ -437,6 +440,66 @@ def _promotion_task(body: WorkspaceExecuteInput, user_id: str, request: Request)
         "poster": poster, "provider": provider,
         "verification": {"required_copy_fields_present": True, "unsupported_factual_claims_prohibited": True},
     }
+
+
+@router.post("/execute/multipart")
+async def execute_workspace_multipart(request: Request):
+    """Accept actual user-selected image/logo files and embed them into a generated Office document."""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_CONTENT_LENGTH:
+                raise HTTPException(status_code=413, detail="The upload exceeds the configured request-size limit.")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length header.") from exc
+
+    if request.headers.get("content-type", "").split(";", 1)[0].lower() != "multipart/form-data":
+        raise HTTPException(status_code=415, detail="Use multipart/form-data for direct image and logo uploads.")
+    try:
+        form = await request.form()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="The multipart upload could not be parsed.") from exc
+
+    payload: dict[str, Any] = {}
+    complex_fields = {"official_metadata", "image_options", "sections", "slides", "dataset", "operations"}
+    for key in ("task", "prompt", "title", "format", "language", "document_style"):
+        value = form.get(key)
+        if isinstance(value, str):
+            payload[key] = value
+    for key in complex_fields:
+        value = form.get(key)
+        if isinstance(value, str) and value.strip():
+            try:
+                payload[key] = json.loads(value)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Multipart field '{key}' must contain valid JSON.") from exc
+
+    embedded_images = []
+    total_bytes = 0
+    placement = str(form.get("image_placement") or "header").strip().lower()
+    for field_name in ("images", "image", "logo", "attachment"):
+        for upload in form.getlist(field_name):
+            if not hasattr(upload, "read") or not str(getattr(upload, "filename", "") or "").strip():
+                continue
+            raw = await upload.read(4 * 1024 * 1024 + 1)
+            await upload.close()
+            total_bytes += len(raw)
+            if not raw or len(raw) > 4 * 1024 * 1024 or total_bytes > 8 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Each embedded image is limited to 4 MB; combined images are limited to 8 MB.")
+            embedded_images.append({
+                "image_base64": base64.b64encode(raw).decode("ascii"),
+                "mime_type": str(getattr(upload, "content_type", "") or "").lower(),
+                "alt_text": str(getattr(upload, "filename", "") or "User-provided image")[:200],
+                "placement": placement,
+            })
+    if embedded_images:
+        payload["embedded_images"] = embedded_images
+
+    try:
+        body = WorkspaceExecuteInput.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    return execute_workspace(body, request)
 
 
 @router.post("/execute")
