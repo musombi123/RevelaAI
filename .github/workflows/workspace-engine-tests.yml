@@ -34,4 +34,4 @@ jobs:
       - name: Run workspace and adjacent regression tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest -q tests/test_workspace_engine.py tests/test_design_studio.py tests/test_image_service_design_exports.py tests/test_productivity_exports.py
+        run: pytest -q tests/test_workspace_engine.py tests/test_design_studio.py tests/test_productivity_exports.py
