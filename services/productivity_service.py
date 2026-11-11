@@ -5,6 +5,7 @@ import base64
 import binascii
 import csv
 import hashlib
+import io
 import hmac
 import json
 import os
@@ -32,7 +33,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import Image as PDFImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, PageBreak
 
 
 def storage_root() -> Path:
@@ -98,13 +99,45 @@ def read_signed_file(file_id: str, expires: int, signature: str) -> tuple[Path, 
     raise FileNotFoundError("File not found.")
 
 
-def _preview_pdf(owner_id: str, title: str, blocks: list[dict[str, Any]], kind: str) -> dict[str, Any]:
-    from io import BytesIO
-    stream = BytesIO()
+def _preview_pdf(
+    owner_id: str,
+    title: str,
+    blocks: list[dict[str, Any]],
+    kind: str,
+    *,
+    images: list[dict[str, Any]] | None = None,
+    official_metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    stream = io.BytesIO()
     page = landscape(A4) if kind == "slides" else A4
     doc = SimpleDocTemplate(stream, pagesize=page, rightMargin=16*mm, leftMargin=16*mm, topMargin=16*mm, bottomMargin=16*mm)
     styles = getSampleStyleSheet()
-    story = [Paragraph(escape(title[:180]), styles["Title"]), Spacer(1, 8*mm)]
+    story = []
+    images = images or []
+    metadata = official_metadata if isinstance(official_metadata, dict) else {}
+    for item in images:
+        if item["placement"] in {"header", "cover", "title_slide", "all_slides"}:
+            story.extend([
+                PDFImage(io.BytesIO(item["content"]), width=min(item["width_inches"] * 72, 180), height=min(item["width_inches"] * 72 * item["height"] / item["width"], 100), kind="proportional"),
+                Spacer(1, 3*mm),
+            ])
+    if kind == "document" and metadata:
+        for label, key in (("Date", "date"), ("Our reference", "reference"), ("To", "recipient"),
+                           ("Organization", "recipient_organization"), ("From", "sender")):
+            value = metadata.get(key)
+            if value:
+                story.append(Paragraph(f"<b>{escape(label)}:</b> {escape(str(value)[:240])}", styles["BodyText"]))
+        address = metadata.get("recipient_address") or []
+        if isinstance(address, str):
+            address = [address]
+        for line in address[:5] if isinstance(address, list) else []:
+            story.append(Paragraph(escape(str(line)[:240]), styles["BodyText"]))
+        if metadata.get("subject"):
+            story.extend([Spacer(1, 3*mm), Paragraph("<b>RE: " + escape(str(metadata["subject"]).upper()[:240]) + "</b>", styles["BodyText"]), Spacer(1, 3*mm)])
+        if metadata.get("salutation"):
+            story.extend([Paragraph(escape(str(metadata["salutation"])[:180]), styles["BodyText"]), Spacer(1, 2*mm)])
+    if title and (kind == "slides" or not metadata):
+        story.extend([Paragraph(escape(title[:180]), styles["Title"]), Spacer(1, 8*mm)])
     if kind == "slides":
         for index, item in enumerate(blocks, 1):
             story.append(Paragraph(f"Slide {index}: {escape(str(item.get('title') or 'Untitled'))}", styles["Heading1"]))
@@ -112,12 +145,21 @@ def _preview_pdf(owner_id: str, title: str, blocks: list[dict[str, Any]], kind: 
                 story.append(Paragraph("• " + escape(str(bullet)), styles["BodyText"]))
             story.append(Spacer(1, 12*mm))
     else:
-        for item in blocks:
+        for section_index, item in enumerate(blocks):
+            for image_item in images:
+                if image_item["placement"] == "inline" and image_item["section_index"] == section_index and image_item["paragraph_index"] < 0:
+                    story.append(PDFImage(io.BytesIO(image_item["content"]), width=min(image_item["width_inches"] * 72, 420), kind="proportional"))
+                    story.append(Spacer(1, 2*mm))
             if item.get("heading"):
                 story.append(Paragraph(escape(str(item["heading"])), styles["Heading2"]))
-            for paragraph in (item.get("paragraphs") or [])[:30]:
+            paragraphs = (item.get("paragraphs") or [])[:40]
+            for paragraph_index, paragraph in enumerate(paragraphs):
                 story.append(Paragraph(escape(str(paragraph)), styles["BodyText"]))
                 story.append(Spacer(1, 2*mm))
+                for image_item in images:
+                    if image_item["placement"] == "inline" and image_item["section_index"] == section_index and image_item["paragraph_index"] == paragraph_index:
+                        story.append(PDFImage(io.BytesIO(image_item["content"]), width=min(image_item["width_inches"] * 72, 420), kind="proportional"))
+                        story.append(Spacer(1, 2*mm))
             for table_data in (item.get("tables") or [])[:4]:
                 rows = table_data.get("rows") or []
                 headers = table_data.get("headers") or []
@@ -133,155 +175,22 @@ def _preview_pdf(owner_id: str, title: str, blocks: list[dict[str, Any]], kind: 
                         ("BOTTOMPADDING",(0,0),(-1,-1),5),
                     ]))
                     story.extend([table, Spacer(1, 5*mm)])
+        if metadata:
+            if metadata.get("closing"):
+                story.extend([Spacer(1, 3*mm), Paragraph(escape(str(metadata["closing"])[:180]), styles["BodyText"])])
+            if metadata.get("signatory"):
+                story.extend([Spacer(1, 12*mm), Paragraph("<b>" + escape(str(metadata["signatory"])[:180]) + "</b>", styles["BodyText"])])
+            if metadata.get("signatory_title"):
+                story.append(Paragraph(escape(str(metadata["signatory_title"])[:180]), styles["BodyText"]))
+            for label, key in (("Enclosures", "enclosures"), ("Cc", "cc")):
+                values = metadata.get(key)
+                if isinstance(values, str):
+                    values = [values]
+                if isinstance(values, list) and values:
+                    story.append(Paragraph(f"<b>{label}:</b> " + escape("; ".join(str(v)[:160] for v in values[:12])), styles["BodyText"]))
     doc.build(story)
     return _write_artifact(owner_id, stream.getvalue(), _safe_name(title, ".pdf"), "application/pdf",
-                           preview={"type":"pdf","pages":"rendered"}, retention_seconds=86400)
-
-
-
-def _decode_document_images(images: Any, *, allowed_placements: set[str]) -> list[dict[str, Any]]:
-    """Validate user-provided images and normalize them to PNG bytes for Office/PDF embeds."""
-    if images is None:
-        return []
-    if not isinstance(images, list) or len(images) > 8:
-        raise ValueError("Provide no more than 8 embedded images.")
-    decoded: list[dict[str, Any]] = []
-    total_bytes = 0
-    for index, item in enumerate(images):
-        if not isinstance(item, dict):
-            raise ValueError("Each embedded image must be an object.")
-        encoded = str(item.get("image_base64") or item.get("data") or "").strip()
-        mime = str(item.get("mime_type") or item.get("mimeType") or "").strip().lower()
-        if encoded.startswith("data:"):
-            header, separator, encoded = encoded.partition(",")
-            if not separator or ";base64" not in header.lower():
-                raise ValueError(f"Embedded image {index + 1} must be a base64 data URL.")
-            declared = header[5:].split(";", 1)[0].lower()
-            if mime and mime != declared:
-                raise ValueError(f"Embedded image {index + 1} MIME type does not match its data URL.")
-            mime = declared
-        if not encoded or len(encoded) > ((4 * 1024 * 1024 + 2) // 3) * 4 + 8:
-            raise ValueError(f"Embedded image {index + 1} must be non-empty and no larger than 4 MB.")
-        try:
-            raw = base64.b64decode(encoded, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise ValueError(f"Embedded image {index + 1} is not valid base64.") from exc
-        total_bytes += len(raw)
-        if not raw or len(raw) > 4 * 1024 * 1024 or total_bytes > 8 * 1024 * 1024:
-            raise ValueError("Embedded images may total no more than 8 MB.")
-        try:
-            with PILImage.open(io.BytesIO(raw)) as source:
-                actual_format = str(source.format or "").upper()
-                actual_mime = {"PNG": "image/png", "JPEG": "image/jpeg", "WEBP": "image/webp"}.get(actual_format)
-                if actual_mime is None or (mime and mime != actual_mime):
-                    raise ValueError(f"Embedded image {index + 1} must be a valid PNG, JPEG or WEBP image with a matching MIME type.")
-                if source.width < 1 or source.height < 1 or source.width * source.height > 20_000_000:
-                    raise ValueError(f"Embedded image {index + 1} dimensions exceed the 20-megapixel limit.")
-                source.verify()
-            with PILImage.open(io.BytesIO(raw)) as source:
-                normalized = PILImageOps.exif_transpose(source)
-                normalized = normalized.convert("RGBA" if "A" in normalized.getbands() else "RGB")
-                png = io.BytesIO()
-                normalized.save(png, format="PNG", optimize=True)
-                width, height = normalized.size
-        except (UnidentifiedImageError, OSError, PILImage.DecompressionBombError) as exc:
-            raise ValueError(f"Embedded image {index + 1} is invalid or unsupported.") from exc
-
-        placement = str(item.get("placement") or "header").strip().lower()
-        if placement not in allowed_placements:
-            raise ValueError(f"Embedded image placement must be one of: {', '.join(sorted(allowed_placements))}.")
-        try:
-            width_inches = float(item.get("width_inches", 1.45))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"Embedded image {index + 1} width must be numeric.") from exc
-        if not 0.35 <= width_inches <= 6.5:
-            raise ValueError(f"Embedded image {index + 1} width must be between 0.35 and 6.5 inches.")
-        decoded.append({
-            "content": png.getvalue(),
-            "width": width,
-            "height": height,
-            "width_inches": width_inches,
-            "placement": placement,
-            "alt_text": str(item.get("alt_text") or item.get("alt") or "User-provided image")[:200],
-            "section_index": int(item.get("section_index", 0) or 0),
-            "paragraph_index": int(item.get("paragraph_index", -1) if item.get("paragraph_index") is not None else -1),
-            "slide_index": int(item.get("slide_index", 0) or 0),
-            "x_inches": float(item.get("x_inches", 10.9)),
-            "y_inches": float(item.get("y_inches", 0.35)),
-        })
-    return decoded
-
-
-def _add_official_metadata_to_docx(document: Document, metadata: dict[str, Any]) -> None:
-    """Lay out supplied letter/memo particulars without inventing missing fields."""
-    document_type = str(metadata.get("document_type") or "letter").strip().lower()
-    org = str(metadata.get("organization") or metadata.get("organisation") or "").strip()
-    org_address = metadata.get("organization_address") or metadata.get("organisation_address") or []
-    if isinstance(org_address, str):
-        org_address = [org_address]
-    if org:
-        p = document.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(org[:180])
-        run.bold = True
-        run.font.size = Pt(14)
-    for line in org_address[:4] if isinstance(org_address, list) else []:
-        p = document.add_paragraph(str(line)[:240])
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if metadata.get("date"):
-        p = document.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        p.add_run(str(metadata["date"])[:80])
-    if metadata.get("reference"):
-        p = document.add_paragraph()
-        p.add_run("Our reference: ").bold = True
-        p.add_run(str(metadata["reference"])[:120])
-    if document_type == "memo":
-        for label, key in (("To", "recipient"), ("From", "sender"), ("Date", "date"), ("Subject", "subject")):
-            value = metadata.get(key)
-            if value:
-                p = document.add_paragraph()
-                p.add_run(label + ": ").bold = True
-                p.add_run(str(value)[:240])
-        return
-    recipient = str(metadata.get("recipient") or "").strip()
-    recipient_org = str(metadata.get("recipient_organization") or "").strip()
-    recipient_address = metadata.get("recipient_address") or []
-    if isinstance(recipient_address, str):
-        recipient_address = [recipient_address]
-    for value in [recipient, recipient_org] + (recipient_address[:5] if isinstance(recipient_address, list) else []):
-        if str(value or "").strip():
-            document.add_paragraph(str(value)[:240])
-    if metadata.get("subject"):
-        p = document.add_paragraph()
-        p.paragraph_format.space_before = Pt(7)
-        p.paragraph_format.space_after = Pt(8)
-        run = p.add_run("RE: " + str(metadata["subject"]).strip().upper()[:240])
-        run.bold = True
-    if metadata.get("salutation"):
-        document.add_paragraph(str(metadata["salutation"])[:180])
-
-
-def _add_official_closing_to_docx(document: Document, metadata: dict[str, Any]) -> None:
-    closing = str(metadata.get("closing") or "").strip()
-    if closing:
-        document.add_paragraph(closing[:180])
-    signatory = str(metadata.get("signatory") or "").strip()
-    if signatory:
-        p = document.add_paragraph()
-        p.paragraph_format.space_before = Pt(18)
-        p.add_run(signatory[:180]).bold = True
-    designation = str(metadata.get("signatory_title") or "").strip()
-    if designation:
-        document.add_paragraph(designation[:180])
-    for label, key in (("Enclosures", "enclosures"), ("Cc", "cc")):
-        values = metadata.get(key)
-        if isinstance(values, str):
-            values = [values]
-        if isinstance(values, list) and values:
-            p = document.add_paragraph()
-            p.add_run(label + ": ").bold = True
-            p.add_run("; ".join(str(value)[:160] for value in values[:12]))
+                           preview={"type":"pdf","pages":"rendered","images_embedded":len(images)}, retention_seconds=86400)
 
 
 def create_spreadsheet(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -334,35 +243,87 @@ def create_spreadsheet(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]
 
 
 def create_word_document(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    title=str(payload.get("title") or "RevelaAI Document").strip()[:180]
-    blocks=payload.get("sections")
-    if not isinstance(blocks,list) or len(blocks)>80: raise ValueError("Provide up to 80 document sections.")
-    document=Document()
-    section=document.sections[0]
-    section.top_margin=Inches(0.75); section.bottom_margin=Inches(0.75)
-    document.core_properties.title=title
-    document.core_properties.author="RevelaAI"
-    document.add_heading(title,0)
-    for block in blocks:
-        if not isinstance(block,dict): continue
-        heading=str(block.get("heading") or "").strip()
-        if heading: document.add_heading(heading[:180],level=max(1,min(3,int(block.get("level",1) or 1))))
-        for paragraph in (block.get("paragraphs") or [])[:40]:
-            p=document.add_paragraph(str(paragraph)[:12000])
-            p.paragraph_format.space_after=Pt(7)
+    title = str(payload.get("title") or "RevelaAI Document").strip()[:180]
+    blocks = payload.get("sections")
+    if not isinstance(blocks, list) or len(blocks) > 80:
+        raise ValueError("Provide up to 80 document sections.")
+    images = _decode_document_images(payload.get("images"), allowed_placements={"header", "cover", "inline"})
+    metadata = payload.get("official_metadata") if isinstance(payload.get("official_metadata"), dict) else {}
+    official = str(payload.get("document_style") or "standard").lower() == "official"
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Inches(0.7)
+    section.bottom_margin = Inches(0.7)
+    section.left_margin = Inches(0.9)
+    section.right_margin = Inches(0.9)
+    document.core_properties.title = title
+    document.core_properties.author = str(metadata.get("organization") or metadata.get("organisation") or "RevelaAI")[:180]
+
+    for item in images:
+        if item["placement"] == "header":
+            paragraph = section.header.paragraphs[0]
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            shape = paragraph.add_run().add_picture(io.BytesIO(item["content"]), width=Inches(item["width_inches"]))
+            shape._inline.docPr.set("descr", item["alt_text"])
+        elif item["placement"] == "cover":
+            paragraph = document.add_paragraph()
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            shape = paragraph.add_run().add_picture(io.BytesIO(item["content"]), width=Inches(item["width_inches"]))
+            shape._inline.docPr.set("descr", item["alt_text"])
+            paragraph.paragraph_format.space_after = Pt(10)
+
+    if official:
+        _add_official_metadata_to_docx(document, metadata)
+    elif title:
+        document.add_heading(title, 0)
+
+    for section_index, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            continue
+        heading = str(block.get("heading") or "").strip()
+        if heading:
+            document.add_heading(heading[:180], level=max(1, min(3, int(block.get("level", 1) or 1))))
+        paragraphs = (block.get("paragraphs") or [])[:40]
+        for paragraph_index, paragraph_text in enumerate(paragraphs):
+            paragraph = document.add_paragraph(str(paragraph_text)[:12000])
+            paragraph.paragraph_format.space_after = Pt(7)
+            for item in images:
+                if item["placement"] == "inline" and item["section_index"] == section_index and item["paragraph_index"] == paragraph_index:
+                    image_paragraph = document.add_paragraph()
+                    shape = image_paragraph.add_run().add_picture(io.BytesIO(item["content"]), width=Inches(item["width_inches"]))
+                    shape._inline.docPr.set("descr", item["alt_text"])
+        for item in images:
+            if item["placement"] == "inline" and item["section_index"] == section_index and item["paragraph_index"] < 0:
+                image_paragraph = document.add_paragraph()
+                shape = image_paragraph.add_run().add_picture(io.BytesIO(item["content"]), width=Inches(item["width_inches"]))
+                shape._inline.docPr.set("descr", item["alt_text"])
         for table_data in (block.get("tables") or [])[:4]:
-            headers=table_data.get("headers") or []; rows=table_data.get("rows") or []
-            if headers and len(headers)<=20 and len(rows)<=500:
-                table=document.add_table(rows=1,cols=len(headers)); table.style="Light Shading Accent 1"
-                for i,h in enumerate(headers): table.rows[0].cells[i].text=str(h)[:200]
+            headers = table_data.get("headers") or []
+            rows = table_data.get("rows") or []
+            if headers and len(headers) <= 20 and len(rows) <= 500:
+                table = document.add_table(rows=1, cols=len(headers))
+                table.style = "Light Shading Accent 1"
+                for i, header in enumerate(headers):
+                    table.rows[0].cells[i].text = str(header)[:200]
                 for row in rows:
-                    cells=table.add_row().cells
-                    for i,value in enumerate(row[:len(headers)]): cells[i].text=str(value)[:1000]
-    from io import BytesIO
-    stream=BytesIO(); document.save(stream)
-    primary=_write_artifact(owner_id,stream.getvalue(),_safe_name(title,".docx"),"application/vnd.openxmlformats-officedocument.wordprocessingml.document",preview={"type":"document","title":title,"sections":blocks[:10]},retention_seconds=86400)
-    pdf=_preview_pdf(owner_id,title,blocks,"document")
-    return {"kind":"word","files":[primary,pdf],"primary":primary,"preview_file":pdf,"preview":{"type":"document","title":title,"sections":blocks[:10]}}
+                    cells = table.add_row().cells
+                    for i, value in enumerate(row[:len(headers)]):
+                        cells[i].text = str(value)[:1000]
+    if official:
+        _add_official_closing_to_docx(document, metadata)
+
+    stream = io.BytesIO()
+    document.save(stream)
+    primary = _write_artifact(
+        owner_id, stream.getvalue(), _safe_name(title, ".docx"),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        preview={"type":"document","title":title,"sections":blocks[:10],"images_embedded":len(images),"document_style":"official" if official else "standard"},
+        retention_seconds=86400,
+    )
+    pdf = _preview_pdf(owner_id, title, blocks, "document", images=images, official_metadata=metadata if official else None)
+    return {"kind":"word","files":[primary,pdf],"primary":primary,"preview_file":pdf,
+            "preview":{"type":"document","title":title,"sections":blocks[:10],"images_embedded":len(images),
+                       "document_style":"official" if official else "standard"}}
 
 
 def create_powerpoint(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
