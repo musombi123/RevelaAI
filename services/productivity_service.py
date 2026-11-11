@@ -126,8 +126,20 @@ def _preview_pdf(
         if item["placement"] in {"header", "cover", "title_slide", "all_slides"}:
             story.extend([_pdf_image(item, 180, 100), Spacer(1, 3*mm)])
     if kind == "document" and metadata:
-        for label, key in (("Date", "date"), ("Our reference", "reference"), ("To", "recipient"),
-                           ("Organization", "recipient_organization"), ("From", "sender")):
+        organization = str(metadata.get("organization") or metadata.get("organisation") or "").strip()
+        if organization:
+            story.append(Paragraph("<b>" + escape(organization[:180]) + "</b>", styles["Heading2"]))
+        organization_address = metadata.get("organization_address") or metadata.get("organisation_address") or []
+        if isinstance(organization_address, str):
+            organization_address = [organization_address]
+        for line in organization_address[:4] if isinstance(organization_address, list) else []:
+            story.append(Paragraph(escape(str(line)[:240]), styles["BodyText"]))
+        document_type = str(metadata.get("document_type") or "letter").lower()
+        fields = (("To", "recipient"), ("From", "sender"), ("Date", "date"),
+                  ("Our reference", "reference"), ("Subject", "subject")) if document_type == "memo" else (
+                  ("Date", "date"), ("Our reference", "reference"), ("To", "recipient"),
+                  ("Organization", "recipient_organization"))
+        for label, key in fields:
             value = metadata.get(key)
             if value:
                 story.append(Paragraph(f"<b>{escape(label)}:</b> {escape(str(value)[:240])}", styles["BodyText"]))
