@@ -6,7 +6,6 @@ source code or introduce a second persistence or identity system.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
@@ -20,7 +19,6 @@ from ai.ai_client import ask_hf
 from ai.intent_router import classify_intent
 from ai.json_utils import extract_json
 from services.ai_service import detect_capability
-from services.document_service import process_uploaded_document
 from services.image_service import generate_image_asset, parse_image_options
 from services.productivity_service import (
     _write_artifact, create_csv, create_powerpoint, create_spreadsheet,
@@ -29,7 +27,7 @@ from services.productivity_service import (
 from services.revenue_entitlements import check_entitlement
 from services.workspace_engine import (
     analyze_dataset, edit_image, extract_code_block, markdown_to_sections,
-    markdown_to_slides, render_analysis_chart,
+    markdown_to_slides, parse_dataset, render_analysis_chart,
 )
 from fastapi_routes.productivity import (
     _enforce_limit, _identity, _plan_tier, _record, _request_timezone,
@@ -95,11 +93,17 @@ def _task_for(body: WorkspaceExecuteInput) -> str:
     if body.dataset is not None or any(word in text for word in ("analyze this data", "analyse this data", "data analysis", "dataset", "spreadsheet analysis")):
         return "analytics"
     if body.image_base64:
-        return "image_edit"
+        edit_terms = ("edit", "enhance", "crop", "resize", "rotate", "brighten", "darken", "grayscale", "sharpen", "blur", "add text", "overlay", "flip")
+        if body.operations or any(term in text for term in edit_terms):
+            return "image_edit"
+        raise HTTPException(status_code=422, detail="This endpoint edits supplied images. For visual analysis, use POST /api/vision/analyze.")
     if any(word in text for word in ("campaign", "promotional", "promotion", "advertisement", "advertising", "marketing kit", "social media campaign")):
         return "promotion"
     if detect_capability(body.prompt, intent=classify_intent(body.prompt)) == "image_generation":
         return "image"
+    intent = classify_intent(body.prompt)
+    if intent == "programming" and any(word in text for word in ("write", "create", "build", "generate", "implement", "debug", "fix", "refactor", "develop", "script", "function", "api")):
+        return "code"
     if any(word in text for word in ("write code", "generate code", "build a function", "implement", "debug", "refactor", "programming", "python script", "javascript code")):
         return "code"
     return "document"
@@ -180,10 +184,11 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
         if body.dataset is not None:
             analysis = analyze_dataset(body.dataset)
             data = analysis["workbook_payload"]
-            result = create_spreadsheet(user_id, data) if body.format == "spreadsheet" else create_csv(
-                user_id, {"title": title, "headers": analysis["workbook_payload"]["sheets"][-1]["headers"],
-                          "rows": analysis["workbook_payload"]["sheets"][-1]["rows"]},
-            )
+            if body.format == "spreadsheet":
+                result = create_spreadsheet(user_id, data)
+            else:
+                headers, rows = parse_dataset(body.dataset)
+                result = create_csv(user_id, {"title": title, "headers": headers, "rows": rows})
             return {"task": "document", "format": body.format, "artifact": _download_url(request, result),
                     "analysis": {k: v for k, v in analysis.items() if k != "workbook_payload"},
                     "verification": {"file_created": True, "source_executed": False}}
