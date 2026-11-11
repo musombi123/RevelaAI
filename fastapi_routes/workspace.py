@@ -201,7 +201,7 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
             "only when their inputs are present. Do not fabricate source data."
         )
         data = extract_json(generated)
-        if not isinstance(data, dict) or not isinstance(data.get("sheets"), list):
+        if not isinstance(data, dict) or not isinstance(data.get("sheets"), list) or not data["sheets"] or not isinstance(data["sheets"][0], dict):
             raise HTTPException(status_code=502, detail="The model did not return the required workbook structure. No workbook was created.")
         data["title"] = title
         if body.format == "spreadsheet":
@@ -328,6 +328,8 @@ def _image_edit_task(body: WorkspaceExecuteInput, user_id: str, request: Request
 
 
 def _promotion_task(body: WorkspaceExecuteInput, user_id: str, request: Request) -> dict[str, Any]:
+    if _image_entitlement(request) is not None:
+        raise HTTPException(status_code=402, detail="Promotional poster generation is not enabled for this account.")
     generated, provider = _model_text(
         "Build a complete RevelaCode promotional campaign from the user's brief. "
         "Brand name: RevelaCode. Brand tagline: Code. Innovate. Transform. Website: https://revelacode.co.ke. "
@@ -342,7 +344,10 @@ def _promotion_task(body: WorkspaceExecuteInput, user_id: str, request: Request)
     required = ("headline", "supporting_message", "social_caption", "whatsapp_message", "call_to_action")
     if not isinstance(campaign, dict) or any(not str(campaign.get(key) or "").strip() for key in required):
         raise HTTPException(status_code=502, detail="The campaign generator did not return all required fields. No campaign files were created.")
+    hashtags = campaign.get("hashtags")
+    campaign["hashtags"] = [str(tag)[:80] for tag in hashtags[:20] if str(tag).strip()] if isinstance(hashtags, list) else []
     title = _safe_title(body, "RevelaCode Campaign")
+    poster = _image_task(body, request, promotion=campaign)
     sections = [
         {"heading": "Campaign Strategy", "paragraphs": [
             "Campaign: " + str(campaign.get("campaign_name") or title),
@@ -353,10 +358,9 @@ def _promotion_task(body: WorkspaceExecuteInput, user_id: str, request: Request)
         {"heading": "Social Media Caption", "paragraphs": [str(campaign["social_caption"])]},
         {"heading": "WhatsApp Promotion", "paragraphs": [str(campaign["whatsapp_message"])]},
         {"heading": "Call to Action", "paragraphs": [str(campaign["call_to_action"])]},
-        {"heading": "Hashtags", "paragraphs": [" ".join(str(v) for v in campaign.get("hashtags", [])[:20])]},
+        {"heading": "Hashtags", "paragraphs": [" ".join(campaign["hashtags"])]},
     ]
     doc = create_word_document(user_id, {"title": title, "sections": sections})
-    poster = _image_task(body, request, promotion=campaign)
     return {
         "task": "promotion", "campaign": campaign,
         "document": _download_url(request, doc["primary"]),
