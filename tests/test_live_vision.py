@@ -1,6 +1,7 @@
 """Native FastAPI Live Vision validation and provider-contract tests."""
 import base64
 import io
+import json
 
 import pytest
 from fastapi.responses import JSONResponse
@@ -231,3 +232,122 @@ def test_vision_rejects_without_entitlement_before_gemini_call(client, monkeypat
 
     assert response.status_code == 402
     assert response.json()["code"] == "premium_entitlement_required"
+
+
+def test_shamba_leaf_returns_structured_differential_assessment(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "authenticate_identity", _authenticate_as("verified-user"))
+    monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
+    monkeypatch.setattr(vision_routes, "get_gemini_headers", lambda: {"x-goog-api-key": "test-key"})
+    analysis = {
+        "diagnostic_type": "leaf",
+        "summary": "The image shows leaf lesions requiring differential checks.",
+        "observations": ["Several pale spots are visible."],
+        "likely_causes": [{
+            "name": "Fungal leaf spot",
+            "likelihood": "possible",
+            "visual_evidence": ["Discrete pale lesions"],
+            "differential": ["Spray injury", "Nutrient stress"],
+            "verification": ["Inspect lesion margins and both leaf surfaces"],
+        }],
+        "severity": {"level": "moderate", "basis": "Limited visible affected area"},
+        "confidence": {"level": "medium", "rationale": "Image is clear but lacks a scale"},
+        "integrated_pest_management": ["Remove heavily affected fallen leaves and monitor spread"],
+        "field_checks": ["Inspect nearby plants and the leaf underside"],
+        "escalation": ["Submit a sample if lesions spread rapidly"],
+        "limitations": ["A photograph cannot confirm a pathogen"],
+    }
+
+    class MockResponse:
+        ok = True
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"candidates": [{
+                "content": {"parts": [{"text": json.dumps(analysis)}]}
+            }]}
+
+    captured = {}
+
+    def mock_post(url, **kwargs):
+        captured.update(kwargs["json"])
+        return MockResponse()
+
+    monkeypatch.setattr(vision_routes.requests, "post", mock_post)
+    valid_image_payload.update({
+        "hub": "shamba",
+        "analysisType": "leaf",
+        "analysisContext": {"farm_name": "Namarambi", "crop_name": "Tomato"},
+        "prompt": "Assess visible leaf health and likely causes.",
+    })
+
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["analysisType"] == "leaf"
+    assert data["analysis"]["likely_causes"][0]["name"] == "Fungal leaf spot"
+    assert "leaf" in captured["systemInstruction"]["parts"][0]["text"].lower()
+    assert captured["generationConfig"]["responseMimeType"] == "application/json"
+    assert captured["generationConfig"]["maxOutputTokens"] >= 1500
+    assert "Namarambi" in captured["contents"][0]["parts"][0]["text"]
+    assert data["mediaRetained"] is False
+    assert data["visionChatHandoff"] is False
+
+
+def test_shamba_soil_never_turns_bare_soil_colour_into_ph(client, monkeypatch, valid_image_payload):
+    monkeypatch.setattr(vision_routes, "authenticate_identity", _authenticate_as("verified-user"))
+    monkeypatch.setattr(vision_routes, "GEMINI_ENABLED", True)
+    monkeypatch.setattr(vision_routes, "GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(vision_routes, "GEMINI_MODEL", "test-vision-model")
+    monkeypatch.setattr(vision_routes, "get_gemini_headers", lambda: {"x-goog-api-key": "test-key"})
+    analysis = {
+        "diagnostic_type": "soil",
+        "summary": "Visible surface features can be described, but chemical properties are not measurable from this image.",
+        "observations": ["Loose soil aggregates are visible."],
+        "physical_assessment": {"surface_structure": "Loose aggregates", "texture_cues": "Not reliably assessable"},
+        "pH_test": {"status": "not_assessable", "chart_match": "No test strip or chart visible", "estimated_ph": None, "estimated_range": None, "confidence": "not_applicable", "basis": "Bare-soil colour cannot measure pH"},
+        "nutrient_assessment": {"status": "laboratory_test_required", "reason": "Nutrients cannot be inferred visually"},
+        "confidence": {"level": "low", "rationale": "Single image"},
+        "recommended_field_tests": ["Use a representative composite sample for laboratory testing"],
+        "management_actions": ["Avoid lime or fertilizer changes until tests are available"],
+        "limitations": ["pH and nutrient status cannot be measured from bare soil colour"],
+    }
+
+    class MockResponse:
+        ok = True
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"candidates": [{
+                "content": {"parts": [{"text": json.dumps(analysis)}]}
+            }]}
+
+    captured = {}
+
+    def mock_post(url, **kwargs):
+        captured.update(kwargs["json"])
+        return MockResponse()
+
+    monkeypatch.setattr(vision_routes.requests, "post", mock_post)
+    valid_image_payload.update({
+        "hub": "shamba",
+        "analysisType": "soil",
+        "analysisContext": {"farm_name": "Namarambi", "sample_depth_cm": 15},
+        "prompt": "Assess bare soil and determine whether pH evidence is present.",
+    })
+
+    response = client.post("/api/vision/analyze", json=valid_image_payload)
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["analysis"]["pH_test"]["status"] == "not_assessable"
+    assert data["analysis"]["pH_test"]["estimated_ph"] is None
+    assert data["analysis"]["nutrient_assessment"]["status"] == "laboratory_test_required"
+    system = captured["systemInstruction"]["parts"][0]["text"]
+    assert "Never infer soil pH" in system
+    assert captured["generationConfig"]["responseMimeType"] == "application/json"
+    assert data["mediaRetained"] is False
