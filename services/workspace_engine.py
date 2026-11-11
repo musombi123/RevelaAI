@@ -17,6 +17,13 @@ _CODE_LANGUAGES = {
     "html": (".html", "text/html"), "css": (".css", "text/css"),
     "json": (".json", "application/json"), "sql": (".sql", "application/sql"),
     "bash": (".sh", "text/x-shellscript"), "sh": (".sh", "text/x-shellscript"),
+    "go": (".go", "text/x-go"), "golang": (".go", "text/x-go"),
+    "rust": (".rs", "text/x-rust"), "rs": (".rs", "text/x-rust"),
+    "java": (".java", "text/x-java"), "c": (".c", "text/x-c"),
+    "cpp": (".cpp", "text/x-c++src"), "c++": (".cpp", "text/x-c++src"),
+    "csharp": (".cs", "text/x-csharp"), "c#": (".cs", "text/x-csharp"),
+    "php": (".php", "application/x-httpd-php"), "ruby": (".rb", "text/x-ruby"),
+    "swift": (".swift", "text/x-swift"), "kotlin": (".kt", "text/x-kotlin"),
 }
 
 def _cell_text(value: Any) -> str:
