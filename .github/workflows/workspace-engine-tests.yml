@@ -32,4 +32,6 @@ jobs:
       - name: Compile changed backend modules
         run: python -m py_compile asgi.py fastapi_routes/workspace.py services/workspace_engine.py
       - name: Run workspace and adjacent regression tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest -q tests/test_workspace_engine.py tests/test_design_studio.py tests/test_image_service_design_exports.py tests/test_productivity_exports.py
