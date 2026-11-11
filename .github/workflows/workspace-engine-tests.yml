@@ -1,0 +1,35 @@
+name: Workspace Engine Tests
+
+on:
+  pull_request:
+    paths:
+      - "services/workspace_engine.py"
+      - "fastapi_routes/workspace.py"
+      - "fastapi_routes/productivity.py"
+      - "asgi.py"
+      - "tests/test_workspace_engine.py"
+      - ".github/workflows/workspace-engine-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Compile changed backend modules
+        run: python -m py_compile asgi.py fastapi_routes/workspace.py services/workspace_engine.py
+      - name: Run workspace and adjacent regression tests
+        run: pytest -q tests/test_workspace_engine.py tests/test_design_studio.py tests/test_image_service_design_exports.py tests/test_productivity_exports.py
