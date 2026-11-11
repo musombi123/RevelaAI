@@ -331,7 +331,10 @@ def create_powerpoint(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     slides = payload.get("slides")
     if not isinstance(slides, list) or not slides or len(slides) > 80:
         raise ValueError("Provide between 1 and 80 slides.")
-    images = _decode_document_images(payload.get("images"), allowed_placements={"title_slide", "slide", "all_slides"})
+    images = _decode_document_images(payload.get("images"), allowed_placements={"header", "cover", "title_slide", "slide", "all_slides"})
+    for image_item in images:
+        if image_item["placement"] in {"header", "cover"}:
+            image_item["placement"] = "title_slide"
     prs = Presentation()
     prs.core_properties.title = title
     prs.core_properties.author = "RevelaAI"
