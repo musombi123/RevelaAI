@@ -54,6 +54,16 @@ def test_python_code_artifact_is_parsed_and_invalid_source_is_rejected():
         extract_code_block(invalid)
 
 
+def test_html_code_artifact_is_extracted_for_ui_prototypes():
+    fence = chr(96) * 3
+    html = '<!doctype html><html><head><meta name="viewport" content="width=device-width"></head><body><main>Ready</main></body></html>'
+    code, extension, mime, validation = extract_code_block(fence + "html\n" + html + "\n" + fence)
+    assert code.strip() == html
+    assert extension == ".html"
+    assert mime == "text/html"
+    assert validation == "not_available"
+
+
 def test_json_code_artifact_is_parsed():
     fence = chr(96) * 3
     code, extension, mime, validation = extract_code_block(fence + 'json\n{"ok": true}\n' + fence)
