@@ -327,30 +327,60 @@ def create_word_document(owner_id: str, payload: dict[str, Any]) -> dict[str, An
 
 
 def create_powerpoint(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    title=str(payload.get("title") or "RevelaAI Presentation").strip()[:180]
-    slides=payload.get("slides")
-    if not isinstance(slides,list) or not slides or len(slides)>80: raise ValueError("Provide between 1 and 80 slides.")
-    prs=Presentation(); prs.core_properties.title=title; prs.core_properties.author="RevelaAI"
-    prs.slide_width=PptInches(13.333); prs.slide_height=PptInches(7.5)
-    for index,item in enumerate(slides):
-        if not isinstance(item,dict): continue
-        layout=prs.slide_layouts[0] if index==0 else prs.slide_layouts[1]
-        slide=prs.slides.add_slide(layout)
-        slide.shapes.title.text=str(item.get("title") or (title if index==0 else f"Slide {index+1}"))[:180]
-        if index==0 and len(slide.placeholders)>1:
-            slide.placeholders[1].text=str(item.get("subtitle") or "Created with RevelaAI")[:250]
+    title = str(payload.get("title") or "RevelaAI Presentation").strip()[:180]
+    slides = payload.get("slides")
+    if not isinstance(slides, list) or not slides or len(slides) > 80:
+        raise ValueError("Provide between 1 and 80 slides.")
+    images = _decode_document_images(payload.get("images"), allowed_placements={"title_slide", "slide", "all_slides"})
+    prs = Presentation()
+    prs.core_properties.title = title
+    prs.core_properties.author = "RevelaAI"
+    prs.slide_width = PptInches(13.333)
+    prs.slide_height = PptInches(7.5)
+    for index, item in enumerate(slides):
+        if not isinstance(item, dict):
+            continue
+        layout = prs.slide_layouts[0] if index == 0 else prs.slide_layouts[1]
+        slide = prs.slides.add_slide(layout)
+        slide.shapes.title.text = str(item.get("title") or (title if index == 0 else f"Slide {index+1}"))[:180]
+        if index == 0 and len(slide.placeholders) > 1:
+            slide.placeholders[1].text = str(item.get("subtitle") or "Created with RevelaAI")[:250]
         else:
-            placeholder=next((p for p in slide.placeholders if p.placeholder_format.idx==1),None)
+            placeholder = next((p for p in slide.placeholders if p.placeholder_format.idx == 1), None)
             if placeholder:
-                tf=placeholder.text_frame; tf.clear()
-                for bullet_index,text_value in enumerate((item.get("bullets") or [])[:12]):
-                    para=tf.paragraphs[0] if bullet_index==0 else tf.add_paragraph()
-                    para.text=str(text_value)[:500]; para.level=0; para.font.size=PptPt(24)
-    from io import BytesIO
-    stream=BytesIO(); prs.save(stream)
-    primary=_write_artifact(owner_id,stream.getvalue(),_safe_name(title,".pptx"),"application/vnd.openxmlformats-officedocument.presentationml.presentation",preview={"type":"slides","slides":slides[:12]},retention_seconds=86400)
-    pdf=_preview_pdf(owner_id,title,slides,"slides")
-    return {"kind":"powerpoint","files":[primary,pdf],"primary":primary,"preview_file":pdf,"preview":{"type":"slides","slides":slides[:12]}}
+                text_frame = placeholder.text_frame
+                text_frame.clear()
+                for bullet_index, text_value in enumerate((item.get("bullets") or [])[:12]):
+                    paragraph = text_frame.paragraphs[0] if bullet_index == 0 else text_frame.add_paragraph()
+                    paragraph.text = str(text_value)[:500]
+                    paragraph.level = 0
+                    paragraph.font.size = PptPt(24)
+    for item in images:
+        if item["placement"] == "all_slides":
+            target_slides = list(prs.slides)
+        else:
+            index = 0 if item["placement"] == "title_slide" else item["slide_index"]
+            if index < 0 or index >= len(prs.slides):
+                raise ValueError("An embedded presentation image refers to a slide that does not exist.")
+            target_slides = [prs.slides[index]]
+        for slide in target_slides:
+            width = item["width_inches"]
+            max_left = max(0.0, 13.333 - width)
+            left = min(max(0.0, item["x_inches"]), max_left)
+            top = min(max(0.0, item["y_inches"]), 7.1)
+            slide.shapes.add_picture(io.BytesIO(item["content"]), PptInches(left), PptInches(top), width=PptInches(width))
+
+    stream = io.BytesIO()
+    prs.save(stream)
+    primary = _write_artifact(
+        owner_id, stream.getvalue(), _safe_name(title, ".pptx"),
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        preview={"type":"slides","slides":slides[:12],"images_embedded":len(images)},
+        retention_seconds=86400,
+    )
+    pdf = _preview_pdf(owner_id, title, slides, "slides", images=images)
+    return {"kind":"powerpoint","files":[primary,pdf],"primary":primary,"preview_file":pdf,
+            "preview":{"type":"slides","slides":slides[:12],"images_embedded":len(images)}}
 
 
 def create_csv(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
