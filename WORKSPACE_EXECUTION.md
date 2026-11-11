@@ -186,3 +186,32 @@ For JSON clients, pass the image bytes as a base64 data URL or base64 string ins
 Image rules: PNG, JPEG and WEBP inputs; up to 4 MB per image, 8 MB combined and 20 megapixels per image. DOCX supports header, cover and inline placement. PPTX supports title_slide, slide with slide_index, and all_slides. Images are validated before embedding. DOCX, PDF preview and PPTX output all contain the selected image; the API returns an images_embedded count.
 
 The frontend must forward the image bytes selected or uploaded by the user to this endpoint. The backend cannot silently access an unrelated file elsewhere in the user's account or browser.
+
+
+## Shamba advanced camera diagnostics
+
+Shamba uses the existing authenticated Live Vision route for both leaf and soil workflows:
+
+    POST /api/vision/analyze
+
+The Shamba frontend sends the selected camera frame through the shared RevelaAI API client. No separate image-analysis service URL is required. The request includes `hub: "shamba"`, `analysisType: "leaf" | "soil"`, the base64 image/data URL, its MIME type, and bounded optional farm/test context. Existing Shamba entitlement checks and the server-configured Gemini Live Vision provider remain authoritative.
+
+### Leaf and crop-health screening
+
+The leaf response includes a structured `data.analysis` report with:
+- Visible observations, separated from inferred causes
+- Ranked differential possibilities and supporting visual evidence
+- Field verification checks, severity and confidence with rationale
+- Integrated pest-management priorities, escalation guidance and limitations
+
+The system must not present a photograph-only result as confirmed pathogen or pest identification. It considers nutrient, water, heat, light, herbicide and other abiotic stressors as differentials and prioritizes non-chemical integrated management.
+
+### Soil and soil-test evidence
+
+The soil response includes visible physical-condition cues, a structured `pH_test` section, nutrient-status limitations, recommended field/laboratory tests and cautious next actions.
+
+Bare-soil colour, apparent texture or surface moisture are not measurements of pH, N-P-K, micronutrients, salinity or CEC. A pH value may be estimated visually only when a readable reacted indicator strip/sample and its matching chart are both visible, or a digital meter/laboratory display is legible. The response labels that as a visual interpretation, not a laboratory measurement. Otherwise `pH_test.status` is `not_assessable` and the numeric estimate remains null.
+
+### Privacy and operational boundaries
+
+The camera frame is held only for the authenticated request and is not written to MongoDB or the productivity file store. The response carries `mediaRetained: false`. Farm activity records are written only when the user explicitly saves a diagnostic through the existing Shamba record workflow. Free mode keeps image analysis local and does not claim hosted semantic diagnosis.
