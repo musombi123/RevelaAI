@@ -143,6 +143,10 @@ Example form fields:
 | official_metadata | JSON object containing exact recipient, date, reference, organization and signatory details |
 | image_placement | header, cover or inline |
 | logo | The actual PNG/JPEG/WEBP file selected by the user |
+| image_width_inches | Optional image width; defaults to 1.2 inches for a logo |
+| image_section_index | Optional section number for inline DOCX placement |
+| image_paragraph_index | Optional paragraph number for inline DOCX placement; omit to place after the section body |
+| image_slide_index | Optional target slide number when image_placement=slide |
 
 The file field can be named logo, image, images (repeatable), or attachment. For PowerPoint use format=powerpoint; the default multipart image placement becomes title_slide. Use image_placement=all_slides to place a logo on every slide.
 
