@@ -315,6 +315,8 @@ def _image_edit_task(body: WorkspaceExecuteInput, user_id: str, request: Request
         raise HTTPException(status_code=402, detail="Image editing is not enabled for this account.")
     if not body.image_base64:
         raise HTTPException(status_code=422, detail="Image editing requires image_base64.")
+    if not body.operations:
+        raise HTTPException(status_code=422, detail="Provide at least one supported image-edit operation; unchanged-image copies are not created.")
     try:
         content, width, height = edit_image(body.image_base64, body.mime_type, body.operations)
     except (ValueError, TypeError) as exc:
