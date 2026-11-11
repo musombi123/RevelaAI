@@ -1,8 +1,11 @@
 # RevelaAI Workspace Execution API
 
-The unified workspace execution endpoint is:
+The unified workspace execution endpoints are:
 
     POST /api/workspace/execute
+    POST /api/workspace/execute/multipart
+
+Use the JSON endpoint for text and structured inputs. Use the multipart endpoint when a user selects an actual logo, photograph, scan, seal or other image file in RevelaCode; upload the file in the same request and it will be embedded in the exported document or deck.
 
 Requests must carry a valid RevelaCode Bearer token. The route uses the existing
 Smart AI entitlement, Productivity administrator controls, quota metering,
@@ -17,6 +20,9 @@ and the Productivity signed-file store.
 | prompt | string | Required task instructions, up to 12,000 characters |
 | title | string | Optional artifact title |
 | format | string | word, pdf, powerpoint, spreadsheet, csv, or markdown |
+| document_style | string | auto, official, or standard; auto detects formal letters, memos and submissions |
+| official_metadata | object | Optional exact particulars: organization, recipient, address, date, reference, subject, salutation, signatory, cc and enclosures |
+| embedded_images | array | Optional image objects with image_base64, mime_type, alt_text, placement and width_inches |
 | language | string | Optional source-code language hint |
 | dataset | string/object/array | CSV text, a headers/rows object, or an array of row objects |
 | image_base64 | string | Optional JPEG, PNG, or WEBP base64/data URL for editing |
@@ -106,3 +112,77 @@ Create a RevelaCode campaign:
 ## Default daily allowance
 
 The workspace execution tool is registered in the Productivity catalog and can be disabled by a platform administrator. Current default daily limits are 2 executions for Free, 30 for Plus, and 100 for Pro. The existing image-generation entitlement is checked separately for image generation, image editing, and campaign posters.
+
+
+## Official correspondence and image/logo embedding
+
+For official letters, institutional submissions, formal requests, memoranda, proposals and reports, use the official document style. The engine asks the configured text model for a structured document layout and keeps formal particulars separate from body sections. Supply any details that must be exact in official_metadata; explicit values override model-extracted values. Missing recipients, reference numbers, addresses, dates and signatories are left blank rather than invented.
+
+Supported official metadata keys include:
+
+- document_type: letter, memo, submission, proposal or report
+- organization, organization_address
+- date, reference
+- recipient, recipient_organization, recipient_address
+- sender, subject, salutation
+- closing, signatory, signatory_title
+- cc, enclosures
+
+### Upload an existing logo from RevelaCode
+
+Use multipart form-data so the frontend can send the user's selected file directly. The image is validated, converted to a document-safe PNG representation in memory, and placed in the actual DOCX/PDF/PPTX output. Source upload bytes are not retained as a separate permanent image.
+
+Example form fields:
+
+| Field | Value |
+| --- | --- |
+| task | document |
+| format | word or pdf |
+| document_style | official |
+| prompt | Write a formal institutional partnership request using the supplied details. Do not invent missing particulars. |
+| official_metadata | JSON object containing exact recipient, date, reference, organization and signatory details |
+| image_placement | header, cover or inline |
+| logo | The actual PNG/JPEG/WEBP file selected by the user |
+| image_width_inches | Optional image width; defaults to 1.2 inches for a logo |
+| image_section_index | Optional section number for inline DOCX placement |
+| image_paragraph_index | Optional paragraph number for inline DOCX placement; omit to place after the section body |
+| image_slide_index | Optional target slide number when image_placement=slide |
+
+The file field can be named logo, image, images (repeatable), or attachment. For PowerPoint use format=powerpoint; the default multipart image placement becomes title_slide. Use image_placement=all_slides to place a logo on every slide.
+
+For JSON clients, pass the image bytes as a base64 data URL or base64 string inside embedded_images:
+
+~~~json
+{
+  "task": "document",
+  "format": "word",
+  "document_style": "official",
+  "title": "Institutional Partnership Request",
+  "prompt": "Prepare an official letter requesting a meeting. Use only the particulars supplied.",
+  "official_metadata": {
+    "document_type": "letter",
+    "organization": "RevelaCode Software Solutions",
+    "date": "11 November 2026",
+    "recipient": "The Conference Secretary",
+    "recipient_organization": "West Kenya Conference",
+    "subject": "Request for an institutional demonstration",
+    "salutation": "Dear Conference Secretary,",
+    "closing": "Yours faithfully,",
+    "signatory": "Musombi William",
+    "signatory_title": "Founder and Full-Stack Developer"
+  },
+  "embedded_images": [
+    {
+      "image_base64": "BASE64_OR_DATA_URL",
+      "mime_type": "image/png",
+      "alt_text": "RevelaCode logo",
+      "placement": "header",
+      "width_inches": 1.4
+    }
+  ]
+}
+~~~
+
+Image rules: PNG, JPEG and WEBP inputs; up to 4 MB per image, 8 MB combined and 20 megapixels per image. DOCX supports header, cover and inline placement. PPTX supports title_slide, slide with slide_index, and all_slides. Images are validated before embedding. DOCX, PDF preview and PPTX output all contain the selected image; the API returns an images_embedded count.
+
+The frontend must forward the image bytes selected or uploaded by the user to this endpoint. The backend cannot silently access an unrelated file elsewhere in the user's account or browser.
