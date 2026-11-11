@@ -115,12 +115,16 @@ def _preview_pdf(
     story = []
     images = images or []
     metadata = official_metadata if isinstance(official_metadata, dict) else {}
+
+    def _pdf_image(item: dict[str, Any], max_width: float, max_height: float) -> Any:
+        aspect = float(item["height"]) / max(1.0, float(item["width"]))
+        width = min(float(item["width_inches"]) * 72, max_width, max_height / max(aspect, 0.001))
+        height = width * aspect
+        return PDFImage(io.BytesIO(item["content"]), width=width, height=height)
+
     for item in images:
         if item["placement"] in {"header", "cover", "title_slide", "all_slides"}:
-            story.extend([
-                PDFImage(io.BytesIO(item["content"]), width=min(item["width_inches"] * 72, 180), height=min(item["width_inches"] * 72 * item["height"] / item["width"], 100), kind="proportional"),
-                Spacer(1, 3*mm),
-            ])
+            story.extend([_pdf_image(item, 180, 100), Spacer(1, 3*mm)])
     if kind == "document" and metadata:
         for label, key in (("Date", "date"), ("Our reference", "reference"), ("To", "recipient"),
                            ("Organization", "recipient_organization"), ("From", "sender")):
@@ -146,10 +150,6 @@ def _preview_pdf(
             story.append(Spacer(1, 12*mm))
     else:
         for section_index, item in enumerate(blocks):
-            for image_item in images:
-                if image_item["placement"] == "inline" and image_item["section_index"] == section_index and image_item["paragraph_index"] < 0:
-                    story.append(PDFImage(io.BytesIO(image_item["content"]), width=min(image_item["width_inches"] * 72, 420), kind="proportional"))
-                    story.append(Spacer(1, 2*mm))
             if item.get("heading"):
                 story.append(Paragraph(escape(str(item["heading"])), styles["Heading2"]))
             paragraphs = (item.get("paragraphs") or [])[:40]
@@ -158,8 +158,12 @@ def _preview_pdf(
                 story.append(Spacer(1, 2*mm))
                 for image_item in images:
                     if image_item["placement"] == "inline" and image_item["section_index"] == section_index and image_item["paragraph_index"] == paragraph_index:
-                        story.append(PDFImage(io.BytesIO(image_item["content"]), width=min(image_item["width_inches"] * 72, 420), kind="proportional"))
+                        story.append(_pdf_image(image_item, 420, 350))
                         story.append(Spacer(1, 2*mm))
+            for image_item in images:
+                if image_item["placement"] == "inline" and image_item["section_index"] == section_index and image_item["paragraph_index"] < 0:
+                    story.append(_pdf_image(image_item, 420, 350))
+                    story.append(Spacer(1, 2*mm))
             for table_data in (item.get("tables") or [])[:4]:
                 rows = table_data.get("rows") or []
                 headers = table_data.get("headers") or []
