@@ -97,9 +97,9 @@ def _task_for(body: WorkspaceExecuteInput) -> str:
         if body.operations or any(term in text for term in edit_terms):
             return "image_edit"
         raise HTTPException(status_code=422, detail="This endpoint edits supplied images. For visual analysis, use POST /api/vision/analyze.")
-    if any(word in text for word in ("campaign", "promotional", "promotion", "advertisement", "advertising", "marketing kit", "social media campaign")):
+    if any(word in text for word in ("campaign", "promotional", "promotion", "promo", "advertisement", "advertising", "marketing kit", "social media campaign", "social post", "product launch", "whatsapp campaign")):
         return "promotion"
-    ui_terms = ("ui/ux", "user interface", "ux design", "ui design", "wireframe", "prototype", "landing page", "dashboard interface", "web app design")
+    ui_terms = ("ui/ux", "user interface", "ux design", "ui design", "wireframe", "prototype", "landing page", "dashboard interface", "dashboard ui", "dashboard design", "app screen", "screen design", "mobile app design", "web app design")
     if any(term in text for term in ui_terms) and any(verb in text for verb in ("create", "design", "build", "generate", "make", "prototype", "develop")):
         return "ui_design"
     if detect_capability(body.prompt, intent=classify_intent(body.prompt)) == "image_generation":
