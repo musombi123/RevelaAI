@@ -298,6 +298,7 @@ def _code_task(body: WorkspaceExecuteInput, user_id: str, request: Request) -> d
     artifact = _write_artifact(user_id, code.encode("utf-8"), filename + extension, mime,
                                preview={"type": "code", "language": body.language or extension[1:], "characters": len(code)})
     return {"task": "code", "artifact": _download_url(request, artifact), "provider": provider,
+            "source_preview": code,
             "verification": {"syntax_validation": validation, "runtime_execution": False,
                              "tests_executed": False, "human_review_recommended": True}}
 
@@ -327,6 +328,7 @@ def _ui_design_task(body: WorkspaceExecuteInput, user_id: str, request: Request)
     artifact = _write_artifact(user_id, source.encode("utf-8"), filename + ".html", "text/html",
                                preview={"type": "ui_prototype", "characters": len(source)})
     return {"task": "ui_design", "artifact": _download_url(request, artifact), "provider": provider,
+            "source_preview": source,
             "verification": {"html_document_present": True, "parser": "html.parser", "runtime_execution": False,
                              "deployment": False, "source_validation": validation}}
 
