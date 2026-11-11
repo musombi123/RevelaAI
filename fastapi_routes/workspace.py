@@ -56,7 +56,7 @@ _PROMOTION_SYSTEM = (
 
 
 class WorkspaceExecuteInput(BaseModel):
-    task: str = Field(default="auto", pattern="^(auto|document|code|analytics|image|image_edit|promotion)$")
+    task: str = Field(default="auto", pattern="^(auto|document|code|ui_design|analytics|image|image_edit|promotion)$")
     prompt: str = Field(min_length=1, max_length=12000)
     title: str = Field(default="", max_length=180)
     format: str = Field(default="word", pattern="^(word|pdf|powerpoint|spreadsheet|csv|markdown)$")
@@ -99,6 +99,9 @@ def _task_for(body: WorkspaceExecuteInput) -> str:
         raise HTTPException(status_code=422, detail="This endpoint edits supplied images. For visual analysis, use POST /api/vision/analyze.")
     if any(word in text for word in ("campaign", "promotional", "promotion", "advertisement", "advertising", "marketing kit", "social media campaign")):
         return "promotion"
+    ui_terms = ("ui/ux", "user interface", "ux design", "ui design", "wireframe", "prototype", "landing page", "dashboard interface", "web app design")
+    if any(term in text for term in ui_terms) and any(verb in text for verb in ("create", "design", "build", "generate", "make", "prototype", "develop")):
+        return "ui_design"
     if detect_capability(body.prompt, intent=classify_intent(body.prompt)) == "image_generation":
         return "image"
     intent = classify_intent(body.prompt)
@@ -225,6 +228,35 @@ def _code_task(body: WorkspaceExecuteInput, user_id: str, request: Request) -> d
     return {"task": "code", "artifact": _download_url(request, artifact), "provider": provider,
             "verification": {"syntax_validation": validation, "runtime_execution": False,
                              "tests_executed": False, "human_review_recommended": True}}
+
+
+def _ui_design_task(body: WorkspaceExecuteInput, user_id: str, request: Request) -> dict[str, Any]:
+    generated, provider = _model_text(
+        body.prompt + "\n\nCreate a complete, polished, responsive single-file web UI prototype. "
+        "Return exactly one fenced html code block containing semantic HTML, embedded CSS, "
+        "and only the JavaScript needed for explicit interactions. Include a mobile viewport, "
+        "keyboard-visible focus states, accessible labels, responsive breakpoints, and usable "
+        "empty/loading/error states where relevant. Do not include remote scripts, remote fonts, "
+        "tracking, external dependencies, secrets, or fabricated brand facts. Do not claim this "
+        "prototype is deployed or connected to a backend."
+    )
+    source, extension, mime, validation = extract_code_block(generated, "html")
+    if extension != ".html" or not re.search(r"<!doctype\s+html|<html\b", source, re.I) or not re.search(r"<body\b", source, re.I):
+        raise HTTPException(status_code=502, detail="The UI generator did not return a complete HTML document. No prototype file was created.")
+    from html.parser import HTMLParser
+    try:
+        parser = HTMLParser(convert_charrefs=True)
+        parser.feed(source)
+        parser.close()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="The generated HTML could not be parsed. No prototype file was created.") from exc
+    title = _safe_title(body, "RevelaAI-UI-prototype")
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", title).strip(".-_")[:60] or "RevelaAI-UI-prototype"
+    artifact = _write_artifact(user_id, source.encode("utf-8"), filename + ".html", "text/html",
+                               preview={"type": "ui_prototype", "characters": len(source)})
+    return {"task": "ui_design", "artifact": _download_url(request, artifact), "provider": provider,
+            "verification": {"html_document_present": True, "parser": "html.parser", "runtime_execution": False,
+                             "deployment": False, "source_validation": validation}}
 
 
 def _analytics_task(body: WorkspaceExecuteInput, user_id: str, request: Request) -> dict[str, Any]:
@@ -355,6 +387,8 @@ def execute_workspace(body: WorkspaceExecuteInput, request: Request):
             result = _document_task(body, user_id, request)
         elif task == "code":
             result = _code_task(body, user_id, request)
+        elif task == "ui_design":
+            result = _ui_design_task(body, user_id, request)
         elif task == "analytics":
             result = _analytics_task(body, user_id, request)
         elif task == "image":
