@@ -122,5 +122,3 @@ def test_workspace_guard_fails_closed_when_workspace_route_is_not_visible(monkey
     monkeypatch.setattr(productivity_guard, "_architecture_snapshot", lambda: snapshot)
     with pytest.raises(productivity_guard.ProductivitySafetyError, match="registered productivity modules"):
         productivity_guard.guard_productivity_tool("workspace_execute", {})
-
-
