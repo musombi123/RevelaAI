@@ -108,3 +108,19 @@ def test_image_edit_rejects_unsupported_operations_and_mime_mismatch():
         edit_image(encoded, "image/png", [{"type": "execute"}])
     with pytest.raises(ValueError, match="MIME"):
         edit_image(encoded, "image/jpeg", [])
+
+
+def test_workspace_guard_fails_closed_when_workspace_route_is_not_visible(monkeypatch):
+    from services import productivity_guard
+
+    snapshot = {
+        "structure": {
+            "services": ["services/productivity_service.py", "services/workspace_engine.py"],
+            "fastapi_routes": ["fastapi_routes/productivity.py"],
+        }
+    }
+    monkeypatch.setattr(productivity_guard, "_architecture_snapshot", lambda: snapshot)
+    with pytest.raises(productivity_guard.ProductivitySafetyError, match="registered productivity modules"):
+        productivity_guard.guard_productivity_tool("workspace_execute", {})
+
+
