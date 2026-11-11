@@ -129,6 +129,8 @@ def _is_official_document(body: WorkspaceExecuteInput) -> bool:
         "memo to", "institutional submission", "cover letter", "business letter",
         "letter of request", "letter of introduction", "letter of recommendation",
         "minutes of meeting", "official report", "letter addressed to",
+        "formal proposal", "official proposal", "formal submission", "partnership proposal",
+        "grant application", "application letter", "request letter", "covering letter",
     )
     return any(term in text for term in terms)
 
@@ -495,6 +497,10 @@ async def execute_workspace_multipart(request: Request):
                 "mime_type": str(getattr(upload, "content_type", "") or "").lower(),
                 "alt_text": str(getattr(upload, "filename", "") or "User-provided image")[:200],
                 "placement": placement,
+                "width_inches": form.get("image_width_inches") or (1.2 if field_name == "logo" else 1.45),
+                "section_index": form.get("image_section_index") or 0,
+                "paragraph_index": form.get("image_paragraph_index") if form.get("image_paragraph_index") is not None else -1,
+                "slide_index": form.get("image_slide_index") or 0,
             })
     if embedded_images:
         payload["embedded_images"] = embedded_images
