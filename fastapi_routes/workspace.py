@@ -60,6 +60,9 @@ class WorkspaceExecuteInput(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
     title: str = Field(default="", max_length=180)
     format: str = Field(default="word", pattern="^(word|pdf|powerpoint|spreadsheet|csv|markdown)$")
+    document_style: str = Field(default="auto", pattern="^(auto|official|standard)$")
+    official_metadata: dict[str, Any] = Field(default_factory=dict)
+    embedded_images: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
     language: str = Field(default="", max_length=24)
     dataset: Any = None
     image_base64: str | None = Field(default=None, max_length=6_000_000)
@@ -112,6 +115,54 @@ def _task_for(body: WorkspaceExecuteInput) -> str:
     return "document"
 
 
+def _is_official_document(body: WorkspaceExecuteInput) -> bool:
+    if body.document_style == "official":
+        return True
+    if body.document_style == "standard":
+        return False
+    text = body.prompt.lower()
+    terms = (
+        "official letter", "formal letter", "official copy", "memorandum",
+        "memo to", "institutional submission", "cover letter", "business letter",
+        "letter of request", "letter of introduction", "letter of recommendation",
+        "minutes of meeting", "official report", "letter addressed to",
+    )
+    return any(term in text for term in terms)
+
+
+def _official_document_payload(body: WorkspaceExecuteInput, title: str) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    """Generate a formal document structure while preserving supplied facts and particulars."""
+    generated, provider = _model_text(
+        body.prompt
+        + "\n\nCreate a complete professional official document. Return strict JSON only with "
+        "keys: title, official_metadata, sections. official_metadata must be an object with "
+        "document_type (letter, memo, submission, proposal, report), organization, "
+        "organization_address (array of strings), date, reference, recipient, "
+        "recipient_organization, recipient_address (array of strings), sender, subject, "
+        "salutation, closing, signatory, signatory_title, cc (array), enclosures (array). "
+        "sections must be an array of objects with heading, level, paragraphs, and optional "
+        "tables containing headers and rows. Use a formal institutional register, clear subject, "
+        "specific purpose, concise evidence-based body, appropriate request/recommendation, and "
+        "professional closing. Do not invent names, titles, addresses, reference numbers, dates, "
+        "facts, figures, institutional affiliations or signatures. Put an empty string or empty "
+        "array in any field not supplied or safely inferable from the user's brief. Keep the "
+        "recipient and signatory blank when unknown. Do not add placeholder names."
+    )
+    payload = extract_json(generated)
+    if not isinstance(payload, dict) or not isinstance(payload.get("sections"), list) or not payload["sections"]:
+        raise HTTPException(status_code=502, detail="The official-document generator did not return the required structured document. No file was created.")
+    generated_metadata = payload.get("official_metadata")
+    if not isinstance(generated_metadata, dict):
+        generated_metadata = {}
+    # Explicit values supplied by the user always take precedence over model extraction.
+    metadata = {**generated_metadata, **body.official_metadata}
+    sections = payload["sections"]
+    if not all(isinstance(section, dict) for section in sections):
+        raise HTTPException(status_code=502, detail="The official document contains invalid section data. No file was created.")
+    title = str(body.title or payload.get("title") or title).strip()[:180]
+    return sections[:80], metadata, {**provider, "title": title}
+
+
 def _safe_title(body: WorkspaceExecuteInput, fallback: str) -> str:
     supplied = str(body.title or "").strip()
     if supplied:
@@ -141,6 +192,8 @@ def _image_entitlement(request: Request):
 def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) -> dict[str, Any]:
     title = _safe_title(body, "RevelaAI Document")
     if body.format == "markdown":
+        if body.embedded_images:
+            raise HTTPException(status_code=422, detail="Embedded images are supported in Word, PDF and PowerPoint files, not Markdown exports.")
         generated, provider = _model_text(body.prompt)
         artifact = _write_artifact(
             user_id, generated.encode("utf-8"), re.sub(r"[^A-Za-z0-9._-]+", "-", title)[:70] + ".md",
@@ -150,9 +203,14 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
                 "artifact": _download_url(request, artifact), "provider": provider}
 
     if body.format in {"word", "pdf"}:
+        official = _is_official_document(body)
+        metadata = dict(body.official_metadata)
         if body.sections is not None:
             sections = body.sections
             provider = {"provider": "user_supplied_structured_content", "model": None}
+        elif official:
+            sections, metadata, provider = _official_document_payload(body, title)
+            title = provider.pop("title", title)
         else:
             generated, provider = _model_text(
                 body.prompt + "\n\nReturn a polished professional document in Markdown. Use a title, "
@@ -160,11 +218,20 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
                 "Do not include an introductory chat message."
             )
             sections = markdown_to_sections(generated)
-        result = create_word_document(user_id, {"title": title, "sections": sections})
+        result = create_word_document(user_id, {
+            "title": title,
+            "sections": sections,
+            "images": body.embedded_images,
+            "document_style": "official" if official else "standard",
+            "official_metadata": metadata,
+        })
         selected = result["preview_file"] if body.format == "pdf" else result["primary"]
-        return {"task": "document", "format": body.format, "artifact": _download_url(request, selected),
+        return {"task": "document", "format": body.format, "document_style": "official" if official else "standard",
+                "artifact": _download_url(request, selected),
                 "additional_files": [_download_url(request, item) for item in result.get("files", []) if item.get("file_id") != selected.get("file_id")],
-                "preview": result.get("preview"), "provider": provider, "verification": {"file_created": True, "source_executed": False}}
+                "preview": result.get("preview"), "provider": provider,
+                "verification": {"file_created": True, "images_embedded": result["preview"].get("images_embedded", 0),
+                                 "official_metadata_applied": official, "source_executed": False}}
 
     if body.format == "powerpoint":
         if body.slides is not None:
@@ -176,7 +243,7 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
                 "one or two heading levels and no more than six concise bullets per slide."
             )
             slides = markdown_to_slides(generated, title)
-        result = create_powerpoint(user_id, {"title": title, "slides": slides})
+        result = create_powerpoint(user_id, {"title": title, "slides": slides, "images": body.embedded_images})
         return {"task": "document", "format": "powerpoint",
                 "artifact": _download_url(request, result["primary"]),
                 "preview_file": _download_url(request, result["preview_file"]),
