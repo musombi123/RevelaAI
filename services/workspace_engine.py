@@ -211,7 +211,7 @@ def markdown_to_sections(markdown: str) -> list[dict[str, Any]]:
         elif re.match(r"^\d+[.)]\s+", line): current["paragraphs"].append(line[:12000])
         else: current["paragraphs"].append(line[:12000])
     if current["heading"] or current["paragraphs"]: sections.append(current)
-    return sections[:80] or [{"heading": "Content", "paragraphs": [str(markdown or "")[:12000]]}
+    return sections[:80] or [{"heading": "Content", "paragraphs": [str(markdown or "")[:12000]]}]
 
 def markdown_to_slides(markdown: str, title: str) -> list[dict[str, Any]]:
     """Convert Markdown headings and bullets into editable PowerPoint slides."""
