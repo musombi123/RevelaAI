@@ -236,9 +236,10 @@ def rollback_repair(
 ) -> dict[str, Any]:
     if not authorized or not approved:
         raise ValueError("Rollback requires both --authorized and --approve from the local operator.")
-    transaction_path = transaction_path.expanduser().resolve(strict=True)
+    transaction_path = transaction_path.expanduser()
     if transaction_path.is_symlink() or not transaction_path.is_file():
-        raise ValueError("Transaction record must be a regular file.")
+        raise ValueError("Transaction record must be a regular, non-symbolic-link file.")
+    transaction_path = transaction_path.resolve(strict=True)
     try:
         transaction = json.loads(transaction_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -247,7 +248,10 @@ def rollback_repair(
         raise ValueError("Unsupported repair transaction schema.")
     if transaction.get("status") != "applied" or not isinstance(transaction.get("changes"), list):
         raise ValueError("Transaction is not in an applied state.")
-    root = Path(str(transaction.get("root") or "")).resolve(strict=True)
+    root = Path(str(transaction.get("root") or ""))
+    if root.is_symlink():
+        raise ValueError("Original repository root now resolves through a symbolic link.")
+    root = root.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("Original repository root is unavailable.")
     transaction_dir = transaction_path.parent
