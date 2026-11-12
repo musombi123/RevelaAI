@@ -8,6 +8,12 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn revela_platform.fastapi_app:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
+      # Expose the URL assigned by Render for service-to-service Blueprint links.
+      - key: REVELAAI_PUBLIC_URL
+        fromService:
+          type: web
+          name: RevelaAI
+          envVarKey: RENDER_EXTERNAL_URL
       # Explicit allow-list for the web frontend and native WebView clients.
       - key: CORS_ORIGINS
         value: "https://revelacode.co.ke,https://www.revelacode.co.ke,https://revelacode-frontend.onrender.com,http://tauri.localhost,https://localhost,http://localhost,http://localhost:5173,http://127.0.0.1:5173"
@@ -71,12 +77,12 @@ services:
         fromService:
           type: web
           name: usect-zero-core-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: USECT_ZERO_PUBLIC_URL
       - key: USECT_ZERO_BASE_URL
         fromService:
           type: web
           name: usect-zero-core-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: USECT_ZERO_PUBLIC_URL
       - key: USECT_ZERO_ADMIN_TOKEN
         fromService:
           type: web
@@ -93,7 +99,7 @@ services:
         fromService:
           type: web
           name: genesis-core-one-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: GENESIS_PUBLIC_URL
       - key: GENESIS_ADMIN_TOKEN
         fromService:
           type: web
@@ -119,7 +125,7 @@ services:
         fromService:
           type: web
           name: infinite-mind-core-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: MIND_PUBLIC_URL
       - key: MIND_ADMIN_TOKEN
         fromService:
           type: web
@@ -139,6 +145,12 @@ services:
     buildCommand: go build -o ./usect-zero ./cmd/usect-zero
     startCommand: ./usect-zero -mode serve -root .. -listen 0.0.0.0:$PORT
     envVars:
+      # Self-reference Render's generated HTTPS URL for other services to consume.
+      - key: USECT_ZERO_PUBLIC_URL
+        fromService:
+          type: web
+          name: usect-zero-core-free
+          envVarKey: RENDER_EXTERNAL_URL
       - key: USECT_ZERO_DATA_DIR
         value: ./.revela-state/usect-zero
       - key: USECT_ZERO_ADMIN_TOKEN
@@ -151,17 +163,17 @@ services:
         fromService:
           type: web
           name: RevelaAI
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: REVELAAI_PUBLIC_URL
       - key: GENESIS_BASE_URL
         fromService:
           type: web
           name: genesis-core-one-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: GENESIS_PUBLIC_URL
       - key: MIND_BASE_URL
         fromService:
           type: web
           name: infinite-mind-core-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: MIND_PUBLIC_URL
   # Core-One: standalone Genesis service. Build from the repository root so
   # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
   - type: web
@@ -172,6 +184,12 @@ services:
     buildCommand: go -C core-one build -o ./genesis-server ./cmd/genesis
     startCommand: ./core-one/genesis-server -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
     envVars:
+      # Self-reference Render's generated HTTPS URL for other services to consume.
+      - key: GENESIS_PUBLIC_URL
+        fromService:
+          type: web
+          name: genesis-core-one-free
+          envVarKey: RENDER_EXTERNAL_URL
       - key: GENESIS_REGISTRY_DIR
         value: ./.revela-state/genesis/tool-registry
       - key: GENESIS_ADMIN_TOKEN
@@ -206,13 +224,19 @@ services:
     buildCommand: go -C core-two build -o ./revela-mind ./cmd/revela-mind
     startCommand: ./core-two/revela-mind -daemon -repo-root . -listen 0.0.0.0:$PORT -interval 24h
     envVars:
+      # Self-reference Render's generated HTTPS URL for other services to consume.
+      - key: MIND_PUBLIC_URL
+        fromService:
+          type: web
+          name: infinite-mind-core-free
+          envVarKey: RENDER_EXTERNAL_URL
       - key: MIND_ADMIN_TOKEN
         generateValue: true
       - key: USECT_ZERO_BASE_URL
         fromService:
           type: web
           name: usect-zero-core-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: USECT_ZERO_PUBLIC_URL
       - key: USECT_ZERO_ADMIN_TOKEN
         fromService:
           type: web
@@ -222,7 +246,7 @@ services:
         fromService:
           type: web
           name: genesis-core-one-free
-          envVarKey: RENDER_EXTERNAL_URL
+          envVarKey: GENESIS_PUBLIC_URL
       - key: GENESIS_ADMIN_TOKEN
         fromService:
           type: web
