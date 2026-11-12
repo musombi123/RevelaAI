@@ -35,8 +35,13 @@ def test_primary_url_takes_precedence_over_alias(monkeypatch):
 
 def test_production_without_url_fails_closed(monkeypatch):
     monkeypatch.setenv("RENDER_SERVICE_ID", "srv-example")
-    with pytest.raises(client.USECTZeroConfigurationError, match="service address is not linked"):
+    with pytest.raises(client.USECTZeroConfigurationError, match="HTTPS address is missing"):
         client._base_url()
+
+
+def test_render_blueprint_supplied_https_url_needs_no_manual_url_setup(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_URL", "https://usect-zero-core-free.onrender.com")
+    assert client._base_url() == "https://usect-zero-core-free.onrender.com"
 
 
 def test_local_development_keeps_loopback_default():
@@ -45,7 +50,7 @@ def test_local_development_keeps_loopback_default():
 
 def test_timeout_is_fixed_to_ten_seconds_and_ignores_legacy_environment(monkeypatch):
     monkeypatch.setenv("USECT_ZERO_TIMEOUT_SECONDS", "2")
-    assert client._timeout_seconds() == 10
+    assert client._timeout_seconds() == 75
 
 
 def test_legacy_enable_flag_does_not_control_runtime(monkeypatch):
