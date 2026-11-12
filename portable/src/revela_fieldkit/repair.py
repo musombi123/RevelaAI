@@ -102,11 +102,15 @@ def apply_repair_plan(
 ) -> dict[str, Any]:
     if not authorized or not approved:
         raise ValueError("Repair requires both --authorized and --approve from the local operator.")
-    root = root.expanduser().resolve(strict=True)
-    plan_path = plan_path.expanduser().resolve(strict=True)
-    if not root.is_dir() or root.is_symlink():
-        raise ValueError("Repair root must be an existing directory and cannot be a symbolic link.")
+    root = root.expanduser()
+    plan_path = plan_path.expanduser()
+    if root.is_symlink():
+        raise ValueError("Repair root cannot be a symbolic link; select its real target explicitly.")
     if plan_path.is_symlink() or not plan_path.is_file():
+        raise ValueError("Repair plan must be a regular, non-symbolic-link file.")
+    root = root.resolve(strict=True)
+    plan_path = plan_path.resolve(strict=True)
+    if not root.is_dir():
         raise ValueError("Repair plan must be a regular, non-symbolic-link file.")
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
@@ -161,6 +165,8 @@ def apply_repair_plan(
         })
 
     backup_root = (backup_root or (Path.home() / ".revela-fieldkit" / "backups")).expanduser()
+    if backup_root.is_symlink():
+        raise ValueError("Backup directory cannot be a symbolic link.")
     backup_root.mkdir(parents=True, exist_ok=True)
     backup_root = backup_root.resolve(strict=True)
     try:
@@ -188,6 +194,7 @@ def apply_repair_plan(
                 "created": item["old"] is None,
                 "backup": backup_relative.as_posix() if item["old"] is not None else None,
                 "before_sha256": _sha256(item["old"]) if item["old"] is not None else None,
+                "before_mode": item["mode"],
                 "after_sha256": _sha256(item["new"]),
                 "reason": item["reason"],
             })
@@ -270,7 +277,8 @@ def rollback_repair(
         original = backup.read_bytes()
         if _sha256(original) != item.get("before_sha256"):
             raise ValueError(f"Backup integrity check failed for {relative}.")
-        _atomic_write(target, original, target.stat().st_mode & 0o777)
+        original_mode = item.get("before_mode")
+        _atomic_write(target, original, int(original_mode) if isinstance(original_mode, int) else (target.stat().st_mode & 0o777))
         completed.append(relative)
     transaction["status"] = "rolled_back"
     transaction["rolled_back_at"] = _now()
