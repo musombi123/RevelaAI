@@ -230,6 +230,7 @@ func TestCanaryAndHumanFeedbackUseIndependentRankingEntries(t *testing.T) {
 
 func TestImprovementMetricsUseTelemetryWithoutLegacyMetricsFile(t *testing.T) {
 	_, service := newTestRepository(t)
+	t.Setenv("MIND_ADMIN_TOKEN", "test-only-token")
 	version := strings.Repeat("a", 64)
 	for _, event := range telemetryEvents("sample_tool", version, 3, 0, true) {
 		if err := service.RecordToolTelemetry(event); err != nil {
@@ -237,6 +238,7 @@ func TestImprovementMetricsUseTelemetryWithoutLegacyMetricsFile(t *testing.T) {
 		}
 	}
 	request := httptest.NewRequest(http.MethodGet, "/v1/mind/tools/sample_tool/improvement", nil)
+	request.Header.Set("X-Mind-Token", "test-only-token")
 	response := httptest.NewRecorder()
 	service.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
