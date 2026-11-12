@@ -60,18 +60,18 @@ def test_configuration_health_distinguishes_missing_private_routes_from_down_ser
     assert report["core_probes"]["zero"]["reason"] == "core_service_not_configured"
     assert report["core_probes"]["genesis"]["reason"] == "core_service_not_configured"
     assert report["core_probes"]["mind"]["reason"] == "core_service_not_configured"
-    assert all("private service URL" in item["message"] for item in report["core_probes"].values())
+    assert all("Blueprint-linked HTTPS endpoint" in item["message"] for item in report["core_probes"].values())
     assert report["secrets_returned"] is False
 
 
 def test_configuration_health_reports_service_down_when_private_url_exists(monkeypatch):
     monkeypatch.setenv("RENDER", "true")
-    monkeypatch.setenv("USECT_ZERO_URL", "http://usect-zero-core:10000")
-    monkeypatch.setenv("GENESIS_BASE_URL", "http://genesis-core-one:10000")
-    monkeypatch.setenv("MIND_BASE_URL", "http://infinite-mind-core:10000")
+    monkeypatch.setenv("USECT_ZERO_URL", "https://usect-zero-core-free.onrender.com")
+    monkeypatch.setenv("GENESIS_BASE_URL", "https://genesis-core-one-free.onrender.com")
+    monkeypatch.setenv("MIND_BASE_URL", "https://infinite-mind-core-free.onrender.com")
     monkeypatch.setattr(core_mesh, "_safe_fetch", lambda *args, **kwargs: {
         "status": "unavailable", "reachable": False, "reason": "core_service_unreachable"
     })
     report = core_mesh.get_core_mesh_configuration_health()
     assert all(probe["reason"] == "core_service_unreachable" for probe in report["core_probes"].values())
-    assert all("deployed and running" in probe["message"] for probe in report["core_probes"].values())
+    assert all("waking from idle" in probe["message"] for probe in report["core_probes"].values())
