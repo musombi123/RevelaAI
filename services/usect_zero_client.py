@@ -70,8 +70,8 @@ def _configured_base_url() -> str:
     raw = core_base_url("zero")
     if not raw:
         raise USECTZeroConfigurationError(
-            "The USECT-ZERO service address is not linked. Sync the RevelaAI Render Blueprint "
-            "so it can connect to usect-zero-core automatically."
+            "The USECT-ZERO HTTPS address is missing. The Render Blueprint supplies it "
+            "automatically from the core web service; no manual URL is required."
         )
     return raw
 
