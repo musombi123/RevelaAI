@@ -75,8 +75,9 @@ class WorkspaceAuditTests(unittest.TestCase):
         nested.mkdir()
         (nested / "package.json").write_text('{"name":"frontend"}', encoding="utf-8")
         found = discover_projects(self.root)
-        self.assertIn(self.project, found)
-        self.assertIn(nested, found)
+        resolved = {path.resolve() for path in found}
+        self.assertIn(self.project.resolve(), resolved)
+        self.assertIn(nested.resolve(), resolved)
 
     def test_secret_values_are_not_included_in_audit_report(self):
         secret = "ghp_" + "Z" * 40
