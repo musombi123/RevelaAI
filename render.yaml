@@ -8,12 +8,6 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn revela_platform.fastapi_app:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
-      # Expose the URL assigned by Render for service-to-service Blueprint links.
-      - key: REVELAAI_PUBLIC_URL
-        fromService:
-          type: web
-          name: RevelaAI
-          envVarKey: RENDER_EXTERNAL_URL
       # Explicit allow-list for the web frontend and native WebView clients.
       - key: CORS_ORIGINS
         value: "https://revelacode.co.ke,https://www.revelacode.co.ke,https://revelacode-frontend.onrender.com,http://tauri.localhost,https://localhost,http://localhost,http://localhost:5173,http://127.0.0.1:5173"
@@ -158,22 +152,6 @@ services:
       # Separate generated service identity for bounded RevelaAI brain operations.
       - key: USECT_ZERO_BRAIN_TOKEN
         generateValue: true
-      # Optional supervisor probes use Blueprint-assigned HTTPS URLs.
-      - key: USECT_ZERO_GATEWAY_URL
-        fromService:
-          type: web
-          name: RevelaAI
-          envVarKey: REVELAAI_PUBLIC_URL
-      - key: GENESIS_BASE_URL
-        fromService:
-          type: web
-          name: genesis-core-one-free
-          envVarKey: GENESIS_PUBLIC_URL
-      - key: MIND_BASE_URL
-        fromService:
-          type: web
-          name: infinite-mind-core-free
-          envVarKey: MIND_PUBLIC_URL
   # Core-One: standalone Genesis service. Build from the repository root so
   # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
   - type: web
