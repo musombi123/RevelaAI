@@ -110,6 +110,29 @@ def test_only_allowlisted_proposal_fields_are_returned():
     assert "admin_token" not in proposal
 
 
+def test_mind_diagnostic_reads_forward_the_server_side_service_token(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_BASE_URL", "http://127.0.0.1:8780")
+    monkeypatch.setenv("GENESIS_BASE_URL", "http://127.0.0.1:8781")
+    monkeypatch.setenv("MIND_BASE_URL", "http://127.0.0.1:8782")
+    monkeypatch.setenv("MIND_ADMIN_TOKEN", "internal-mind-test")
+    observed = {}
+
+    def fake_safe_fetch(base, path, *, headers=None):
+        observed[path] = dict(headers or {})
+        if path == "/v1/genesis/registry/tools":
+            return {"tools": []}
+        return {"status": "ok"}
+
+    monkeypatch.setattr(core_mesh, "_safe_fetch", fake_safe_fetch)
+    core_mesh._dashboard_snapshot()
+
+    assert observed["/v1/mind/health"] == {}
+    assert observed["/v1/zero/status"] == {"X-Mind-Token": "internal-mind-test"}
+    assert observed["/v1/mind/metrics"] == {"X-Mind-Token": "internal-mind-test"}
+    assert observed["/v1/mind/evolutions"] == {"X-Mind-Token": "internal-mind-test"}
+    assert observed["/v1/mind/learning"] == {"X-Mind-Token": "internal-mind-test"}
+
+
 def test_mind_unavailable_is_explicit_and_normal_chat_stays_available(monkeypatch):
     monkeypatch.setattr(core_mesh, "_cache_value", None)
 
