@@ -66,6 +66,42 @@ class RepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             apply_repair_plan(self.root, self.plan, self.backups, authorized=True, approved=True)
 
+
+    def test_rollback_preflights_all_files_before_restoring_any(self):
+        second = self.root / "src" / "second.py"
+        second_original = b"VERSION = 1\n"
+        second_replacement = b"VERSION = 2\n"
+        second.write_bytes(second_original)
+        payload = {
+            "schema_version": "revelaai.repair-plan.v1",
+            "id": "two-file-change",
+            "changes": [
+                {
+                    "path": "src/settings.py",
+                    "expected_sha256": __import__("hashlib").sha256(self.original).hexdigest(),
+                    "new_content_base64": base64.b64encode(self.replacement).decode("ascii"),
+                    "reason": "reviewed first change",
+                },
+                {
+                    "path": "src/second.py",
+                    "expected_sha256": __import__("hashlib").sha256(second_original).hexdigest(),
+                    "new_content_base64": base64.b64encode(second_replacement).decode("ascii"),
+                    "reason": "reviewed second change",
+                },
+            ],
+        }
+        self.plan.write_text(json.dumps(payload), encoding="utf-8")
+        result = apply_repair_plan(self.root, self.plan, self.backups, authorized=True, approved=True)
+        self.assertEqual(self.target.read_bytes(), self.replacement)
+        self.assertEqual(second.read_bytes(), second_replacement)
+
+        # A post-repair edit to the second target must block rollback of the first.
+        second.write_bytes(b"operator changed this later\n")
+        with self.assertRaises(ValueError):
+            rollback_repair(Path(result["transaction"]), authorized=True, approved=True)
+        self.assertEqual(self.target.read_bytes(), self.replacement)
+        self.assertEqual(second.read_bytes(), b"operator changed this later\n")
+
     def test_rollback_refuses_to_overwrite_post_repair_changes(self):
         result = apply_repair_plan(self.root, self.plan, self.backups, authorized=True, approved=True)
         self.target.write_text("later operator edit\n", encoding="utf-8")
