@@ -110,11 +110,47 @@ def _preview_pdf(
 ) -> dict[str, Any]:
     stream = io.BytesIO()
     page = landscape(A4) if kind == "slides" else A4
-    doc = SimpleDocTemplate(stream, pagesize=page, rightMargin=16*mm, leftMargin=16*mm, topMargin=16*mm, bottomMargin=16*mm)
-    styles = getSampleStyleSheet()
-    story = []
     images = images or []
     metadata = official_metadata if isinstance(official_metadata, dict) else {}
+    is_official = bool(metadata)
+    margin_x = 19*mm if is_official else 16*mm
+    top_margin = 22*mm if is_official else 16*mm
+    bottom_margin = 20*mm if is_official else 16*mm
+    doc = SimpleDocTemplate(
+        stream, pagesize=page, rightMargin=margin_x, leftMargin=margin_x,
+        topMargin=top_margin, bottomMargin=bottom_margin,
+    )
+    styles = getSampleStyleSheet()
+    story = []
+
+    def _draw_page_chrome(canvas_obj: Any, document_obj: Any) -> None:
+        if not is_official:
+            return
+        width, height = page
+        organization = str(metadata.get("organization") or metadata.get("organisation") or "REVELAAI").strip()
+        tagline = "Code. Innovate. Transform." if "revelacode" in organization.lower() else "Official institutional document"
+        canvas_obj.saveState()
+        canvas_obj.setFillColor(colors.HexColor("#0A74DA"))
+        canvas_obj.rect(0, height - 7*mm, width, 7*mm, fill=1, stroke=0)
+        canvas_obj.setFillColor(colors.HexColor("#2E8B57"))
+        canvas_obj.rect(0, height - 9*mm, width, 2*mm, fill=1, stroke=0)
+        canvas_obj.setFillColor(colors.HexColor("#D4AF37"))
+        canvas_obj.rect(0, height - 10*mm, width, 1*mm, fill=1, stroke=0)
+        canvas_obj.setFillColor(colors.HexColor("#F4F8FC"))
+        canvas_obj.rect(0, 0, 4*mm, height, fill=1, stroke=0)
+        canvas_obj.setFillColor(colors.HexColor("#EEF3F8"))
+        canvas_obj.rect(0, 0, width, 14*mm, fill=1, stroke=0)
+        canvas_obj.setStrokeColor(colors.HexColor("#D7E1EB"))
+        canvas_obj.setLineWidth(0.45)
+        canvas_obj.line(margin_x, 15.5*mm, width - margin_x, 15.5*mm)
+        canvas_obj.setFillColor(colors.HexColor("#23364D"))
+        canvas_obj.setFont("Helvetica-Bold", 7)
+        canvas_obj.drawString(margin_x, 7.5*mm, organization[:64])
+        canvas_obj.setFont("Helvetica", 6)
+        canvas_obj.drawCentredString(width / 2, 7.5*mm, tagline)
+        canvas_obj.setFont("Helvetica", 7)
+        canvas_obj.drawRightString(width - margin_x, 7.5*mm, f"Page {document_obj.page}")
+        canvas_obj.restoreState()
 
     def _pdf_image(item: dict[str, Any], max_width: float, max_height: float) -> Any:
         aspect = float(item["height"]) / max(1.0, float(item["width"]))
@@ -152,7 +188,7 @@ def _preview_pdf(
             story.extend([Spacer(1, 3*mm), Paragraph("<b>RE: " + escape(str(metadata["subject"]).upper()[:240]) + "</b>", styles["BodyText"]), Spacer(1, 3*mm)])
         if metadata.get("salutation"):
             story.extend([Paragraph(escape(str(metadata["salutation"])[:180]), styles["BodyText"]), Spacer(1, 2*mm)])
-    if title and (kind == "slides" or not metadata):
+    if title:
         story.extend([Paragraph(escape(title[:180]), styles["Title"]), Spacer(1, 8*mm)])
     if kind == "slides":
         for index, item in enumerate(blocks, 1):
@@ -204,9 +240,16 @@ def _preview_pdf(
                     values = [values]
                 if isinstance(values, list) and values:
                     story.append(Paragraph(f"<b>{label}:</b> " + escape("; ".join(str(v)[:160] for v in values[:12])), styles["BodyText"]))
-    doc.build(story)
-    return _write_artifact(owner_id, stream.getvalue(), _safe_name(title, ".pdf"), "application/pdf",
-                           preview={"type":"pdf","pages":"rendered","images_embedded":len(images)}, retention_seconds=86400)
+    doc.build(story, onFirstPage=_draw_page_chrome, onLaterPages=_draw_page_chrome)
+    pdf_bytes = stream.getvalue()
+    if not pdf_bytes.startswith(b"%PDF-") or len(pdf_bytes) < 500:
+        raise RuntimeError("The PDF renderer returned an invalid or empty PDF.")
+    return _write_artifact(
+        owner_id, pdf_bytes, _safe_name(title, ".pdf"), "application/pdf",
+        preview={"type": "pdf", "pages": "rendered", "images_embedded": len(images),
+                 "official_layout": is_official},
+        retention_seconds=86400,
+    )
 
 
 def _decode_document_images(images: Any, *, allowed_placements: set[str]) -> list[dict[str, Any]]:
@@ -404,6 +447,27 @@ def create_spreadsheet(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]
     stream=BytesIO(); wb.save(stream)
     artifact=_write_artifact(owner_id,stream.getvalue(),_safe_name(title,".xlsx"),"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",preview={"type":"table","sheets":previews},retention_seconds=86400)
     artifact["kind"]="spreadsheet"
+    return artifact
+
+
+def create_pdf_document(owner_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Create one independently downloadable PDF without creating an unwanted DOCX sidecar."""
+    title = str(payload.get("title") or "RevelaAI Document").strip()[:180]
+    blocks = payload.get("sections")
+    if not isinstance(blocks, list) or not blocks or len(blocks) > 80:
+        raise ValueError("Provide between 1 and 80 document sections.")
+    images = _decode_document_images(
+        payload.get("images"),
+        allowed_placements={"header", "cover", "inline"},
+    )
+    metadata = payload.get("official_metadata") if isinstance(payload.get("official_metadata"), dict) else {}
+    official = str(payload.get("document_style") or "standard").lower() == "official"
+    artifact = _preview_pdf(
+        owner_id, title, blocks, "document",
+        images=images,
+        official_metadata=metadata if official else None,
+    )
+    artifact["kind"] = "pdf"
     return artifact
 
 
