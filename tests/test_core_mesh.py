@@ -15,7 +15,7 @@ def _online_dashboard():
 
 
 def test_core_mesh_status_timeout_is_ten_seconds():
-    assert core_mesh._TIMEOUT_SECONDS == 10.0
+    assert core_mesh._TIMEOUT_SECONDS == 75.0
 
 
 def test_normal_chat_does_not_trigger_core_health_fanout(monkeypatch):
@@ -69,6 +69,13 @@ def test_render_private_hostport_is_normalized_and_allowed(monkeypatch):
     monkeypatch.setenv("USECT_ZERO_BASE_URL", "usect-zero-core:10000")
     base = core_mesh._base_url("USECT_ZERO_BASE_URL", "")
     assert base == "http://usect-zero-core:10000"
+    core_mesh._validate_base(base)
+
+
+def test_render_external_https_url_is_used_without_manual_hostport(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_URL", "https://usect-zero-core-free.onrender.com")
+    base = core_mesh._base_url("USECT_ZERO_BASE_URL", "")
+    assert base == "https://usect-zero-core-free.onrender.com"
     core_mesh._validate_base(base)
 
 
