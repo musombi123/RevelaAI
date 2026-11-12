@@ -148,7 +148,7 @@ func (s *Service) proxyCore(w http.ResponseWriter, r *http.Request, which string
     u, err := url.Parse(base + path); if err != nil { writeAPIError(w, 502, "invalid_upstream", "Core upstream URL is invalid."); return }; u.RawQuery = r.URL.RawQuery
 	upReq, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), r.Body); if err != nil { writeAPIError(w, 502, "upstream_request_failed", "Could not construct Core upstream request."); return }
 	for _, header := range []string{"Accept", "Content-Type", "Authorization", "X-API-Key", "X-Admin-Token", "X-Genesis-Token"} { if value:=r.Header.Get(header);value!=""{upReq.Header.Set(header,value)} }
-	client := &http.Client{Transport:&http.Transport{ResponseHeaderTimeout:8*time.Second}}; resp, err := client.Do(upReq); if err != nil { writeAPIError(w, 502, "upstream_unavailable", "Core upstream is unavailable; start the corresponding existing daemon."); return }; defer resp.Body.Close()
+	client := &http.Client{Transport:&http.Transport{ResponseHeaderTimeout:75*time.Second}}; resp, err := client.Do(upReq); if err != nil { writeAPIError(w, 502, "upstream_unavailable", "Core upstream is unavailable or waking from an idle Render state; retry after the service starts."); return }; defer resp.Body.Close()
 	for _,header:=range []string{"Content-Type","Cache-Control","ETag","Last-Modified"}{if value:=resp.Header.Get(header);value!=""{w.Header().Set(header,value)}};w.WriteHeader(resp.StatusCode);_,_=io.Copy(w,io.LimitReader(resp.Body,8<<20))
 }
 
