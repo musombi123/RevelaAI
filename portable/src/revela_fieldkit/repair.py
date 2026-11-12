@@ -279,8 +279,14 @@ def rollback_repair(
     if not isinstance(transaction, dict) or transaction.get("schema_version") != TRANSACTION_SCHEMA:
         raise ValueError("Unsupported repair transaction schema.")
     changes = transaction.get("changes")
-    if transaction.get("status") != "applied" or not isinstance(changes, list) or not changes:
-        raise ValueError("Transaction is not in an applied state.")
+    if (
+        transaction.get("status") != "applied"
+        or not isinstance(changes, list)
+        or not changes
+        or len(changes) > MAX_CHANGES
+    ):
+        raise ValueError("Transaction is not in a valid applied state.")
+
     root = Path(str(transaction.get("root") or ""))
     if root.is_symlink():
         raise ValueError("Original repository root now resolves through a symbolic link.")
@@ -291,8 +297,14 @@ def rollback_repair(
     if transaction_dir.is_symlink():
         raise ValueError("Transaction directory cannot be a symbolic link.")
     transaction_dir = transaction_dir.resolve(strict=True)
+    try:
+        transaction_dir.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("Repair transaction and its backups must remain outside the repository.")
 
-    # Preflight every current file and backup before restoring any file.
+    # Preflight every patched file and every original backup before restoring any file.
     prepared: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in changes:
@@ -309,13 +321,25 @@ def rollback_repair(
         current = target.read_bytes()
         if len(current) > MAX_FILE_BYTES or _sha256(current) != item.get("after_sha256"):
             raise ValueError(f"Rollback blocked because {normalized} changed after the repair was applied.")
+        current_mode = target.stat().st_mode & 0o777
+
         if item.get("created") is True:
-            prepared.append({"path": normalized, "target": target, "created": True, "backup": None, "old": None, "mode": None})
+            prepared.append({
+                "path": normalized, "target": target, "created": True,
+                "current": current, "current_mode": current_mode,
+                "original": None, "original_mode": None,
+            })
             continue
+
         backup_rel = Path(str(item.get("backup") or ""))
         if backup_rel.is_absolute() or any(part in {"", ".", ".."} for part in backup_rel.parts):
             raise ValueError(f"Unsafe backup reference for {normalized}.")
         backup = transaction_dir.joinpath(backup_rel)
+        cursor = transaction_dir
+        for part in backup_rel.parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise ValueError(f"Backup path contains a symbolic link: {normalized}")
         try:
             backup.resolve(strict=True).relative_to(transaction_dir)
         except (OSError, ValueError):
@@ -325,26 +349,47 @@ def rollback_repair(
         original = backup.read_bytes()
         if len(original) > MAX_FILE_BYTES or _sha256(original) != item.get("before_sha256"):
             raise ValueError(f"Backup integrity check failed for {normalized}.")
-        mode = item.get("before_mode")
+        original_mode = item.get("before_mode")
         prepared.append({
-            "path": normalized, "target": target, "created": False, "backup": backup,
-            "old": original, "mode": int(mode) if isinstance(mode, int) else (target.stat().st_mode & 0o777),
+            "path": normalized, "target": target, "created": False,
+            "current": current, "current_mode": current_mode,
+            "original": original,
+            "original_mode": int(original_mode) if isinstance(original_mode, int) else current_mode,
         })
 
-    completed: list[str] = []
-    for item in reversed(prepared):
-        if item["created"]:
-            item["target"].unlink()
-        else:
-            _atomic_write(item["target"], item["old"], item["mode"])
-        completed.append(item["path"])
+    changed: list[dict[str, Any]] = []
+    try:
+        for item in reversed(prepared):
+            if item["created"]:
+                item["target"].unlink()
+            else:
+                _atomic_write(item["target"], item["original"], item["original_mode"])
+            changed.append(item)
 
-    transaction["status"] = "rolled_back"
-    transaction["rolled_back_at"] = _now()
-    with transaction_path.open("w", encoding="utf-8", newline="\n") as stream:
-        stream.write(json.dumps(transaction, indent=2, ensure_ascii=False) + "\n")
-        stream.flush()
-        os.fsync(stream.fileno())
+        transaction["status"] = "rolled_back"
+        transaction["rolled_back_at"] = _now()
+        encoded = (json.dumps(transaction, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+        _atomic_write(
+            transaction_path, encoded,
+            transaction_path.stat().st_mode & 0o777,
+        )
+    except Exception as exc:
+        recovery_errors: list[str] = []
+        for item in reversed(changed):
+            try:
+                # Restore the exact post-repair bytes so the transaction stays
+                # in its original applied state when rollback could not finish.
+                _atomic_write(item["target"], item["current"], item["current_mode"])
+            except OSError as recovery_exc:
+                recovery_errors.append(f"{item['path']}: {recovery_exc}")
+        if recovery_errors:
+            raise RuntimeError(
+                f"Rollback failed ({exc}); re-applying the post-repair state was incomplete. "
+                "Preserve the external backup and inspect: " + "; ".join(recovery_errors)
+            ) from exc
+        raise
+
+    completed = [item["path"] for item in changed]
     return {
         "status": "rolled_back", "transaction_id": transaction.get("transaction_id"),
         "files_restored": len(completed), "paths": completed,
