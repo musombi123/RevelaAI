@@ -9,6 +9,7 @@ on:
       - "fastapi_routes/productivity.py"
       - "asgi.py"
       - "tests/test_workspace_engine.py"
+      - "tests/test_workspace_documents.py"
       - ".github/workflows/workspace-engine-tests.yml"
   workflow_dispatch:
 
@@ -31,8 +32,8 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
       - name: Compile changed backend modules
-        run: python -m py_compile asgi.py fastapi_routes/workspace.py services/workspace_engine.py services/productivity_service.py
+        run: python -m py_compile asgi.py fastapi_routes/workspace.py services/workspace_engine.py services/productivity_service.py tests/test_workspace_documents.py
       - name: Run workspace and adjacent regression tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest -q tests/test_workspace_engine.py tests/test_design_studio.py tests/test_productivity_exports.py
+        run: pytest -q tests/test_workspace_engine.py tests/test_workspace_documents.py tests/test_design_studio.py tests/test_productivity_exports.py

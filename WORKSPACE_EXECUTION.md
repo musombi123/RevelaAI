@@ -19,7 +19,7 @@ and the Productivity signed-file store.
 | task | string | auto, document, code, ui_design, analytics, image, image_edit, or promotion |
 | prompt | string | Required task instructions, up to 12,000 characters |
 | title | string | Optional artifact title |
-| format | string | word, pdf, powerpoint, spreadsheet, csv, or markdown |
+| format | string | word, pdf, powerpoint, spreadsheet, csv, or markdown |\n| document_count | integer | Optional number of separate PDF deliverables (1–4); defaults to 1 |
 | document_style | string | auto, official, or standard; auto detects formal letters, memos and submissions |
 | official_metadata | object | Optional exact particulars: organization, recipient, address, date, reference, subject, salutation, signatory, cc and enclosures |
 | embedded_images | array | Optional image objects with image_base64, mime_type, alt_text, placement and width_inches |
@@ -130,7 +130,7 @@ Supported official metadata keys include:
 
 ### Upload an existing logo from RevelaCode
 
-Use multipart form-data so the frontend can send the user's selected file directly. The image is validated, converted to a document-safe PNG representation in memory, and placed in the actual DOCX/PDF/PPTX output. Source upload bytes are not retained as a separate permanent image.
+Use multipart form-data so the frontend can send the user's selected file directly. The image is validated, converted to a document-safe PNG representation in memory, and placed in the actual DOCX/PDF/PPTX output. SVG logos selected in the web frontend are safety-checked and rasterized to PNG in the browser before upload. Source upload bytes are not retained as a separate permanent image.
 
 Example form fields:
 
@@ -215,3 +215,10 @@ Bare-soil colour, apparent texture or surface moisture are not measurements of p
 ### Privacy and operational boundaries
 
 The camera frame is held only for the authenticated request and is not written to MongoDB or the productivity file store. The response carries `mediaRetained: false`. Farm activity records are written only when the user explicitly saves a diagnostic through the existing Shamba record workflow. Free mode keeps image analysis local and does not claim hosted semantic diagnosis.
+
+
+### Separate PDF deliverables and official page design
+
+Set `document_count` to an integer from 1 to 4 when a user explicitly requests multiple independent PDFs. The official document generator returns exactly that many separately titled document structures; the backend writes and validates each PDF independently and returns the first as `artifact`, the full list as `documents`, and the remaining files as `additional_files`. A request is not marked successful unless every requested PDF has been persisted.
+
+PDF exports use a dedicated PDF-only path. They do not create an unexpected DOCX sidecar. Official PDFs use the supplied logo, a printer-friendly branded page treatment, a restrained blue/green/gold header, a pale footer band, and page numbering. User-supplied official particulars override model-extracted values.
