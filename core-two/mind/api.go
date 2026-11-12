@@ -17,6 +17,13 @@ import (
 
 func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	// Only the liveness endpoint is public. Free Render web services have public
+	// HTTPS URLs, so all other read routes require the same server-only token as
+	// mutations; the old private-service network boundary no longer exists.
+	publicHealth := r.Method == http.MethodGet && r.URL.Path == "/v1/mind/health"
+	if r.Method != http.MethodOptions && !publicHealth && !s.allowServiceRead(w, r) {
+		return
+	}
 	switch {
 	case r.URL.Path == "/v1/mind/health" && r.Method == http.MethodGet:
 		mirror, _ := os.ReadFile(filepath.Join(s.CoreRoot, "metrics", "mirror.json"))
@@ -105,6 +112,23 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeAPIError(w, 404, "not_found", "Route not found.")
 	}
+}
+
+func (s *Service) allowServiceRead(w http.ResponseWriter, r *http.Request) bool {
+	configured := strings.TrimSpace(os.Getenv("MIND_ADMIN_TOKEN"))
+	if configured == "" {
+		writeAPIError(w, 503, "mind_service_auth_disabled", "MIND_ADMIN_TOKEN is not configured; remote service access is disabled.")
+		return false
+	}
+	given := strings.TrimSpace(r.Header.Get("X-Mind-Token"))
+	if given == "" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		given = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	}
+	if len(given) == len(configured) && subtleConstantTimeEqual(given, configured) {
+		return true
+	}
+	writeAPIError(w, 401, "mind_auth_required", "Supply a valid X-Mind-Token or Bearer token.")
+	return false
 }
 
 func (s *Service) allowMutation(w http.ResponseWriter, r *http.Request) bool {
