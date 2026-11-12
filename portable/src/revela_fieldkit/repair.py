@@ -111,7 +111,7 @@ def apply_repair_plan(
     root = root.resolve(strict=True)
     plan_path = plan_path.resolve(strict=True)
     if not root.is_dir():
-        raise ValueError("Repair plan must be a regular, non-symbolic-link file.")
+        raise ValueError("Repair root must be an existing directory.")
     try:
         plan = json.loads(plan_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
