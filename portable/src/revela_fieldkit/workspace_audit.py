@@ -89,7 +89,10 @@ def has_project_marker(directory: Path) -> bool:
 
 
 def discover_projects(root: Path) -> list[Path]:
-    root = root.expanduser().resolve(strict=True)
+    root = root.expanduser()
+    if root.is_symlink():
+        raise ValueError("Audit root cannot be a symbolic link; select its real target explicitly.")
+    root = root.resolve(strict=True)
     if root.is_file():
         raise ValueError("Select a directory or mounted volume, not a single file.")
     projects = [root] if has_project_marker(root) else []
@@ -561,8 +564,11 @@ def audit_project(project: Path, include_hidden: bool = True, npm_audit: bool = 
 
 
 def audit_workspace(root: Path, include_hidden: bool = True, npm_audit: bool = False) -> dict[str, Any]:
-    root = root.expanduser().resolve(strict=True)
-    if root.is_symlink() or not root.is_dir():
+    root = root.expanduser()
+    if root.is_symlink():
+        raise ValueError("Audit root cannot be a symbolic link; select its real target explicitly.")
+    root = root.resolve(strict=True)
+    if not root.is_dir():
         raise ValueError("Audit root must be an existing, non-symbolic-link directory.")
     projects = discover_projects(root)
     results = [audit_project(project, include_hidden, npm_audit) for project in projects]
