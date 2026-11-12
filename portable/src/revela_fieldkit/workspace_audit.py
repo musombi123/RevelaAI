@@ -612,7 +612,9 @@ def export_handoff_findings(report: dict[str, Any], output_dir: Path) -> dict[st
     if report.get("schema_version") != TOOL_SCHEMA:
         raise ValueError("Unsupported workspace audit report schema.")
     output_dir = output_dir.expanduser()
-    if output_dir.exists() and any(output_dir.iterdir()):
+    if output_dir.is_symlink():
+        raise ValueError("Finding output directory cannot be a symbolic link.")
+    if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
         raise ValueError("Finding output directory must be new or empty; refusing to overwrite.")
     output_dir.mkdir(parents=True, exist_ok=True)
     written = []
