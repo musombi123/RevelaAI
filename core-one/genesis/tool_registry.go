@@ -310,20 +310,24 @@ func registrySigningKey() (ed25519.PrivateKey, error) {
 	if raw == "" {
 		return nil, errors.New("GENESIS_SIGNING_KEY is not configured; signing is disabled")
 	}
-	decoded, err := base64.RawStdEncoding.DecodeString(raw)
-	if err != nil {
-		decoded, err = base64.StdEncoding.DecodeString(raw)
+	decoded, decodeErr := base64.RawStdEncoding.DecodeString(raw)
+	if decodeErr != nil {
+		decoded, decodeErr = base64.StdEncoding.DecodeString(raw)
 	}
-	if err != nil {
-		return nil, errors.New("GENESIS_SIGNING_KEY must be base64 encoded Ed25519 key material")
-	}
-	switch len(decoded) {
-	case ed25519.SeedSize:
+	switch {
+	case decodeErr == nil && len(decoded) == ed25519.SeedSize:
 		return ed25519.NewKeyFromSeed(decoded), nil
-	case ed25519.PrivateKeySize:
+	case decodeErr == nil && len(decoded) == ed25519.PrivateKeySize:
 		return ed25519.PrivateKey(decoded), nil
+	case len(raw) >= ed25519.SeedSize:
+		// Render's generateValue creates a high-entropy opaque secret, not
+		// necessarily a base64 Ed25519 seed. Derive a stable seed from that
+		// secret so a free web service can provision signing without a
+		// hand-entered, pre-encoded key. The raw secret never leaves the process.
+		seed := sha256.Sum256([]byte(raw))
+		return ed25519.NewKeyFromSeed(seed[:]), nil
 	default:
-		return nil, errors.New("GENESIS_SIGNING_KEY must encode a 32-byte seed or 64-byte Ed25519 private key")
+		return nil, errors.New("GENESIS_SIGNING_KEY must be a 32-byte Ed25519 seed, 64-byte private key, or at least 32 characters of generated secret material")
 	}
 }
 
