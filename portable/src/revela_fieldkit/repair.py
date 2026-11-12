@@ -121,6 +121,8 @@ def apply_repair_plan(
     changes = plan.get("changes")
     if not isinstance(changes, list) or not changes or len(changes) > MAX_CHANGES:
         raise ValueError(f"Repair plan must contain 1–{MAX_CHANGES} file changes.")
+
+    # Validate every target and decode every new file before writing any backup or source.
     prepared: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in changes:
@@ -133,7 +135,9 @@ def apply_repair_plan(
             raise ValueError(f"Duplicate repair target: {normalized}")
         seen.add(normalized)
         expected = item.get("expected_sha256")
-        if expected is not None and (not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected)):
+        if expected is not None and (
+            not isinstance(expected, str) or not re.fullmatch(r"[a-f0-9]{64}", expected)
+        ):
             raise ValueError(f"Invalid expected_sha256 for {normalized}.")
         if target.exists():
             if target.is_symlink() or not target.is_file():
@@ -171,24 +175,31 @@ def apply_repair_plan(
     backup_root = backup_root.resolve(strict=True)
     try:
         backup_root.relative_to(root)
+    except ValueError:
+        pass
+    else:
         raise ValueError("Backup directory must be outside the audited repository.")
-    except ValueError as exc:
-        if str(exc) == "Backup directory must be outside the audited repository.":
-            raise
+
     transaction_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     transaction_dir = backup_root / transaction_id
     transaction_dir.mkdir(mode=0o700)
-    records = []
+    records: list[dict[str, Any]] = []
     written: list[dict[str, Any]] = []
+    transaction_file = transaction_dir / "transaction.json"
+
     try:
+        # Prepare and verify every original backup before the first source file is changed.
         for item in prepared:
             backup_relative = Path("files") / item["path"]
             backup_file = transaction_dir / backup_relative
             if item["old"] is not None:
                 backup_file.parent.mkdir(parents=True, exist_ok=True)
-                backup_file.write_bytes(item["old"])
-            _atomic_write(item["target"], item["new"], item["mode"])
-            written.append(item)
+                with backup_file.open("xb") as stream:
+                    stream.write(item["old"])
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                if _sha256(backup_file.read_bytes()) != _sha256(item["old"]):
+                    raise ValueError(f"Backup verification failed for {item['path']}.")
             records.append({
                 "path": item["path"],
                 "created": item["old"] is None,
@@ -198,31 +209,52 @@ def apply_repair_plan(
                 "after_sha256": _sha256(item["new"]),
                 "reason": item["reason"],
             })
+
+        # Recheck all preconditions just before applying to prevent stale-plan writes.
+        for item in prepared:
+            target = item["target"]
+            if item["old"] is None:
+                if target.exists() or target.is_symlink():
+                    raise ValueError(f"New repair target appeared after approval: {item['path']}")
+            else:
+                if target.is_symlink() or not target.is_file() or _sha256(target.read_bytes()) != _sha256(item["old"]):
+                    raise ValueError(f"Repair target changed after approval: {item['path']}")
+
+        for item in prepared:
+            _atomic_write(item["target"], item["new"], item["mode"])
+            written.append(item)
+
         transaction = {
             "schema_version": TRANSACTION_SCHEMA, "transaction_id": transaction_id,
             "created_at": _now(), "root": str(root), "plan_id": str(plan.get("id") or "")[:120],
             "changes": records, "status": "applied",
         }
-        transaction_file = transaction_dir / "transaction.json"
-        transaction_file.write_text(json.dumps(transaction, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    except Exception:
+        with transaction_file.open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(transaction, indent=2, ensure_ascii=False) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception as exc:
+        rollback_errors: list[str] = []
         for item in reversed(written):
-            if item["old"] is None:
-                try:
+            try:
+                if item["old"] is None:
                     item["target"].unlink(missing_ok=True)
-                except OSError:
-                    pass
-            else:
-                try:
+                else:
                     _atomic_write(item["target"], item["old"], item["mode"])
-                except OSError:
-                    pass
+            except OSError as rollback_exc:
+                rollback_errors.append(f"{item['path']}: {rollback_exc}")
+        if rollback_errors:
+            detail = "; ".join(rollback_errors)
+            raise RuntimeError(
+                f"Repair failed ({exc}); automatic rollback was incomplete. Preserve backups at "
+                f"{transaction_dir} and restore manually: {detail}"
+            ) from exc
         raise
+
     return {
         "status": "applied", "transaction_id": transaction_id,
         "transaction": str(transaction_file.resolve()), "root": str(root),
-        "files_changed": len(records),
-        "backup_directory": str(transaction_dir.resolve()),
+        "files_changed": len(records), "backup_directory": str(transaction_dir.resolve()),
         "rollback_command": f"revela-fieldkit repair rollback --transaction {transaction_file} --authorized --approve",
         "human_review_required": True,
     }
@@ -246,7 +278,8 @@ def rollback_repair(
         raise ValueError("Transaction record is unreadable or invalid JSON.") from None
     if not isinstance(transaction, dict) or transaction.get("schema_version") != TRANSACTION_SCHEMA:
         raise ValueError("Unsupported repair transaction schema.")
-    if transaction.get("status") != "applied" or not isinstance(transaction.get("changes"), list):
+    changes = transaction.get("changes")
+    if transaction.get("status") != "applied" or not isinstance(changes, list) or not changes:
         raise ValueError("Transaction is not in an applied state.")
     root = Path(str(transaction.get("root") or ""))
     if root.is_symlink():
@@ -255,38 +288,63 @@ def rollback_repair(
     if not root.is_dir():
         raise ValueError("Original repository root is unavailable.")
     transaction_dir = transaction_path.parent
-    completed = []
-    for item in reversed(transaction["changes"]):
+    if transaction_dir.is_symlink():
+        raise ValueError("Transaction directory cannot be a symbolic link.")
+    transaction_dir = transaction_dir.resolve(strict=True)
+
+    # Preflight every current file and backup before restoring any file.
+    prepared: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in changes:
+        if not isinstance(item, dict):
+            raise ValueError("Transaction contains an invalid change record.")
         relative = item.get("path")
         target = _safe_path(root, relative)
+        normalized = target.relative_to(root).as_posix()
+        if normalized in seen:
+            raise ValueError(f"Transaction contains a duplicate target: {normalized}")
+        seen.add(normalized)
         if target.is_symlink() or not target.is_file():
-            raise ValueError(f"Rollback target is missing or unsafe: {relative}")
+            raise ValueError(f"Rollback target is missing or unsafe: {normalized}")
         current = target.read_bytes()
-        if _sha256(current) != item.get("after_sha256"):
-            raise ValueError(f"Rollback blocked because {relative} changed after the repair was applied.")
+        if len(current) > MAX_FILE_BYTES or _sha256(current) != item.get("after_sha256"):
+            raise ValueError(f"Rollback blocked because {normalized} changed after the repair was applied.")
         if item.get("created") is True:
-            target.unlink()
-            completed.append(relative)
+            prepared.append({"path": normalized, "target": target, "created": True, "backup": None, "old": None, "mode": None})
             continue
         backup_rel = Path(str(item.get("backup") or ""))
         if backup_rel.is_absolute() or any(part in {"", ".", ".."} for part in backup_rel.parts):
-            raise ValueError(f"Unsafe backup reference for {relative}.")
+            raise ValueError(f"Unsafe backup reference for {normalized}.")
         backup = transaction_dir.joinpath(backup_rel)
         try:
-            backup.resolve(strict=True).relative_to(transaction_dir.resolve(strict=True))
+            backup.resolve(strict=True).relative_to(transaction_dir)
         except (OSError, ValueError):
-            raise ValueError(f"Backup file unavailable or outside the transaction: {relative}") from None
+            raise ValueError(f"Backup file unavailable or outside the transaction: {normalized}") from None
         if backup.is_symlink() or not backup.is_file():
-            raise ValueError(f"Backup file unavailable: {relative}")
+            raise ValueError(f"Backup file unavailable: {normalized}")
         original = backup.read_bytes()
-        if _sha256(original) != item.get("before_sha256"):
-            raise ValueError(f"Backup integrity check failed for {relative}.")
-        original_mode = item.get("before_mode")
-        _atomic_write(target, original, int(original_mode) if isinstance(original_mode, int) else (target.stat().st_mode & 0o777))
-        completed.append(relative)
+        if len(original) > MAX_FILE_BYTES or _sha256(original) != item.get("before_sha256"):
+            raise ValueError(f"Backup integrity check failed for {normalized}.")
+        mode = item.get("before_mode")
+        prepared.append({
+            "path": normalized, "target": target, "created": False, "backup": backup,
+            "old": original, "mode": int(mode) if isinstance(mode, int) else (target.stat().st_mode & 0o777),
+        })
+
+    completed: list[str] = []
+    for item in reversed(prepared):
+        if item["created"]:
+            item["target"].unlink()
+        else:
+            _atomic_write(item["target"], item["old"], item["mode"])
+        completed.append(item["path"])
+
     transaction["status"] = "rolled_back"
     transaction["rolled_back_at"] = _now()
-    transaction_path.write_text(json.dumps(transaction, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    with transaction_path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(transaction, indent=2, ensure_ascii=False) + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
     return {
         "status": "rolled_back", "transaction_id": transaction.get("transaction_id"),
         "files_restored": len(completed), "paths": completed,
