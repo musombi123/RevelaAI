@@ -21,7 +21,8 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// HTTPS URLs, so all other read routes require the same server-only token as
 	// mutations; the old private-service network boundary no longer exists.
 	publicHealth := r.Method == http.MethodGet && r.URL.Path == "/v1/mind/health"
-	if r.Method != http.MethodOptions && !publicHealth && !s.allowServiceRead(w, r) {
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+		!publicHealth && !s.allowServiceRead(w, r) {
 		return
 	}
 	switch {
