@@ -23,10 +23,10 @@ from services.core_config import core_base_url, core_admin_token
 from services.usect_zero_client import is_enabled as usect_zero_is_enabled
 
 
-CACHE_TTL_SECONDS = 12.0
+ CACHE_TTL_SECONDS = 12.0
 MAX_RESPONSE_BYTES = 1_000_000
-# Match the requested ten-second window for hosted private-core status probes.
-_TIMEOUT_SECONDS = 10.0
+# Free Render services can sleep while idle; allow their cold-start window.
+_TIMEOUT_SECONDS = 75.0
 
 _cache_lock = threading.Lock()
 _cache_value: dict | None = None
