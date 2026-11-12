@@ -465,7 +465,7 @@ def create_pdf_document(owner_id: str, payload: dict[str, Any]) -> dict[str, Any
     artifact = _preview_pdf(
         owner_id, title, blocks, "document",
         images=images,
-        official_metadata=metadata if official else None,
+        official_metadata=({**metadata, "_official_document": True} if official else None),
     )
     artifact["kind"] = "pdf"
     return artifact
@@ -549,7 +549,7 @@ def create_word_document(owner_id: str, payload: dict[str, Any]) -> dict[str, An
         preview={"type":"document","title":title,"sections":blocks[:10],"images_embedded":len(images),"document_style":"official" if official else "standard"},
         retention_seconds=86400,
     )
-    pdf = _preview_pdf(owner_id, title, blocks, "document", images=images, official_metadata=metadata if official else None)
+    pdf = _preview_pdf(owner_id, title, blocks, "document", images=images, official_metadata=({**metadata, "_official_document": True} if official else None))
     return {"kind":"word","files":[primary,pdf],"primary":primary,"preview_file":pdf,
             "preview":{"type":"document","title":title,"sections":blocks[:10],"images_embedded":len(images),
                        "document_style":"official" if official else "standard"}}
