@@ -1122,6 +1122,7 @@ func runMenu() error {
 		fmt.Println("8) Scan a package manifest against the trusted offline feed")
 		fmt.Println("9) Import a CycloneDX or SPDX software bill of materials")
 		fmt.Println("10) Collect installed-software inventory from this host")
+		fmt.Println("11) Run the repository Workspace Auditor (Python companion)")
 		fmt.Println("0) Exit")
 		fmt.Print("Select: ")
 		value, err := reader.ReadString('\n')
@@ -1217,6 +1218,8 @@ func runMenu() error {
 			if strings.TrimSpace(confirmation) != "AUTHORISED" { fmt.Println("Cancelled."); continue }
 			err := runManifestCollect([]string{"--out", strings.TrimSpace(output), "--authorized"})
 			if err != nil { fmt.Println(err) }
+		case "11":
+			if err := runWorkspaceAudit(reader); err != nil { fmt.Println(err) }
 		case "0":
 			return nil
 		default:
@@ -1224,3 +1227,117 @@ func runMenu() error {
 		}
 	}
 }
+
+// runWorkspaceAudit launches the bundled Python companion without invoking a
+// shell. The selected source path is explicit and separately confirmed.
+func runWorkspaceAudit(reader *bufio.Reader) error {
+	fmt.Print("Repository or mounted-volume path to inspect: ")
+	rawRoot, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	root := strings.TrimSpace(rawRoot)
+	if root == "" {
+		return errors.New("an explicit directory path is required")
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("cannot access selected path: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return errors.New("select an existing directory directly; symbolic-link roots and files are rejected")
+	}
+	fmt.Print("This performs a local read-only source/configuration audit. Type AUTHORISED to continue: ")
+	confirmation, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(confirmation) != "AUTHORISED" {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	executableDir := filepath.Dir(executable)
+	candidates := []string{
+		filepath.Clean(filepath.Join(executableDir, "..", "..")),
+		filepath.Clean(filepath.Join(executableDir, "..")),
+		executableDir,
+	}
+	portableRoot := ""
+	for _, candidate := range candidates {
+		module := filepath.Join(candidate, "src", "revela_fieldkit", "workspace_audit.py")
+		if stat, statErr := os.Stat(module); statErr == nil && !stat.IsDir() {
+			portableRoot = candidate
+			break
+		}
+	}
+	if portableRoot == "" {
+		return errors.New("Workspace Auditor companion was not found beside this Field Engine. Use a complete USB package.")
+	}
+
+	pythonCandidates := []string{}
+	if runtime.GOOS == "windows" {
+		pythonCandidates = append(pythonCandidates, filepath.Join(portableRoot, "runtimes", "python-win-x64", "python.exe"))
+	} else {
+		pythonCandidates = append(pythonCandidates, filepath.Join(portableRoot, "runtimes", "python-linux-x64", "bin", "python3"))
+	}
+	if path, lookErr := exec.LookPath("python3"); lookErr == nil {
+		pythonCandidates = append(pythonCandidates, path)
+	}
+	if runtime.GOOS == "windows" {
+		if path, lookErr := exec.LookPath("python.exe"); lookErr == nil {
+			pythonCandidates = append(pythonCandidates, path)
+		}
+	} else if path, lookErr := exec.LookPath("python"); lookErr == nil {
+		pythonCandidates = append(pythonCandidates, path)
+	}
+
+	python := ""
+	for _, candidate := range pythonCandidates {
+		if candidate == "" {
+			continue
+		}
+		versionCheck := exec.Command(candidate, "-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)")
+		if versionCheck.Run() == nil {
+			python = candidate
+			break
+		}
+	}
+	if python == "" {
+		return errors.New("Python 3.10+ was not found. The Windows USB bundle includes its verified embedded runtime; install Python 3.10+ for Linux.")
+	}
+
+	reportDir := filepath.Join(portableRoot, "data", "reports")
+	if err := os.MkdirAll(reportDir, 0o700); err != nil {
+		return fmt.Errorf("cannot create USB-local report directory: %w", err)
+	}
+	reportName := "workspace-audit-" + time.Now().UTC().Format("20060102T150405Z") + ".json"
+	reportPath := filepath.Join(reportDir, reportName)
+	command := exec.Command(
+		python, "-m", "revela_fieldkit", "audit",
+		"--root", root, "--authorized", "--out", reportPath,
+	)
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(strings.ToUpper(entry), "PYTHONPATH=") {
+			env = append(env, entry)
+		}
+	}
+	env = append(env, "PYTHONPATH="+filepath.Join(portableRoot, "src"))
+	command.Env = env
+	command.Stdin = os.Stdin
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	fmt.Printf("Starting local Workspace Auditor. Report path: %s\n", reportPath)
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("workspace audit failed: %w", err)
+	}
+	fmt.Printf("\nReport saved on the USB: %s\n", reportPath)
+	fmt.Println("Open diagnostics.html in the portfolio or any local browser and select this JSON report.")
+	return nil
+}
+

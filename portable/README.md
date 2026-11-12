@@ -114,7 +114,13 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\Start-RevelaAI.ps1
 ```
 
-The CI-built Windows native executable starts first. The Python case-workspace menu is a fallback/companion.
+The CI-built Windows native executable starts first. Choose menu option 11 to launch the repository Workspace Auditor from the verified embedded Python runtime. It asks for the exact authorized source path and writes a JSON report to `data/reports/` on the USB.
+
+For the standalone launcher, run `Run-Workspace-Audit.cmd` or:
+
+```powershell
+.\Run-Workspace-Audit.ps1 -Root C:\work\RevelaCode -Output C:\work\workspace-audit.json
+```
 
 ### Linux
 
@@ -124,7 +130,31 @@ chmod +x start-linux.sh
 ./start-linux.sh
 ```
 
-The native Linux x64 engine starts first. Python 3.10+ is required only for the companion fallback.
+The native Linux x64 engine starts first. Choose menu option 11 to run the Workspace Auditor with Python 3.10+ from the host. The native package does not silently download or install a Python runtime.
+
+The standalone launcher is also available:
+
+```sh
+./run-workspace-audit.sh /path/to/authorised/repository
+```
+
+## Workspace codebase diagnostics and guarded repair
+
+The Workspace Auditor recursively discovers repository roots and performs bounded static checks for Python syntax/duplicate literal routes, JavaScript relative imports and parser errors, local HTML assets, npm manifest/lockfile drift, Python/Go dependency declarations, and Render `fromService` service-name references. Git metadata is read without changing the worktree.
+
+```text
+python -m revela_fieldkit drives
+python -m revela_fieldkit audit --root /path/to/repository --authorized --out ./workspace-audit.json
+python -m revela_fieldkit audit --root /media/USB --authorized --findings-dir ./data/field-findings
+python -m revela_fieldkit repair apply --root /path/to/repository --plan ./approved-plan.json --authorized --approve
+python -m revela_fieldkit repair rollback --transaction /path/to/backups/TRANSACTION/transaction.json --authorized --approve
+```
+
+The auditor is read-only by default. Network access is disabled unless the operator explicitly adds `--npm-audit`. It does not execute project source, install dependencies or run package scripts. Findings export through the existing Field Engine v1.0 Meta Engineer hand-off; authenticated remote sync remains a separate explicit action.
+
+Repairs accept only a reviewed JSON plan for allowlisted UTF-8 text files, with exact pre-change SHA-256 values. Both `--authorized` and `--approve` are mandatory. Plans reject path traversal, symlinks, credential/key material and stale files. Original files are backed up outside the repository before source replacement, and rollback verifies every target and backup before restoring. Review all proposed file contents and run the real CI/build/test suite after repair.
+
+USB mass-storage autorun is not used. Launch the Field Engine manually after inserting the USB and explicitly choose the target directory; this prevents an inserted drive from silently inspecting or modifying a host computer.
 
 ## Specialist tools and updates
 
@@ -134,7 +164,7 @@ Ghidra, GNU ddrescue, The Sleuth Kit, Autopsy, TestDisk/PhotoRec, Volatility 3, 
 
 - The native Field Engine is an inspection and defensive validation foundation, not a complete EDR, SIEM, penetration-testing platform or automatic malware-removal product.
 - Live vulnerability feed import, source authenticity/signature checks and freshness reporting are not implemented yet.
-- General Windows/Linux repair adapters, backup/rollback and post-repair verification are not implemented yet.
+- Guarded text-source repair transactions are available through reviewed repair plans; this is not a general OS repair adapter and does not modify services, registry keys, network settings, accounts or security products.
 - The synthetic scenarios do not prove that real EDR/SIEM sensors detect real-world attacks.
 - The supervisor checks service health, but package-level cross-core correctness still requires the complete CI test suite and platform smoke tests.
 - File hashing is not a forensic image and does not replace a hardware write blocker.
