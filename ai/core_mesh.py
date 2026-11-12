@@ -23,7 +23,7 @@ from services.core_config import core_base_url, core_admin_token
 from services.usect_zero_client import is_enabled as usect_zero_is_enabled
 
 
- CACHE_TTL_SECONDS = 12.0
+CACHE_TTL_SECONDS = 12.0
 MAX_RESPONSE_BYTES = 1_000_000
 # Free Render services can sleep while idle; allow their cold-start window.
 _TIMEOUT_SECONDS = 75.0
@@ -451,11 +451,11 @@ def get_core_mesh_configuration_health() -> dict:
             "message": (
                 "Genesis accepted the gateway token on its authenticated status route."
                 if genesis_token_verified else
-                "Genesis rejected the gateway token. Re-link the exact GENESIS_ADMIN_TOKEN value from genesis-core-one-free-free."
+                "Genesis rejected the gateway token. Re-link the exact GENESIS_ADMIN_TOKEN value from genesis-core-one-free."
                 if genesis_token_invalid else
                 "The gateway has a token, but equality cannot be verified until Genesis routing is healthy. Use the automatic Render Blueprint service link."
                 if genesis_token else
-                "Missing on RevelaAI: Genesis status, signed registry and invention proxy requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one-free-free in the Blueprint."
+                "Missing on RevelaAI: Genesis status, signed registry and invention proxy requests cannot authenticate. Link GENESIS_ADMIN_TOKEN from genesis-core-one-free in the Blueprint."
             ),
         },
         {
