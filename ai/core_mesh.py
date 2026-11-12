@@ -194,20 +194,24 @@ def _dashboard_snapshot() -> dict:
     one_base = _base_url("GENESIS_BASE_URL", "")
     mind_base = _base_url("MIND_BASE_URL", "http://127.0.0.1:8782")
     genesis_headers = _upstream_headers(include_genesis=True)
+    mind_token = core_admin_token("mind")
+    mind_headers = {"X-Mind-Token": mind_token} if mind_token else None
 
     # All probes are read-only. Mind's proxy is the shared path for detailed
     # Core-One/Core-Zero state where the daemons are deployed separately.
+    # Detailed Mind reads carry the service token because the Free web service
+    # is internet-reachable; only its health endpoint remains public.
     jobs = {
         "zero_health": (zero_base, "/v1/health", None),
-        "zero_detail": (mind_base, "/v1/zero/status", None),
+        "zero_detail": (mind_base, "/v1/zero/status", mind_headers),
         "one_health": (one_base, "/v1/genesis/health", None),
         "one_status": (one_base, "/v1/genesis/status", genesis_headers),
         "one_tools": (one_base, "/v1/genesis/tools", genesis_headers),
         "one_registry": (one_base, "/v1/genesis/registry/tools", genesis_headers),
         "two_health": (mind_base, "/v1/mind/health", None),
-        "two_metrics": (mind_base, "/v1/mind/metrics", None),
-        "two_evolutions": (mind_base, "/v1/mind/evolutions", None),
-        "two_learning": (mind_base, "/v1/mind/learning", None),
+        "two_metrics": (mind_base, "/v1/mind/metrics", mind_headers),
+        "two_evolutions": (mind_base, "/v1/mind/evolutions", mind_headers),
+        "two_learning": (mind_base, "/v1/mind/learning", mind_headers),
     }
     results: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
