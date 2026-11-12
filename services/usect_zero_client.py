@@ -61,7 +61,7 @@ def is_enabled() -> bool:
 
 
 def _timeout_seconds() -> int:
-    """Use the fixed connect/read timeout so deployments need no timeout variable."""
+    """Bound cold starts with a 10-second connect and 75-second read timeout."""
     return DEFAULT_TIMEOUT_SECONDS
 
 
