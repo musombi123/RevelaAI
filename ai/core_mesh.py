@@ -330,7 +330,7 @@ def _dashboard_snapshot() -> dict:
             "feedback_count": learning_count,
         },
         "configuration": {
-            # Render links the private URL and generated brain credential through
+            # Render automatically links the core HTTPS URL and generated brain credential through
             # the Blueprint. Do not require a manually provisioned developer key,
             # duplicated URL alias, feature flag, or timeout override.
             "zero_admin_token_configured": bool(core_admin_token("zero")),
@@ -459,7 +459,7 @@ def get_core_mesh_configuration_health() -> dict:
             "service": "genesis-core-one-free",
             "configured": genesis_signing is True,
             "unknown": genesis_signing is None,
-            "message": "Genesis reports its Ed25519 signing key configured." if genesis_signing is True else ("Genesis health could not be read, so signing-key status is unknown. Restore the automatically linked HTTPS service endpoint before diagnosing the key." if genesis_signing is None else "Missing or invalid on genesis-core-one-free: set GENESIS_SIGNING_KEY to base64-encoded Ed25519 32-byte seed material. Render generateValue is not a valid substitute."),
+            "message": "Genesis reports its Ed25519 signing key configured." if genesis_signing is True else ("Genesis health could not be read, so signing-key status is unknown. Restore the automatically linked HTTPS service endpoint before diagnosing the key." if genesis_signing is None else "Missing or invalid on genesis-core-one-free: set GENESIS_SIGNING_KEY to base64-encoded Ed25519 32-byte seed material. Render generates this base64 Ed25519 seed through generateValue in the Blueprint."),
         },
         {
             "name": "GENESIS_ORCHESTRATOR_TOOLS_ENABLED=true",
