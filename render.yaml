@@ -82,7 +82,7 @@ services:
           type: web
           name: usect-zero-core-free
           envVarKey: USECT_ZERO_ADMIN_TOKEN
-      # Generated on the private core and linked here automatically. This identity is
+      # Generated on the core service and linked here automatically. This identity is
       # restricted to the brain's read/proposal scopes and is never an admin credential.
       - key: USECT_ZERO_BRAIN_TOKEN
         fromService:
@@ -135,6 +135,7 @@ services:
     runtime: go
     rootDir: core-zero
     plan: free
+    healthCheckPath: /v1/health
     buildCommand: go build -o ./usect-zero ./cmd/usect-zero
     startCommand: ./usect-zero -mode serve -root .. -listen 0.0.0.0:$PORT
     envVars:
@@ -167,6 +168,7 @@ services:
     name: genesis-core-one-free
     runtime: go
     plan: free
+    healthCheckPath: /v1/genesis/health
     buildCommand: go -C core-one build -o ./genesis-server ./cmd/genesis
     startCommand: ./core-one/genesis-server -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
     envVars:
@@ -177,14 +179,14 @@ services:
       # Render terminates public TLS; gateway-to-core calls use the assigned HTTPS URL.
       - key: GENESIS_TRUST_PROXY_TLS
         value: "true"
-      # Must be a base64-encoded Ed25519 32-byte seed or 64-byte private key.
-      # Render's generic generateValue is not guaranteed to produce valid key material.
+      # Render generateValue supplies a base64-encoded 256-bit secret, which
+      # decodes to the 32-byte Ed25519 seed required by Genesis.
       - key: GENESIS_SIGNING_KEY
-        sync: false
+        generateValue: true
       - key: GENESIS_OWNER_APPROVAL_TOKEN
-        sync: false
+        generateValue: true
       - key: GENESIS_ACTION_APPROVAL_TOKEN
-        sync: false
+        generateValue: true
       - key: GENESIS_MODEL_BASE_URL
         sync: false
       - key: GENESIS_MODEL_NAME
@@ -200,6 +202,7 @@ services:
     name: infinite-mind-core-free
     runtime: go
     plan: free
+    healthCheckPath: /v1/mind/health
     buildCommand: go -C core-two build -o ./revela-mind ./cmd/revela-mind
     startCommand: ./core-two/revela-mind -daemon -repo-root . -listen 0.0.0.0:$PORT -interval 24h
     envVars:
