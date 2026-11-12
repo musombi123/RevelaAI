@@ -175,8 +175,8 @@ services:
       # Render terminates public TLS; gateway-to-core calls use the assigned HTTPS URL.
       - key: GENESIS_TRUST_PROXY_TLS
         value: "true"
-      # Render generateValue supplies a base64-encoded 256-bit secret, which
-      # decodes to the 32-byte Ed25519 seed required by Genesis.
+      # Genesis accepts an explicit base64 Ed25519 key or derives a stable
+      # Ed25519 seed from this generated high-entropy Render secret.
       - key: GENESIS_SIGNING_KEY
         generateValue: true
       - key: GENESIS_OWNER_APPROVAL_TOKEN
