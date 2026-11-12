@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 HERE="$(cd -- "$(dirname -- "$0")" && pwd)"
-export PYTHONPATH="$HERE/src:$PYTHONPATH"
+export PYTHONPATH="$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
 
 PYTHON="$HERE/runtimes/python-linux-x64/bin/python3"
 if [[ ! -x "$PYTHON" ]]; then
