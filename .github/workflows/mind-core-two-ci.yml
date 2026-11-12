@@ -92,9 +92,16 @@ jobs:
               ready=1
               break
             fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              cat /tmp/revela-mind-smoke.log
+              exit 1
+            fi
             sleep 1
           done
-          test "$ready" = "1"
+          if [ "$ready" != "1" ]; then
+            cat /tmp/revela-mind-smoke.log
+            exit 1
+          fi
           grep -q '"status":"ok"' /tmp/mind-health.json
           status="$(curl --silent --output /tmp/mind-write.json --write-out '%{http_code}' -X POST http://127.0.0.1:18782/v1/mind/feedback -H 'Content-Type: application/json' --data '{}')"
           test "$status" = "503"

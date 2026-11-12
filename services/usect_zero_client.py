@@ -18,7 +18,7 @@ from services.core_config import core_base_url, core_admin_token
 
 MAX_REQUEST_BYTES = 1 * 1024 * 1024
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024
-DEFAULT_TIMEOUT_SECONDS = 10
+DEFAULT_TIMEOUT_SECONDS = 75
 
 
 class USECTZeroError(RuntimeError):
@@ -61,7 +61,7 @@ def is_enabled() -> bool:
 
 
 def _timeout_seconds() -> int:
-    """Use the fixed connect/read timeout so deployments need no timeout variable."""
+    """Bound cold starts with a 10-second connect and 75-second read timeout."""
     return DEFAULT_TIMEOUT_SECONDS
 
 
@@ -70,8 +70,8 @@ def _configured_base_url() -> str:
     raw = core_base_url("zero")
     if not raw:
         raise USECTZeroConfigurationError(
-            "The USECT-ZERO service address is not linked. Sync the RevelaAI Render Blueprint "
-            "so it can connect to usect-zero-core automatically."
+            "The USECT-ZERO HTTPS address is missing. The Render Blueprint supplies it "
+            "automatically from the core web service; no manual URL is required."
         )
     return raw
 
@@ -84,10 +84,9 @@ def _admin_token() -> str:
 def _base_url() -> str:
     raw = _configured_base_url()
 
-    # Render Blueprints expose a service's internal host and port through
-    # fromService.property=hostport (for example, "usect-zero-core:10000").
-    # Accept that exact host:port form as HTTP; explicit schemes still undergo
-    # the strict URL validation below.
+    # Current Render Blueprints inject the assigned HTTPS URL through
+    # RENDER_EXTERNAL_URL. Retain legacy host:port support for existing
+    # private-service deployments; explicit schemes are validated below.
     if "://" not in raw:
         endpoint = urlsplit("//" + raw)
         try:
@@ -202,7 +201,7 @@ def request_core(
             params=query or None,
             data=raw_body if normalized_method == "POST" else None,
             headers=headers,
-            timeout=(_timeout_seconds(), _timeout_seconds()),
+            timeout=(10, _timeout_seconds()),
             allow_redirects=False,
             stream=True,
         )

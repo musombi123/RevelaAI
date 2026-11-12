@@ -69,35 +69,35 @@ services:
         value: "true"
       - key: USECT_ZERO_URL
         fromService:
-          type: pserv
-          name: usect-zero-core
-          property: hostport
+          type: web
+          name: usect-zero-core-free
+          envVarKey: USECT_ZERO_PUBLIC_URL
       - key: USECT_ZERO_BASE_URL
         fromService:
-          type: pserv
-          name: usect-zero-core
-          property: hostport
+          type: web
+          name: usect-zero-core-free
+          envVarKey: USECT_ZERO_PUBLIC_URL
       - key: USECT_ZERO_ADMIN_TOKEN
         fromService:
-          type: pserv
-          name: usect-zero-core
+          type: web
+          name: usect-zero-core-free
           envVarKey: USECT_ZERO_ADMIN_TOKEN
-      # Generated on the private core and linked here automatically. This identity is
+      # Generated on the core service and linked here automatically. This identity is
       # restricted to the brain's read/proposal scopes and is never an admin credential.
       - key: USECT_ZERO_BRAIN_TOKEN
         fromService:
-          type: pserv
-          name: usect-zero-core
+          type: web
+          name: usect-zero-core-free
           envVarKey: USECT_ZERO_BRAIN_TOKEN
       - key: GENESIS_BASE_URL
         fromService:
-          type: pserv
-          name: genesis-core-one
-          property: hostport
+          type: web
+          name: genesis-core-one-free
+          envVarKey: GENESIS_PUBLIC_URL
       - key: GENESIS_ADMIN_TOKEN
         fromService:
-          type: pserv
-          name: genesis-core-one
+          type: web
+          name: genesis-core-one-free
           envVarKey: GENESIS_ADMIN_TOKEN
       - key: GENESIS_ORCHESTRATOR_TOOLS_ENABLED
         value: "true"
@@ -107,45 +107,46 @@ services:
       # These server-only credentials are used only by authenticated operator routes.
       - key: GENESIS_OWNER_APPROVAL_TOKEN
         fromService:
-          type: pserv
-          name: genesis-core-one
+          type: web
+          name: genesis-core-one-free
           envVarKey: GENESIS_OWNER_APPROVAL_TOKEN
       - key: GENESIS_ACTION_APPROVAL_TOKEN
         fromService:
-          type: pserv
-          name: genesis-core-one
+          type: web
+          name: genesis-core-one-free
           envVarKey: GENESIS_ACTION_APPROVAL_TOKEN
       - key: MIND_BASE_URL
         fromService:
-          type: pserv
-          name: infinite-mind-core
-          property: hostport
+          type: web
+          name: infinite-mind-core-free
+          envVarKey: MIND_PUBLIC_URL
       - key: MIND_ADMIN_TOKEN
         fromService:
-          type: pserv
-          name: infinite-mind-core
+          type: web
+          name: infinite-mind-core-free
           envVarKey: MIND_ADMIN_TOKEN
 
-  # Optional supervisor probe targets may be configured in the Render dashboard:
-  # USECT_ZERO_GATEWAY_URL, GENESIS_BASE_URL, MIND_BASE_URL.
-  # They are intentionally not required at service startup.
-  # Core-Zero: model-free diagnostics, bounded tools, and human-gated recovery.
-  # Render private services use TCP health checks; /v1/health remains available
-  # to authenticated internal probes and the optional supervisor.
-  - type: pserv
-    name: usect-zero-core
+  # Core services are free Render web services. Render assigns their HTTPS URLs;
+  # the Blueprint links RENDER_EXTERNAL_URL automatically so no URL is pasted
+  # into the Dashboard. Their APIs still require their existing service tokens.
+  # Free web services sleep when idle and have ephemeral filesystems (no disks).
+  - type: web
+    name: usect-zero-core-free
     runtime: go
     rootDir: core-zero
-    plan: starter
+    plan: free
+    healthCheckPath: /v1/health
     buildCommand: go build -o ./usect-zero ./cmd/usect-zero
     startCommand: ./usect-zero -mode serve -root .. -listen 0.0.0.0:$PORT
-    disk:
-      name: usect-zero-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
+      # Self-reference Render's generated HTTPS URL for other services to consume.
+      - key: USECT_ZERO_PUBLIC_URL
+        fromService:
+          type: web
+          name: usect-zero-core-free
+          envVarKey: RENDER_EXTERNAL_URL
       - key: USECT_ZERO_DATA_DIR
-        value: /var/data/usect-zero
+        value: ./.revela-state/usect-zero
       - key: USECT_ZERO_ADMIN_TOKEN
         generateValue: true
       # Separate generated service identity for bounded RevelaAI brain operations.
@@ -153,32 +154,35 @@ services:
         generateValue: true
   # Core-One: standalone Genesis service. Build from the repository root so
   # sibling-module replacements (core-zero/core-one/lib/worldwide) remain visible.
-  - type: pserv
-    name: genesis-core-one
+  - type: web
+    name: genesis-core-one-free
     runtime: go
-    plan: starter
+    plan: free
+    healthCheckPath: /v1/genesis/health
     buildCommand: go -C core-one build -o ./genesis-server ./cmd/genesis
     startCommand: ./core-one/genesis-server -mode serve -repo-root . -listen 0.0.0.0:$PORT -interval 60s
-    disk:
-      name: genesis-core-one-data
-      mountPath: /var/data/genesis
-      sizeGB: 1
     envVars:
+      # Self-reference Render's generated HTTPS URL for other services to consume.
+      - key: GENESIS_PUBLIC_URL
+        fromService:
+          type: web
+          name: genesis-core-one-free
+          envVarKey: RENDER_EXTERNAL_URL
       - key: GENESIS_REGISTRY_DIR
-        value: /var/data/genesis/tool-registry
+        value: ./.revela-state/genesis/tool-registry
       - key: GENESIS_ADMIN_TOKEN
         generateValue: true
-      # Render terminates public TLS at the platform proxy; this is a private service.
+      # Render terminates public TLS; gateway-to-core calls use the assigned HTTPS URL.
       - key: GENESIS_TRUST_PROXY_TLS
         value: "true"
-      # Must be a base64-encoded Ed25519 32-byte seed or 64-byte private key.
-      # Render's generic generateValue is not guaranteed to produce valid key material.
+      # Genesis accepts an explicit base64 Ed25519 key or derives a stable
+      # Ed25519 seed from this generated high-entropy Render secret.
       - key: GENESIS_SIGNING_KEY
-        sync: false
+        generateValue: true
       - key: GENESIS_OWNER_APPROVAL_TOKEN
-        sync: false
+        generateValue: true
       - key: GENESIS_ACTION_APPROVAL_TOKEN
-        sync: false
+        generateValue: true
       - key: GENESIS_MODEL_BASE_URL
         sync: false
       - key: GENESIS_MODEL_NAME
@@ -190,34 +194,41 @@ services:
 
   # Core-Two: standalone Infinite Mind service. Its sibling-module imports
   # require the full repository checkout to remain the build/runtime root.
-  - type: pserv
-    name: infinite-mind-core
+  - type: web
+    name: infinite-mind-core-free
     runtime: go
-    plan: starter
+    plan: free
+    healthCheckPath: /v1/mind/health
     buildCommand: go -C core-two build -o ./revela-mind ./cmd/revela-mind
     startCommand: ./core-two/revela-mind -daemon -repo-root . -listen 0.0.0.0:$PORT -interval 24h
     envVars:
+      # Self-reference Render's generated HTTPS URL for other services to consume.
+      - key: MIND_PUBLIC_URL
+        fromService:
+          type: web
+          name: infinite-mind-core-free
+          envVarKey: RENDER_EXTERNAL_URL
       - key: MIND_ADMIN_TOKEN
         generateValue: true
       - key: USECT_ZERO_BASE_URL
         fromService:
-          type: pserv
-          name: usect-zero-core
-          property: hostport
+          type: web
+          name: usect-zero-core-free
+          envVarKey: USECT_ZERO_PUBLIC_URL
       - key: USECT_ZERO_ADMIN_TOKEN
         fromService:
-          type: pserv
-          name: usect-zero-core
+          type: web
+          name: usect-zero-core-free
           envVarKey: USECT_ZERO_ADMIN_TOKEN
       - key: GENESIS_BASE_URL
         fromService:
-          type: pserv
-          name: genesis-core-one
-          property: hostport
+          type: web
+          name: genesis-core-one-free
+          envVarKey: GENESIS_PUBLIC_URL
       - key: GENESIS_ADMIN_TOKEN
         fromService:
-          type: pserv
-          name: genesis-core-one
+          type: web
+          name: genesis-core-one-free
           envVarKey: GENESIS_ADMIN_TOKEN
       # Optional provider credential; Mind remains model-free without it.
       - key: REVELACODE_PROVIDER_KEY

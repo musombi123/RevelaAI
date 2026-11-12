@@ -15,7 +15,7 @@ def _online_dashboard():
 
 
 def test_core_mesh_status_timeout_is_ten_seconds():
-    assert core_mesh._TIMEOUT_SECONDS == 10.0
+    assert core_mesh._TIMEOUT_SECONDS == 75.0
 
 
 def test_normal_chat_does_not_trigger_core_health_fanout(monkeypatch):
@@ -72,6 +72,13 @@ def test_render_private_hostport_is_normalized_and_allowed(monkeypatch):
     core_mesh._validate_base(base)
 
 
+def test_render_external_https_url_is_used_without_manual_hostport(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_URL", "https://usect-zero-core-free.onrender.com")
+    base = core_mesh._base_url("USECT_ZERO_BASE_URL", "")
+    assert base == "https://usect-zero-core-free.onrender.com"
+    core_mesh._validate_base(base)
+
+
 def test_invalid_hostport_is_not_normalized(monkeypatch):
     monkeypatch.setenv("USECT_ZERO_BASE_URL", "usect-zero-core/path")
     base = core_mesh._base_url("USECT_ZERO_BASE_URL", "")
@@ -101,6 +108,29 @@ def test_only_allowlisted_proposal_fields_are_returned():
     assert proposal["automatic_merge"] is False
     assert "source_code" not in proposal
     assert "admin_token" not in proposal
+
+
+def test_mind_diagnostic_reads_forward_the_server_side_service_token(monkeypatch):
+    monkeypatch.setenv("USECT_ZERO_BASE_URL", "http://127.0.0.1:8780")
+    monkeypatch.setenv("GENESIS_BASE_URL", "http://127.0.0.1:8781")
+    monkeypatch.setenv("MIND_BASE_URL", "http://127.0.0.1:8782")
+    monkeypatch.setenv("MIND_ADMIN_TOKEN", "internal-mind-test")
+    observed = {}
+
+    def fake_safe_fetch(base, path, *, headers=None):
+        observed[path] = dict(headers or {})
+        if path == "/v1/genesis/registry/tools":
+            return {"tools": []}
+        return {"status": "ok"}
+
+    monkeypatch.setattr(core_mesh, "_safe_fetch", fake_safe_fetch)
+    core_mesh._dashboard_snapshot()
+
+    assert observed["/v1/mind/health"] == {}
+    assert observed["/v1/zero/status"] == {"X-Mind-Token": "internal-mind-test"}
+    assert observed["/v1/mind/metrics"] == {"X-Mind-Token": "internal-mind-test"}
+    assert observed["/v1/mind/evolutions"] == {"X-Mind-Token": "internal-mind-test"}
+    assert observed["/v1/mind/learning"] == {"X-Mind-Token": "internal-mind-test"}
 
 
 def test_mind_unavailable_is_explicit_and_normal_chat_stays_available(monkeypatch):
