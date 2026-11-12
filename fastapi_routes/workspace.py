@@ -24,7 +24,7 @@ from services.ai_service import detect_capability
 from services.image_service import generate_image_asset, parse_image_options
 from services.productivity_service import (
     _write_artifact, create_csv, create_powerpoint, create_spreadsheet,
-    create_word_document,
+    create_word_document, create_pdf_document,
 )
 from services.revenue_entitlements import check_entitlement
 from services.runtime_config import MAX_CONTENT_LENGTH
@@ -62,6 +62,7 @@ class WorkspaceExecuteInput(BaseModel):
     task: str = Field(default="auto", pattern="^(auto|document|code|ui_design|analytics|image|image_edit|promotion)$")
     prompt: str = Field(min_length=1, max_length=12000)
     title: str = Field(default="", max_length=180)
+    document_count: int = Field(default=1, ge=1, le=4)
     format: str = Field(default="word", pattern="^(word|pdf|powerpoint|spreadsheet|csv|markdown)$")
     document_style: str = Field(default="auto", pattern="^(auto|official|standard)$")
     official_metadata: dict[str, Any] = Field(default_factory=dict)
@@ -125,8 +126,8 @@ def _is_official_document(body: WorkspaceExecuteInput) -> bool:
         return False
     text = body.prompt.lower()
     terms = (
-        "official letter", "formal letter", "official copy", "memorandum",
-        "memo to", "institutional submission", "cover letter", "business letter",
+        "official letter", "formal letter", "official copy", "official document", "official documents",
+        "memorandum", "memo to", "institutional submission", "institutional introduction", "collaboration proposal", "cover letter", "business letter",
         "letter of request", "letter of introduction", "letter of recommendation",
         "minutes of meeting", "official report", "letter addressed to",
         "formal proposal", "official proposal", "formal submission", "partnership proposal",
@@ -166,6 +167,62 @@ def _official_document_payload(body: WorkspaceExecuteInput, title: str) -> tuple
         raise HTTPException(status_code=502, detail="The official document contains invalid section data. No file was created.")
     title = str(body.title or payload.get("title") or title).strip()[:180]
     return sections[:80], metadata, {**provider, "title": title}
+
+
+def _multiple_document_payload(
+    body: WorkspaceExecuteInput, fallback_title: str, count: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Ask the configured model for exactly N independent, structured documents."""
+    generated, provider = _model_text(
+        body.prompt
+        + f"\n\nThe user explicitly requested exactly {count} separate PDF documents. "
+        + "Return strict JSON only with one top-level key named documents. "
+        + f"documents must contain exactly {count} objects. Each object must have title, "
+        + "official_metadata, and sections. Each sections value must be a non-empty array "
+        + "of objects with heading, level, paragraphs, and optional tables with headers and rows. "
+        + "Make each document independently useful and give it a distinct purpose and title. "
+        + "Separate distinct deliverables by purpose rather than arbitrarily splitting pages. "
+        + "When the brief includes an institutional introduction/technology overview and a "
+        + "collaboration proposal, keep those as separate documents when that fits the requested "
+        + "count. Preserve every relevant supplied fact across the set without unnecessary "
+        + "duplication. Use a formal institutional register. Do not invent names, dates, "
+        + "addresses, reference numbers, statistics, legal claims, signatures, or affiliations. "
+        + "Leave unknown official_metadata fields empty and do not add placeholder names. "
+        + "official_metadata keys: document_type, organization, organization_address, date, "
+        + "reference, recipient, recipient_organization, recipient_address, sender, subject, "
+        + "salutation, closing, signatory, signatory_title, cc, enclosures."
+    )
+    payload = extract_json(generated)
+    documents = payload.get("documents") if isinstance(payload, dict) else None
+    if not isinstance(documents, list) or len(documents) != count:
+        raise HTTPException(
+            status_code=502,
+            detail=f"The document generator did not return exactly {count} separate documents. No PDFs were created.",
+        )
+
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(documents):
+        if not isinstance(item, dict) or not isinstance(item.get("sections"), list) or not item["sections"]:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Document {index + 1} did not contain a valid structured body. No PDFs were created.",
+            )
+        if not all(isinstance(section, dict) for section in item["sections"][:80]):
+            raise HTTPException(
+                status_code=502,
+                detail=f"Document {index + 1} contains invalid section data. No PDFs were created.",
+            )
+        generated_metadata = item.get("official_metadata")
+        if not isinstance(generated_metadata, dict):
+            generated_metadata = {}
+        metadata = {**generated_metadata, **body.official_metadata}
+        title = str(item.get("title") or f"{fallback_title} - Document {index + 1}").strip()[:180]
+        normalized.append({
+            "title": title or f"{fallback_title} - Document {index + 1}",
+            "sections": item["sections"][:80],
+            "official_metadata": metadata,
+        })
+    return normalized, provider
 
 
 def _safe_title(body: WorkspaceExecuteInput, fallback: str) -> str:
@@ -210,6 +267,46 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
     if body.format in {"word", "pdf"}:
         official = _is_official_document(body)
         metadata = dict(body.official_metadata)
+
+        if body.document_count > 1:
+            if body.format != "pdf":
+                raise HTTPException(status_code=422, detail="Multiple independent documents are currently exported as separate PDF files. Select PDF format.")
+            documents, provider = _multiple_document_payload(body, title, body.document_count)
+            generated_artifacts = []
+            for item in documents:
+                artifact = create_pdf_document(user_id, {
+                    "title": item["title"],
+                    "sections": item["sections"],
+                    "images": body.embedded_images,
+                    "document_style": "official" if official else "standard",
+                    "official_metadata": item["official_metadata"],
+                })
+                generated_artifacts.append(_download_url(request, artifact))
+            return {
+                "task": "document",
+                "format": "pdf",
+                "document_style": "official" if official else "standard",
+                "artifact": generated_artifacts[0],
+                "documents": generated_artifacts,
+                "additional_files": generated_artifacts[1:],
+                "preview": {
+                    "type": "document_collection",
+                    "count": len(generated_artifacts),
+                    "documents": [
+                        {"title": item["title"], "filename": artifact["filename"]}
+                        for item, artifact in zip(documents, generated_artifacts)
+                    ],
+                },
+                "provider": provider,
+                "verification": {
+                    "file_created": len(generated_artifacts) == body.document_count,
+                    "artifact_count": len(generated_artifacts),
+                    "images_embedded_per_document": len(body.embedded_images),
+                    "official_metadata_applied": official,
+                    "source_executed": False,
+                },
+            }
+
         if body.sections is not None:
             sections = body.sections
             provider = {"provider": "user_supplied_structured_content", "model": None}
@@ -223,6 +320,33 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
                 "Do not include an introductory chat message."
             )
             sections = markdown_to_sections(generated)
+
+        if body.format == "pdf":
+            selected = create_pdf_document(user_id, {
+                "title": title,
+                "sections": sections,
+                "images": body.embedded_images,
+                "document_style": "official" if official else "standard",
+                "official_metadata": metadata,
+            })
+            selected_url = _download_url(request, selected)
+            return {
+                "task": "document",
+                "format": "pdf",
+                "document_style": "official" if official else "standard",
+                "artifact": selected_url,
+                "documents": [selected_url],
+                "preview": selected.get("preview"),
+                "provider": provider,
+                "verification": {
+                    "file_created": True,
+                    "artifact_count": 1,
+                    "images_embedded": selected.get("preview", {}).get("images_embedded", 0),
+                    "official_metadata_applied": official,
+                    "source_executed": False,
+                },
+            }
+
         result = create_word_document(user_id, {
             "title": title,
             "sections": sections,
@@ -230,13 +354,22 @@ def _document_task(body: WorkspaceExecuteInput, user_id: str, request: Request) 
             "document_style": "official" if official else "standard",
             "official_metadata": metadata,
         })
-        selected = result["preview_file"] if body.format == "pdf" else result["primary"]
-        return {"task": "document", "format": body.format, "document_style": "official" if official else "standard",
-                "artifact": _download_url(request, selected),
-                "additional_files": [_download_url(request, item) for item in result.get("files", []) if item.get("file_id") != selected.get("file_id")],
-                "preview": result.get("preview"), "provider": provider,
-                "verification": {"file_created": True, "images_embedded": result["preview"].get("images_embedded", 0),
-                                 "official_metadata_applied": official, "source_executed": False}}
+        selected = result["primary"]
+        return {
+            "task": "document",
+            "format": "word",
+            "document_style": "official" if official else "standard",
+            "artifact": _download_url(request, selected),
+            "additional_files": [_download_url(request, item) for item in result.get("files", []) if item.get("file_id") != selected.get("file_id")],
+            "preview": result.get("preview"),
+            "provider": provider,
+            "verification": {
+                "file_created": True,
+                "images_embedded": result.get("preview", {}).get("images_embedded", 0),
+                "official_metadata_applied": official,
+                "source_executed": False,
+            },
+        }
 
     if body.format == "powerpoint":
         if body.slides is not None:
@@ -466,7 +599,7 @@ async def execute_workspace_multipart(request: Request):
 
     payload: dict[str, Any] = {}
     complex_fields = {"official_metadata", "image_options", "sections", "slides", "dataset", "operations"}
-    for key in ("task", "prompt", "title", "format", "language", "document_style"):
+    for key in ("task", "prompt", "title", "document_count", "format", "language", "document_style"):
         value = form.get(key)
         if isinstance(value, str):
             payload[key] = value
